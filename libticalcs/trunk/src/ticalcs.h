@@ -167,31 +167,31 @@ typedef enum
 {
 	FTS_NONE = 0,
 
-	OPS_ISREADY     = (1 << 0),
-	OPS_KEYS        = (1 << 1),
-	OPS_SCREEN      = (1 << 2),
-	OPS_DIRLIST     = (1 << 3),
-	OPS_BACKUP      = (1 << 4),
-	OPS_VARS        = (1 << 5),
-	OPS_FLASH       = (1 << 6),
-	OPS_IDLIST      = (1 << 7),
-	OPS_CLOCK       = (1 << 8),
-	OPS_ROMDUMP     = (1 << 9),
-	OPS_VERSION     = (1 << 10),
-	OPS_NEWFLD      = (1 << 11),
-	OPS_DELVAR      = (1 << 12),
-	OPS_OS          = (1 << 13),
-	OPS_RENAME      = (1 << 14),
-	OPS_CHATTR      = (1 << 21),
+	OPS_ISREADY           = (1 << 0),
+	OPS_KEYS              = (1 << 1),
+	OPS_SCREEN            = (1 << 2),
+	OPS_DIRLIST           = (1 << 3),
+	OPS_BACKUP            = (1 << 4),
+	OPS_VARS              = (1 << 5),
+	OPS_FLASH             = (1 << 6),
+	OPS_IDLIST            = (1 << 7),
+	OPS_CLOCK             = (1 << 8),
+	OPS_ROMDUMP           = (1 << 9),
+	OPS_VERSION           = (1 << 10),
+	OPS_NEWFLD            = (1 << 11),
+	OPS_DELVAR            = (1 << 12),
+	OPS_OS                = (1 << 13),
+	OPS_RENAME            = (1 << 14),
+	OPS_CHATTR            = (1 << 21),
+	OPS_LABEQUIPMENTDATA  = (1 << 23),
 
-	FTS_SILENT      = (1 << 15),
-	FTS_FOLDER      = (1 << 16),
-	FTS_MEMFREE     = (1 << 17),
-	FTS_FLASH       = (1 << 18),
-	FTS_CERT        = (1 << 19),
-	FTS_BACKUP      = (1 << 20),
-	FTS_NONSILENT   = (1 << 22)
-
+	FTS_SILENT            = (1 << 15),
+	FTS_FOLDER            = (1 << 16),
+	FTS_MEMFREE           = (1 << 17),
+	FTS_FLASH             = (1 << 18),
+	FTS_CERT              = (1 << 19),
+	FTS_BACKUP            = (1 << 20),
+	FTS_NONSILENT         = (1 << 22)
 } CalcFeatures;
 
 /**
@@ -316,6 +316,8 @@ typedef enum
 	FNCT_CHATTR,
 	FNCT_SEND_ALL_VARS_BACKUP,
 	FNCT_RECV_ALL_VARS_BACKUP,
+	FNCT_SEND_LAB_EQUIPMENT_DATA,
+	FNCT_GET_LAB_EQUIPMENT_DATA,
 	CALC_FNCT_LAST // Keep this one last
 } CalcFnctsIdx;
 
@@ -580,6 +582,36 @@ typedef struct
 } CalcClock;
 
 /**
+ * CalcLabEquipmentDataType:
+ *
+ * An enumeration which contains the following data types:
+ */
+typedef enum
+{
+	CALC_LAB_EQUIPMENT_DATA_TYPE_NONE = 0,
+	CALC_LAB_EQUIPMENT_DATA_TYPE_STRING = 1,
+	CALC_LAB_EQUIPMENT_DATA_TYPE_TI68K_RAW_LIST = 2,
+	CALC_LAB_EQUIPMENT_DATA_TYPE_TI8586_RAW_LIST = 3,
+	CALC_LAB_EQUIPMENT_DATA_TYPE_TIZ80_RAW_LIST = 3,
+} CalcLabEquipmentDataType;
+
+/**
+ * CalcLabEquipmentData:
+ * @size: size of data to be sent
+ * @data: pointer to data to be sent
+ */
+typedef struct
+{
+	CalcLabEquipmentDataType type;
+	uint16_t size;
+	uint16_t items;
+	const uint8_t * data;
+	uint16_t index;
+	uint16_t unknown;
+	uint8_t vartype;
+} CalcLabEquipmentData;
+
+/**
  * CalcUpdate:
  * @text: a text to display about the current operation (locale used is those defined by tifiles_transcoding_set)
  * @cancel: set to 1 if transfer have to be cancelled
@@ -718,6 +750,8 @@ typedef struct
  * @change_attr: change attributes of a variable
  * @send_all_vars_backup: send a fake backup (set of files and FlashApps)
  * @recv_all_vars_backup: request a fake backup (set of files and FlashApps)
+ * @send_lab_equipment_data: send data in a format suitable for lab equipment
+ * @get_lab_equipment_data: get data from a piece of lab equipment
  *
  * A structure containing pointers to functions implementing the various operations (potentially) supported by a hand-held.
  * !!! This structure is for private use !!!
@@ -769,6 +803,8 @@ struct _CalcFnctPtrs
 	int		(*send_all_vars_backup)	(CalcHandle*, FileContent*);
 	int		(*recv_all_vars_backup)	(CalcHandle*, FileContent*);
 
+	int		(*send_lab_equipment_data)	(CalcHandle*, CalcModel, CalcLabEquipmentData *);
+	int		(*get_lab_equipment_data)	(CalcHandle*, CalcModel, CalcLabEquipmentData *);
 };
 
 /**
@@ -806,6 +842,8 @@ struct _CalcFnctPtrs
  * @change_attr: change attributes of a variable
  * @send_all_vars_backup: send a fake backup (set of files and FlashApps)
  * @recv_all_vars_backup: request a fake backup (set of files and FlashApps)
+ * @send_lab_equipment_data: send data to lab equipment
+ * @get_lab_equipment_data: get data from lab equipment
  *
  * A structure used for handling a hand-held.
  * !!! This structure is for private use !!!
@@ -892,6 +930,7 @@ typedef struct
 	int attached;
 	int open;
 	CalcFnctsIdx operation;
+	CalcModel model;
 	union
 	{
 		int intval;
@@ -904,6 +943,7 @@ typedef struct
 		NSPRawPacketA nsp_rpkt;
 		NSPVirtualPacket nsp_vpkt;
 		ROMDumpPacket romdump_pkt;
+		CalcLabEquipmentData labeq_data;
 		struct
 		{
 			void * data;
@@ -1089,6 +1129,9 @@ typedef struct
 	TIEXPORT3 int TICALL ticalcs_calc_send_all_vars_backup(CalcHandle *handle, FileContent*);
 	TIEXPORT3 int TICALL ticalcs_calc_recv_all_vars_backup(CalcHandle *handle, FileContent*);
 
+	TIEXPORT3 int TICALL ticalcs_calc_send_lab_equipment_data(CalcHandle *handle, CalcModel, CalcLabEquipmentData *);
+	TIEXPORT3 int TICALL ticalcs_calc_get_lab_equipment_data(CalcHandle *handle, CalcModel, CalcLabEquipmentData *);
+
 	TIEXPORT3 int TICALL ticalcs_calc_send_tigroup(CalcHandle *handle, TigContent*, TigMode);
 	TIEXPORT3 int TICALL ticalcs_calc_recv_tigroup(CalcHandle *handle, TigContent*, TigMode);
 
@@ -1109,6 +1152,10 @@ typedef struct
 	TIEXPORT3 int TICALL ticalcs_calc_recv_cert2(CalcHandle *handle, const char*);
 
 	TIEXPORT3 int TICALL ticalcs_calc_send_os2(CalcHandle *handle, const char*);
+
+	TIEXPORT3 int TICALL ticalcs_calc_send_lab_equipment_data2(CalcHandle *handle, CalcModel, uint8_t, const char *);
+	TIEXPORT3 int TICALL ticalcs_calc_get_lab_equipment_data2(CalcHandle *handle, CalcModel, uint8_t, const char **);
+	TIEXPORT3 void TICALL ticalcs_free_lab_equipment_data2(char * data);
 
 	TIEXPORT3 int TICALL ticalcs_calc_send_tigroup2(CalcHandle *handle, const char*, TigMode);
 	TIEXPORT3 int TICALL ticalcs_calc_recv_tigroup2(CalcHandle *handle, const char*, TigMode);
