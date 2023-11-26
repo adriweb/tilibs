@@ -90,7 +90,7 @@ static int type_has_length(CalcModel model, uint8_t type_id)
 		return (type_id == TI73_EQU || type_id == TI73_STRNG || type_id == TI73_PRGM || type_id == TI73_ASM || type_id == TI73_PIC || type_id == TI73_AVAR);
 	}
 
-	return (type_id == TI83p_EQU || type_id == TI83p_STRNG || type_id == TI83p_PRGM || type_id == TI83p_ASM || type_id == TI83p_PIC || type_id == TI83p_APPVAR);
+	return (type_id == TI83p_EQU || type_id == TI83p_PRGM || type_id == TI83p_ASM || type_id == TI83p_PIC || type_id == TI83p_APPVAR);
 }
 
 static int type_is_ti68k_oth(CalcModel model, uint8_t type_id)
@@ -103,7 +103,7 @@ static int type_is_ti68k_oth(CalcModel model, uint8_t type_id)
 	return 0;
 }
 
-static int protect_type(CalcModel model, uint8_t type_id)
+static uint8_t protect_type(CalcModel model, uint8_t type_id)
 {
 	return ((   tifiles_calc_is_ti8x(model)
 	         && model != CALC_TI85
@@ -112,7 +112,7 @@ static int protect_type(CalcModel model, uint8_t type_id)
 	                                  : type_id);
 }
 
-static int complexify_type(CalcModel model, uint8_t type_id)
+static uint8_t complexify_type(CalcModel model, uint8_t type_id)
 {
 	if (tifiles_calc_is_ti9x(model)) {
 		return ((type_id == TI89_LIST || type_id == TI89_MAT) ? type_id + 1 : type_id);
@@ -198,11 +198,12 @@ static int tifileutil_wrap(int * argc, char *** argv, unsigned int offset)
 	FILE * infile;
 	FileContent * fc = nullptr;
 	VarEntry * ve = nullptr;
-	unsigned long dsize, dalloc = 1024;
+	uint32_t dsize, dalloc = 1024;
 	bool outfilename_is_allocated = false;
 	bool varname_is_allocated = false;
 
-	int i, j;
+	int i;
+	size_t j;
 	char * p;
 	const char * cp;
 	time_t t;
@@ -452,7 +453,7 @@ oom:
 				goto oom;
 			}
 		}
-		ve->data[dsize++] = i;
+		ve->data[dsize++] = (uint8_t)i;
 		i = fgetc(infile);
 	}
 	ve->size = dsize;
@@ -513,7 +514,7 @@ oom:
 	ve->type = type_id;
 	ve->attr = (archive ? ATTRB_ARCHIVED : 0) | (lock ? ATTRB_LOCKED : 0);
 	// Intentionally leverage atoi()'s lack of error checking: fall back to 0 if the version string isn't an integer.
-	ve->version = (versionstr == nullptr ? 0 : atoi(versionstr));
+	ve->version = (uint8_t)(versionstr == nullptr ? 0 : atoi(versionstr));
 	ve->size = dsize;
 
 	// tifiles_content_add_entry returns the number of entries.
@@ -570,7 +571,7 @@ static int tifileutil_unwrap(int * argc, char *** argv, unsigned int offset)
 
 	for (int i = offset + 1; i < *argc; i++) {
 		if ((*argv)[i][0] == '-' && (*argv)[i][1]) {
-			for (int j = 1; (*argv)[i][j]; j++) {
+			for (size_t j = 1; (*argv)[i][j]; j++) {
 				switch ((*argv)[i][j]) {
 					case 'o':
 						if ((*argv)[i][++j]) {
@@ -786,7 +787,7 @@ static int tifileutil_dump(int * argc, char *** argv, unsigned int offset)
 	}
 
 	if (outfile != stdout && verbose) {
-		fprintf(stdout, "Read %ld bytes.\n", lenread);
+		fprintf(stdout, "Read %lu bytes.\n", lenread);
 	}
 
 	if (length < minsize) {
@@ -813,7 +814,7 @@ static int tifileutil_dump(int * argc, char *** argv, unsigned int offset)
 			fputc('\n', outfile);
 		}
 		// TODO: 2 last digits.
-		fprintf(outfile, "};\nstatic unsigned int %s = sizeof(%s)/sizeof(%s[0]); // %ld\n", arraysizename, arrayname, arrayname, length);
+		fprintf(outfile, "};\nstatic uint16_t %s = sizeof(%s)/sizeof(%s[0]); // %lu\n", arraysizename, arrayname, arrayname, length);
 
 		if (outfile != stdout) {
 			fclose(outfile);
@@ -848,8 +849,8 @@ Where MODE may be:
  set:           set one or more pieces of metadata on a file.
 
 Generic OPTIONS may include:
- -o FILE:     output result to FILE
- -v:          be verbose
+ -o FILE:       output result to FILE
+ -v:            be verbose
 
 OPTIONS for get mode may include (a single option at a time):
  -n:            get on-calc variable name (TI-Z80, TI-eZ80, TI-68k)

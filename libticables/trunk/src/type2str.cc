@@ -47,9 +47,10 @@ const char *TICALL ticables_model_to_string(CableModel model)
 	case CABLE_VTI: return "VTi";
 	case CABLE_TIE: return "TiEmu";
 	case CABLE_ILP: return "linkport";
-	//case CABLE_DEV: return "UsbKernel";
 	case CABLE_TCPC: return "TCPC";
 	case CABLE_TCPS: return "TCPS";
+	case CABLE_DEV:
+	case CABLE_MAX:
 	default: return "unknown";
 	}
 }
@@ -115,6 +116,7 @@ const char *TICALL ticables_port_to_string(CablePort port)
 	case PORT_2: return "#2";
 	case PORT_3: return "#3";
 	case PORT_4: return "#4";
+	case PORT_MAX:
 	default: return "unknown";
 	}
 }
@@ -168,6 +170,7 @@ const char *TICALL ticables_usbpid_to_string(UsbPid pid)
 	case PID_NSPIRE: return "Nspire";		// must match tifiles name
 	case PID_NSPIRE_CRADLE: return "Nspire Cradle";		// must match tifiles name
 	case PID_NSPIRE_CXII: return "Nspire CX II";		// must match tifiles name
+	case PID_UNKNOWN:
 	default: return "unknown";
 	}
 }
