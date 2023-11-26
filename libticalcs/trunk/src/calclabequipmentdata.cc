@@ -89,7 +89,7 @@ int tixx_convert_lab_equipment_data_string_to_ti68k_raw_list(const char * lab_eq
 	// TODO FIXME parse floating-point numbers as well.
 	// TODO FIXME convert leading - to unary minus, if necessary.
 	unsigned int state = 0;
-	uint32_t items = 0;
+	uint16_t items = 0;
 	const uint8_t* orig_ptr = ptr;
 	do
 	{
@@ -111,6 +111,8 @@ int tixx_convert_lab_equipment_data_string_to_ti68k_raw_list(const char * lab_eq
 				else if (c == '}') { *ptr =   0; state = 3; }      // Read trailing }, success
 				else state = 4;                                    // else error.
 				break;
+			default:
+				break;
 		}
 		ptr++;
 	} while (state != 3 && state != 4);
@@ -119,7 +121,7 @@ int tixx_convert_lab_equipment_data_string_to_ti68k_raw_list(const char * lab_eq
 	{
 		ticalcs_info("%s", _("Successfully parsed lab equipment data list string"));
 		out_data->type = CALC_LAB_EQUIPMENT_DATA_TYPE_TI68K_RAW_LIST;
-		out_data->size = ptr - orig_ptr;
+		out_data->size = (uint16_t)(ptr - orig_ptr);
 		out_data->items = items;
 		out_data->data = (const uint8_t *)orig_ptr;
 		out_data->vartype = 4; // List.
@@ -479,6 +481,7 @@ int tixx_send_lab_equipment_data(CalcHandle* handle, CalcModel model, CalcLabEqu
 82 92 0B 00  [improper length]
 12 56 00 00
 */
+			ret = ERR_UNSUPPORTED;
 		}
 		else if (model == CALC_TI82 || model == CALC_TI83)
 		{
@@ -496,6 +499,7 @@ int tixx_send_lab_equipment_data(CalcHandle* handle, CalcModel model, CalcLabEqu
 82 92 0B 00  [improper length]
 12 56 00 00
 */
+			ret = ERR_UNSUPPORTED;
 		}
 		else if (model == CALC_TI85 || model == CALC_TI86)
 		{
@@ -637,8 +641,8 @@ int tixx_get_lab_equipment_data(CalcHandle* handle, CalcModel model, CalcLabEqui
 
 			uint8_t* ptr = (uint8_t*)handle->buffer2;
 			lab_equipment_data->type = CALC_LAB_EQUIPMENT_DATA_TYPE_TI68K_RAW_LIST;
-			lab_equipment_data->size = varsize;
-			lab_equipment_data->items = ptr[0] | (((uint16_t)ptr[1]) << 8);
+			lab_equipment_data->size = (uint16_t)varsize;
+			lab_equipment_data->items = (uint16_t)ptr[0] | (((uint16_t)ptr[1]) << 8);
 			lab_equipment_data->index = 0;
 			lab_equipment_data->unknown = 0;
 			lab_equipment_data->vartype = 4;
@@ -694,6 +698,7 @@ int tixx_get_lab_equipment_data(CalcHandle* handle, CalcModel model, CalcLabEqui
 00 80 00 00 00 00 00 00 00  45 0a
 82 56 9B 00  [improper length]
 */
+			ret = ERR_UNSUPPORTED;
 		}
 		else if (model == CALC_TI85 || model == CALC_TI86)
 		{
