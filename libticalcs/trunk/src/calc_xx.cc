@@ -2028,7 +2028,7 @@ int TICALL ticalcs_calc_send_lab_equipment_data2(CalcHandle *handle, CalcModel m
 	RETURN_IF_HANDLE_BUSY(handle);
 
 	lab_equipment_data.type = CALC_LAB_EQUIPMENT_DATA_TYPE_STRING;
-	lab_equipment_data.size = strlen(data) + 1;
+	lab_equipment_data.size = (uint16_t)(strlen(data) + 1);
 	lab_equipment_data.items = 0;
 	lab_equipment_data.data = (const uint8_t *)data;
 	lab_equipment_data.index = 0;
@@ -2141,9 +2141,7 @@ int TICALL ticalcs_calc_recv_cert2(CalcHandle* handle, const char* filename)
 				break;
 			}
 
-			gchar* e = tifiles_fext_get(basename);
-
-			memcpy(e, "crt", 3);
+			memcpy((void*)tifiles_fext_get(basename), "crt", 3);
 
 			content = tifiles_content_create_flash(handle->model);
 			ret = ticalcs_calc_recv_cert(handle, content);
