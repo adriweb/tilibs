@@ -519,7 +519,7 @@ oom:
 	// tifiles_content_add_entry returns the number of entries.
 	i = !tifiles_content_add_entry(fc, ve);
 	if (!i) {
-		i = err_print("tifiles_file_write_regular", tifiles_file_write_regular(outfilename, fc, 0));
+		i = err_print("tifiles_file_write_regular", tifiles_file_write_regular(outfilename, fc, nullptr));
 
 		if (!i && verbose) {
 			tifiles_file_display_regular(fc);
@@ -568,11 +568,9 @@ static int tifileutil_unwrap(int * argc, char *** argv, unsigned int offset)
 	int deep = 0;
 	int verbose = 0;
 
-	int i, j;
-
-	for (i = offset + 1; i < *argc; i++) {
+	for (int i = offset + 1; i < *argc; i++) {
 		if ((*argv)[i][0] == '-' && (*argv)[i][1]) {
-			for (j = 1; (*argv)[i][j]; j++) {
+			for (int j = 1; (*argv)[i][j]; j++) {
 				switch ((*argv)[i][j]) {
 					case 'o':
 						if ((*argv)[i][++j]) {
@@ -654,7 +652,7 @@ static int tifileutil_dump(int * argc, char *** argv, unsigned int offset)
 	int verbose = 0;
 	FILE * infile, * outfile = nullptr;
 	struct stat st;
-	unsigned long length, lenread, itemsperline = 8, minsize = 64;
+	unsigned long itemsperline = 8, minsize = 64;
 	unsigned char data[65636]; // +100 for the header and footer.
 	unsigned long i, j;
 
@@ -779,9 +777,9 @@ static int tifileutil_dump(int * argc, char *** argv, unsigned int offset)
 	}
 
 	fstat(fileno(infile), &st);
-	length = st.st_size;
+	const unsigned long length = st.st_size;
 
-	lenread = fread(data, sizeof(char), length < sizeof(data) ? length : sizeof(data), infile);
+	const unsigned long lenread = fread(data, sizeof(char), length < sizeof(data) ? length : sizeof(data), infile);
 
 	if (infile != stdin) {
 		fclose(infile);
@@ -880,11 +878,9 @@ OPTIONS for set mode may include (multiple options at a time):
 
 static int tifileutil_metadata(int * argc, char *** argv, unsigned int offset)
 {
-	int ret;
-
 	tifileutil_critical("%s: metadata not implemented yet.\n", (*argv)[0]);
 
-	ret = 1;
+	const int ret = 1;
 
 	return ret;
 }
