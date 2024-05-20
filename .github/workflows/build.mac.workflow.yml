@@ -15,7 +15,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [macos-11, macos-12]
+        os: [macos-12, macos-14]
         try_static_deps: ['OFF','ON']
         include:
           - try_static_deps: 'OFF'
