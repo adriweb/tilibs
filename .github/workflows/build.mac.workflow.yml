@@ -47,6 +47,7 @@ jobs:
         mkdir prefix
         prefixpath="$(pwd)/prefix"
         mkdir build && cd build
+        export PKG_CONFIG_PATH="$(brew --prefix libarchive)/lib/pkgconfig/:$PKG_CONFIG_PATH"
         cmake -GNinja -DCMAKE_BUILD_TYPE=Release -DTRY_STATIC_LIBS=${{ matrix.try_static_deps }} -DCMAKE_INSTALL_PREFIX=${prefixpath} ..
         cmake --build . --target all
 
