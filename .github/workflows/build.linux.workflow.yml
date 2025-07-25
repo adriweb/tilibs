@@ -2,7 +2,7 @@ name: Build Linux
 
 on:
   push:
-    branches: [ master, experimental, experimental2 ]
+    branches: [ master, experimental, experimental2, exp2-safe ]
   pull_request:
     branches: [ master, experimental, experimental2 ]
   release:
