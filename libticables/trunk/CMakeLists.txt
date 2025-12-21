@@ -64,6 +64,26 @@ endif()
 if(WIN32)
     find_library(LIBUSB0 NAMES libusb0.lib usb0 REQUIRED)
     target_link_libraries(ticables2 PRIVATE ${LIBUSB0})
+elseif(EMSCRIPTEN)
+    # Emscripten libusb WebUSB backend
+    pkg_check_modules(libusb REQUIRED IMPORTED_TARGET libusb-1.0>=1.0.27)
+    target_link_libraries(ticables2 PRIVATE PkgConfig::libusb)
+
+    # Required Emscripten linker flags
+    target_link_options(ticables2 PRIVATE
+        "SHELL:--bind"
+        "SHELL:-s ASYNCIFY=1"
+        "SHELL:-s EXPORT_ES6=1"
+        "SHELL:-s ENVIRONMENT=web,worker"
+        "SHELL:-s EXPORTED_RUNTIME_METHODS=['ccall','cwrap','UTF8ToString','stringToUTF8']"
+        "SHELL:-s ALLOW_MEMORY_GROWTH=1"
+        "SHELL:-s INITIAL_MEMORY=128mb"
+        "SHELL:-s STACK_SIZE=64mb"
+        "SHELL:-s ASYNCIFY_STACK_SIZE=5242880"
+        "SHELL:-s MODULARIZE=1"
+        "SHELL:-s EXPORT_NAME='libticables'"
+    )
+    message(STATUS "Configured with Emscripten WebUSB linker flags")
 else()
     pkg_check_modules(libusb REQUIRED IMPORTED_TARGET libusb-1.0>=1.0.16)
     target_link_libraries(ticables2 PRIVATE PkgConfig::libusb)
@@ -76,6 +96,11 @@ if(NOT WIN32)
     target_compile_definitions(ticables2 PUBLIC HAVE_LIBUSB_1_0=1 HAVE_LIBUSB10_STRERROR=1 HAVE_TERMIOS_H=1)
 endif()
 
+# Emscripten needs these defines too (but not HAVE_TERMIOS_H)
+if(EMSCRIPTEN)
+    target_compile_definitions(ticables2 PUBLIC HAVE_LIBUSB_1_0=1 HAVE_LIBUSB10_STRERROR=1)
+endif()
+
 set_target_properties(ticables2 PROPERTIES VERSION 8.0.0 SOVERSION 8)
 
 # Takes care of the i18n po/pot/gmo/mo files
@@ -84,8 +109,12 @@ if(ENABLE_NLS)
     add_dependencies(ticables2 potfiles_2)
 endif()
 
+if(EMSCRIPTEN)
+# disable non-USB cables
+    target_compile_definitions(ticables2 PUBLIC
+            NO_CABLE_GRY NO_CABLE_BLK NO_CABLE_PAR NO_CABLE_VTI NO_CABLE_TIE NO_CABLE_TCPS NO_CABLE_TCPC)
 # check includes for parallel and serial support
-if(LINUX)
+elseif(LINUX)
     include(CheckIncludeFile)
     CHECK_INCLUDE_FILE(linux/parport.h HAVE_LINUX_PARPORT_H)
     CHECK_INCLUDE_FILE(linux/serial.h HAVE_LINUX_SERIAL_H)

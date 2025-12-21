@@ -48,6 +48,22 @@ if(USE_ICONV)
     endif()
 endif()
 
+if(EMSCRIPTEN)
+    target_link_options(ticonv PRIVATE
+        "SHELL:--bind"
+        "SHELL:-s ASYNCIFY=1"
+        "SHELL:-s EXPORT_ES6=1"
+        "SHELL:-s ENVIRONMENT=web,worker"
+        "SHELL:-s EXPORTED_RUNTIME_METHODS=['ccall','cwrap','UTF8ToString','stringToUTF8']"
+        "SHELL:-s ALLOW_MEMORY_GROWTH=1"
+        "SHELL:-s INITIAL_MEMORY=33554432"
+        "SHELL:-s STACK_SIZE=5242880"
+        "SHELL:-s ASYNCIFY_STACK_SIZE=5242880"
+        "SHELL:-s MODULARIZE=1"
+        "SHELL:-s EXPORT_NAME='libticonv'"
+    )
+endif()
+
 # public export define
 target_compile_definitions(ticonv PUBLIC TICONV_EXPORTS)
 
