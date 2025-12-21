@@ -234,7 +234,9 @@ int TICALL ticables_probing_finish(int ***result)
  **/
 int TICALL ticables_is_usb_enabled(void)
 {
-#if defined(__WIN32__)
+#if defined(__EMSCRIPTEN__)
+	return 1; // available via libusb's webusb backend
+#elif defined(__WIN32__)
 	return !win32_check_libusb();
 #elif defined(__MACOSX__)
 	return !macosx_check_libusb();
