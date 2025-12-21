@@ -12,8 +12,8 @@ set(SRC_FILES
         src/main.cc)
 
 # external deps lookup
-find_package(LibArchive REQUIRED)
 pkg_check_modules(glib REQUIRED IMPORTED_TARGET glib-2.0)
+pkg_check_modules(LibArchive REQUIRED IMPORTED_TARGET libarchive)
 
 add_executable(tifileutil ${SRC_FILES})
 
@@ -39,7 +39,7 @@ add_dependencies(tifileutil ticonv tifiles2)
 target_link_directories(tifileutil PRIVATE
         ${CMAKE_BINARY_DIR}/libticonv/trunk
         ${CMAKE_BINARY_DIR}/libtifiles/trunk)
-target_link_libraries(tifileutil PRIVATE PkgConfig::glib LibArchive::LibArchive ticonv tifiles2)
+target_link_libraries(tifileutil PRIVATE PkgConfig::glib PkgConfig::LibArchive ticonv tifiles2)
 
 # Takes care of the i18n po/pot/gmo/mo files
 if(ENABLE_NLS)

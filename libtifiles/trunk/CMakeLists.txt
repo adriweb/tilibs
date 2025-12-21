@@ -50,9 +50,15 @@ set(PUBLIC_HEADERS
         src/typesxx.h)
 
 # external deps lookup
-find_package(ZLIB REQUIRED)
-find_package(LibArchive REQUIRED)
+if(NOT EMSCRIPTEN)
+    find_package(ZLIB REQUIRED)
+else()
+    # For Emscripten, use built-in ports
+    message(STATUS "Emscripten build: Using Emscripten zlib port")
+    set(ZLIB_FOUND TRUE)
+endif()
 pkg_check_modules(glib REQUIRED IMPORTED_TARGET glib-2.0)
+pkg_check_modules(LibArchive REQUIRED IMPORTED_TARGET libarchive)
 
 # auto-creation of all targets with flags etc., alongside with internal deps
 create_lib_target_with_deps(tifiles2 ticonv)
@@ -60,7 +66,27 @@ create_lib_target_with_deps(tifiles2 ticonv)
 if(LINUX)
     target_link_libraries(tifiles2 PRIVATE Threads::Threads)
 endif()
-target_link_libraries(tifiles2 PRIVATE PkgConfig::glib ZLIB::ZLIB LibArchive::LibArchive)
+
+target_link_libraries(tifiles2 PRIVATE PkgConfig::glib PkgConfig::LibArchive)
+
+if(EMSCRIPTEN)
+    target_link_options(tifiles2 PRIVATE
+        "SHELL:--bind"
+        "SHELL:-s ASYNCIFY=1"
+        "SHELL:-s EXPORT_ES6=1"
+        "SHELL:-s ENVIRONMENT=web,worker"
+        "SHELL:-s EXPORTED_RUNTIME_METHODS=['ccall','cwrap','UTF8ToString','stringToUTF8']"
+        "SHELL:-s ALLOW_MEMORY_GROWTH=1"
+        "SHELL:-s INITIAL_MEMORY=33554432"
+        "SHELL:-s STACK_SIZE=5242880"
+        "SHELL:-s ASYNCIFY_STACK_SIZE=5242880"
+        "SHELL:-s MODULARIZE=1"
+        "SHELL:-s EXPORT_NAME='libtifiles'"
+        "SHELL:-sUSE_ZLIB=1"
+    )
+else()
+    target_link_libraries(tifiles2 PRIVATE ZLIB::ZLIB)
+endif()
 
 set_target_properties(tifiles2 PROPERTIES VERSION 11.0.2 SOVERSION 11)
 
