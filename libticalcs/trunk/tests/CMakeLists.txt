@@ -18,11 +18,17 @@ else()
     target_link_libraries(test_ticalcs_2 PRIVATE PkgConfig::libusb)
 endif()
 pkg_check_modules(glib REQUIRED IMPORTED_TARGET glib-2.0)
-find_package(ZLIB REQUIRED) # for libtifiles
-find_package(LibArchive REQUIRED) # for libticables
-target_link_libraries(torture_ticalcs PRIVATE ZLIB::ZLIB PkgConfig::glib LibArchive::LibArchive)
-if(NOT WIN32) # not compatible for now
-    target_link_libraries(test_ticalcs_2 PRIVATE ZLIB::ZLIB PkgConfig::glib LibArchive::LibArchive)
+pkg_check_modules(LibArchive REQUIRED IMPORTED_TARGET libarchive)
+if(NOT EMSCRIPTEN)
+    find_package(ZLIB REQUIRED) # for libtifiles
+    target_link_libraries(torture_ticalcs PRIVATE ZLIB::ZLIB PkgConfig::glib PkgConfig::LibArchive)
+    if(NOT WIN32) # not compatible for now
+        target_link_libraries(test_ticalcs_2 PRIVATE ZLIB::ZLIB PkgConfig::glib PkgConfig::LibArchive)
+    endif()
+else()
+    set(ZLIB_FOUND TRUE)
+    target_link_libraries(torture_ticalcs PRIVATE PkgConfig::glib)
+    target_link_libraries(test_ticalcs_2 PRIVATE PkgConfig::glib)
 endif()
 
 if(WIN32 AND NOT MINGW)
