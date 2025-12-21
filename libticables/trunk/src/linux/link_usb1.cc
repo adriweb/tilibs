@@ -39,7 +39,7 @@
 #include <string.h>
 #include <fcntl.h>
 #include <errno.h>
-#if defined(__BSD__) || defined(__MACOSX__)
+#if defined(__BSD__) || defined(__MACOSX__) || defined(__EMSCRIPTEN__)
 #include <libusb.h>
 #else
 #include <libusb-1.0/libusb.h>
@@ -69,7 +69,7 @@
 #include "../macos/detect.h"
 #elif defined(__BSD__)
 #include "../bsd/detect.h"
-#else
+#elif !defined(__EMSCRIPTEN__)
 #include "detect.h"
 #endif
 #include "../timeout.h"
@@ -355,7 +355,9 @@ static int slv_prepare(CableHandle *h)
 	int ret;
 	char str[64];
 
-#if defined(__WIN32__)
+#if defined(__EMSCRIPTEN__)
+	ret = 0; // available via libusb's webusb backend
+#elif defined(__WIN32__)
 	ret = win32_check_libusb();
 #elif defined(__MACOSX__)
 	ret = macosx_check_libusb();
@@ -475,12 +477,16 @@ static int slv_reset(CableHandle *h)
 	{
 		/* Reset USB port (send an IOCTL_INTERNAL_USB_RESET_PORT) */
 		/* NOTE: tigl_reset() has already checked for uHdl != NULL */
+#ifdef __EMSCRIPTEN__
+		ret = ERR_LIBUSB_RESET;
+#else
 		ret = libusb_reset_device(uHdl);
+#endif
 		if (ret != 0)
 		{
 			ticables_warning("libusb_device_reset (%s).\n", libusb_strerror((libusb_error)ret));
 			/* On Mac OS X, reenumeration isn't automatic, so let's not return here. */
-#ifndef __MACOSX__
+#if !defined(__MACOSX__) && !defined(__EMSCRIPTEN__)
 			ret = ERR_LIBUSB_RESET;
 #else
 			ret = 0;

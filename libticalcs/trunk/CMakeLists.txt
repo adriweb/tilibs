@@ -80,9 +80,30 @@ else()
     target_link_libraries(ticalcs2 PRIVATE PkgConfig::libusb)
 endif()
 pkg_check_modules(glib REQUIRED IMPORTED_TARGET glib-2.0)
-find_package(ZLIB REQUIRED) # for libtifiles
-find_package(LibArchive REQUIRED) # for libticables
-target_link_libraries(ticalcs2 PRIVATE ZLIB::ZLIB PkgConfig::glib LibArchive::LibArchive)
+pkg_check_modules(LibArchive REQUIRED IMPORTED_TARGET libarchive)
+target_link_libraries(ticalcs2 PRIVATE PkgConfig::glib PkgConfig::LibArchive)
+
+if(NOT EMSCRIPTEN)
+    find_package(ZLIB REQUIRED) # for libtifiles
+    target_link_libraries(ticalcs2 PRIVATE ZLIB::ZLIB)
+else()
+    # For Emscripten, use built-in ports
+    set(ZLIB_FOUND TRUE)
+    target_link_options(ticalcs2 PRIVATE
+        "SHELL:--bind"
+        "SHELL:-s ASYNCIFY=1"
+        "SHELL:-s EXPORT_ES6=1"
+        "SHELL:-s ENVIRONMENT=web,worker"
+        "SHELL:-s EXPORTED_RUNTIME_METHODS=['ccall','cwrap','UTF8ToString','stringToUTF8']"
+        "SHELL:-s ALLOW_MEMORY_GROWTH=1"
+        "SHELL:-s INITIAL_MEMORY=33554432"
+        "SHELL:-s STACK_SIZE=5242880"
+        "SHELL:-s ASYNCIFY_STACK_SIZE=5242880"
+        "SHELL:-s MODULARIZE=1"
+        "SHELL:-s EXPORT_NAME='libticalcs'"
+        "SHELL:-sUSE_ZLIB=1"
+    )
+endif()
 
 set_target_properties(ticalcs2 PROPERTIES VERSION 13.0.3 SOVERSION 13)
 
