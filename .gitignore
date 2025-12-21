@@ -86,3 +86,9 @@ Session.vim
 # CMake
 cmake-build-*/
 tilibs.build/
+
+build-emscripten/
+glib-emscripten-built/
+libusb/
+libarchive/
+tifileutil/testData/
