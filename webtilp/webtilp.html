@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WebTILP</title>
+    <link rel="apple-touch-icon" sizes="180x180" href="apple-touch-icon.png">
+    <link rel="icon" type="image/png" sizes="32x32" href="favicon-32x32.png">
+    <link rel="icon" type="image/png" sizes="16x16" href="favicon-16x16.png">
+    <link rel="icon" href="favicon.ico">
+    <link rel="manifest" href="site.webmanifest">
+    <meta name="theme-color" content="#0d1117">
+    <link rel="stylesheet" href="app.css">
+</head>
+<body>
+    <header class="topbar">
+        <div class="brand">
+            <div class="brand-mark"><span>Web<br>TILP</span><span class="brand-beta">Beta</span></div>
+            <div>
+                <div class="brand-title">WebTILP</div>
+                <div class="brand-subtitle">Universal linking, right from your browser!</div>
+            </div>
+        </div>
+        <div class="status">
+            <span id="statusDot" class="status-dot"></span>
+            <span id="statusText">Idle</span>
+        </div>
+        <div class="progress-indicator hidden" id="progressIndicator" role="status" aria-live="polite">
+            <div class="progress-header">
+                <div class="progress-label" id="progressLabel">Working...</div>
+                <div class="progress-meta">
+                    <span class="progress-percent" id="progressPercent"></span>
+                    <span class="progress-rate" id="progressRate"></span>
+                </div>
+            </div>
+            <div class="progress-bar">
+                <span class="progress-bar-fill" id="progressBarFill"></span>
+            </div>
+        </div>
+        <div class="actions">
+            <button class="btn danger hidden" id="btnNuke" type="button" title="Force disconnect and reset">💣</button>
+            <button class="btn ghost" id="btnSettings">⚙️ Settings</button>
+            <button class="btn primary" id="btnConnect">🔌 Connect Calculator</button>
+        </div>
+    </header>
+
+    <section class="splash" id="splashScreen">
+        <div class="splash-card">
+            <h1>Welcome to WebTILP!</h1>
+            <p>Plug in your TI graphing calculator, then click “Connect Calculator” to get started.</p>
+            <div class="splash-warning hidden" id="splashWebUsbWarning">
+                <p><strong>WebUSB is not available in this browser.</strong></p>
+                <p>Please use a WebUSB-compatible browser like Chrome, Edge, or Brave.</p>
+            </div>
+            <button class="btn primary" id="btnSplashConnect" type="button">🔌 Connect Calculator</button>
+        </div>
+    </section>
+
+    <main class="layout hidden" id="mainContent">
+        <section class="panel">
+            <div class="panel-header">
+                <h2>Device</h2>
+                <div class="panel-actions">
+                    <button class="btn subtle" id="btnGetInfo">ℹ️ Refresh Device Info</button>
+                    <button class="btn subtle" id="btnSyncClock">🕒 Sync Clock</button>
+                </div>
+            </div>
+            <div class="panel-body">
+                <div class="info-grid">
+                    <div class="info-card">
+                        <div class="label">Model</div>
+                        <div class="value" id="deviceModel">Unknown</div>
+                    </div>
+                    <div class="info-card">
+                        <div class="label">Free Memory</div>
+                        <div class="value" id="memoryInfo">—</div>
+                    </div>
+                </div>
+                <div class="note"></div>
+                <div class="info-list" id="deviceInfoList"></div>
+            </div>
+        </section>
+
+        <section class="panel">
+            <div class="panel-header">
+                <h2>Transfers</h2>
+                <div class="panel-actions">
+                    <button class="btn subtle" id="btnIsReady" style="visibility: hidden">✅ Is Ready</button>
+                </div>
+            </div>
+            <div class="panel-body">
+                <div class="transfer-grid">
+                    <div class="dropzone" id="dropzone">
+                        <input type="file" id="fileInput" multiple>
+                        <div class="dropzone-text">
+                            <div class="title">Drop files to send</div>
+                            <div class="subtitle">Make sure to select appropriate TI files</div>
+                        </div>
+                        <button class="btn subtle send-idle" id="btnSendFiles" disabled>📤 Send Selected Files</button>
+                    </div>
+                    <div class="quick-actions">
+                        <button class="btn ghost" id="btnReceiveBackup">📥  Make Backup</button>
+                        <button class="btn ghost hidden" id="btnReceiveOs">📥  Receive OS</button>
+                        <button class="btn ghost hidden" id="btnDownloadOsPartial">⬇️  Download OS so far</button>
+                        <button class="btn ghost" id="btnDumpRom">🧠  Dump ROM</button>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section class="panel wide">
+            <div class="panel-header">
+                <h2>Calculator Variables</h2>
+                <div class="panel-actions">
+                    <input class="search" id="filterInput" type="search" placeholder="Filter name or type">
+                    <button class="btn primary" id="btnRefreshDirlist">🔄 Refresh List</button>
+                    <button class="btn subtle" id="btnToggleView">🗂️ Tree View</button>
+                    <button class="btn subtle" id="btnRecvSelected" disabled>⬇️ Receive Selected</button>
+                    <button class="btn danger" id="btnDeleteSelected" disabled>🗑️ Delete Selected</button>
+                </div>
+            </div>
+            <div class="panel-body">
+                <div class="table-wrap" id="tableView">
+                    <table class="var-table">
+                        <thead>
+                            <tr>
+                                <th></th>
+                                <th data-sort="name">Name</th>
+                                <th data-sort="type">Type</th>
+                                <th data-sort="size">Size</th>
+                                <th data-sort="location">Location</th>
+                                <th data-sort="folder">Folder</th>
+                                <th>Kind</th>
+                            </tr>
+                        </thead>
+                        <tbody id="varTableBody"></tbody>
+                    </table>
+                </div>
+                <div class="tree-view hidden" id="treeView"></div>
+            </div>
+        </section>
+
+        <section class="panel">
+            <div class="panel-header">
+                <h2>Screenshot</h2>
+                <div class="panel-actions">
+                    <button class="btn primary" id="btnScreenshot">📸 Take Screenshot</button>
+                    <button class="btn subtle" id="btnDownloadScreenshot">⬇️ Download PNG</button>
+                </div>
+            </div>
+            <div class="panel-body" style="text-align: center">
+                <canvas id="screenshotCanvas" width="320" height="240"></canvas>
+            </div>
+        </section>
+
+        <section class="panel">
+            <div class="panel-header">
+                <h2>Activity Log</h2>
+                <div class="panel-actions">
+                    <button class="btn subtle" id="btnClearLog">🧹 Clear Log</button>
+                </div>
+            </div>
+            <div class="panel-body">
+                <pre class="log" id="log"></pre>
+            </div>
+        </section>
+    </main>
+
+    <div class="modal hidden" id="settingsModal" aria-hidden="true">
+        <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="settingsTitle">
+            <div class="modal-header">
+                <h3 id="settingsTitle">Settings</h3>
+                <button class="btn ghost" id="btnCloseSettings">✖️</button>
+            </div>
+            <div class="modal-body">
+                <div class="settings-grid">
+                    <div class="form-field">
+                        <label for="settingCableModel">Cable</label>
+                        <select id="settingCableModel" class="form-input"></select>
+                        <span class="form-hint">Force cable to skip probing.</span>
+                    </div>
+                    <div class="form-field">
+                        <label for="settingCalcModel">Calculator model</label>
+                        <select id="settingCalcModel" class="form-input"></select>
+                        <span class="form-hint" id="settingCalcHint">Auto uses probing to detect the model.</span>
+                    </div>
+                    <div class="form-field">
+                        <label for="settingTimeout">Cable timeout (1/10s)</label>
+                        <input type="number" id="settingTimeout" class="form-input" min="1" max="200" step="1">
+                    </div>
+                    <div class="form-field">
+                        <label for="settingDelay">Cable delay (µs)</label>
+                        <input type="number" id="settingDelay" class="form-input" min="0" max="1000" step="1">
+                    </div>
+                </div>
+                <div class="form-note">Changing settings resets the current handle. Reconnect for full effect.</div>
+            </div>
+            <div class="modal-footer modal-footer-split" style="justify-content: space-between">
+                <button class="btn ghost theme-toggle" id="btnThemeToggle" type="button">Theme: Dark Modern</button>
+                <div class="modal-footer-actions">
+                    <button class="btn ghost" id="btnResetSettings">↩️ Reset Defaults</button>
+                    <button class="btn primary" id="btnSaveSettings">💾 Save Settings</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal hidden" id="transferModal" aria-hidden="true">
+        <div class="modal-card modal-wide" role="dialog" aria-modal="true" aria-labelledby="transferTitle">
+            <div class="modal-header">
+                <h3 id="transferTitle">Transfer Options</h3>
+                <button class="btn ghost" id="btnCloseTransfer">✖️</button>
+            </div>
+            <div class="modal-body">
+                <div class="table-wrap">
+                    <table class="var-table transfer-table">
+                        <thead>
+                            <tr>
+                                <th>File</th>
+                                <th>Variable</th>
+                                <th class="transfer-location">Location</th>
+                                <th class="transfer-folder">Folder</th>
+                            </tr>
+                        </thead>
+                        <tbody id="transferTableBody"></tbody>
+                    </table>
+                </div>
+                <div class="form-note">Location/folder options depend on calculator capabilities. Existing variables are overwritten only if confirmed.</div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn ghost" id="btnCancelTransfer">Cancel</button>
+                <button class="btn primary" id="btnConfirmTransfer">🚀 Start Transfer</button>
+            </div>
+        </div>
+    </div>
+    <footer class="footer">
+        <span>Powered by <a href="https://github.com/debrouxl/tilibs/" target="_blank">tilibs</a>.</span>
+        <span>WebUSB/WASM build by <a href="https://github.com/adriweb/tilibs/tree/exp2-full-emscripten" target="_blank">Adriweb</a>.</span>
+        <span>Features inspired by <a href="https://github.com/debrouxl/tilp_and_gfm" target="_blank">TILP</a>, a free software released under the
+            <a href="https://www.gnu.org/licenses/old-licenses/gpl-2.0.html" target="_blank">GNU GPLv2</a>.</span>
+        <span>(Web)TILP is not affiliated with Texas Instruments (TI) — TI trademarks belong to Texas Instruments Incorporated.</span>
+    </footer>
+
+    <script src="webtilp.js"></script>
+    <script src="app.js"></script>
+</body>
+</html>
