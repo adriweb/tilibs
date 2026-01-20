@@ -31,6 +31,8 @@
 
 # step 4 : run this file
 
+# step 5 : webtilp/makefile
+
 
 ###### Note
 
@@ -108,7 +110,7 @@ fi
 
 # Path to pre-built LibArchive
 LIBARCHIVE_EMSCRIPTEN="$SCRIPT_DIR/libarchive/build-wasm/stage"
-if [ -d "$GLIB_EMSCRIPTEN" ]; then
+if [ -d "$LIBARCHIVE_EMSCRIPTEN" ]; then
     echo -e "${GREEN}Found libarchive-emscripten-built at: $LIBARCHIVE_EMSCRIPTEN${NC}"
     export PKG_CONFIG_PATH="$LIBARCHIVE_EMSCRIPTEN/lib/pkgconfig:${PKG_CONFIG_PATH}"
     # Also set CMAKE_PREFIX_PATH for find_package
@@ -142,6 +144,7 @@ echo ""
 
 # Configure with CMake
 emcmake cmake .. \
+    -GNinja \
     -DCMAKE_BUILD_TYPE=Release \
     -DBUILD_SHARED_LIBS=OFF \
     -DBUILD_TESTS=OFF \
@@ -156,7 +159,7 @@ fi
 
 echo ""
 echo -e "${GREEN}Building static libraries...${NC}"
-emmake make -j$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)
+cmake --build .
 
 if [ $? -ne 0 ]; then
     echo -e "${RED}Build failed!${NC}"

@@ -1,5 +1,4 @@
 # Build stuff
-Makefile
 Makefile.in
 aclocal.m4
 autom4te.cache/
@@ -92,3 +91,6 @@ glib-emscripten-built/
 libusb/
 libarchive/
 tifileutil/testData/
+
+webtilp/webtilp.js
+webtilp/webtilp.wasm
