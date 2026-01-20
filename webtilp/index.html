@@ -1,0 +1,616 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>TILP — Fast transfers for TI graphing calculators</title>
+  <style>
+    :root {
+      --bg: #0b0f16;
+      --card: #121826;
+      --alt: #0f141f;
+      --border: rgba(255, 255, 255, 0.08);
+      --text: #e8edf5;
+      --muted: #94a0b8;
+      --accent: #5bd2c3;
+      --accent-2: #5a8cff;
+      --shadow: 0 24px 60px rgba(5, 10, 18, 0.5);
+      --glow: rgba(91, 210, 195, 0.2);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      font-family: "Avenir Next", "Futura", "Trebuchet MS", sans-serif;
+      background:
+      radial-gradient(circle at 12% 16%, rgba(91, 210, 195, 0.18), transparent 35%),
+      radial-gradient(circle at 86% 8%, rgba(90, 140, 255, 0.2), transparent 35%),
+      radial-gradient(circle at 40% 85%, rgba(255, 255, 255, 0.06), transparent 45%),
+      var(--bg);
+      color: var(--text);
+      line-height: 1.6;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    a {
+      color: inherit;
+      text-decoration: none;
+    }
+
+    .hero {
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 32px 24px 70px;
+    }
+
+    .nav {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 12px 0;
+      position: sticky;
+      top: 0;
+      backdrop-filter: blur(8px);
+      z-index: 10;
+    }
+
+    .brand {
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .brand-badge {
+      width: 32px;
+      height: 32px;
+      border-radius: 10px;
+      display: grid;
+      place-items: center;
+      background: linear-gradient(135deg, var(--accent), var(--accent-2));
+      color: #081018;
+      font-weight: 700;
+      font-size: 13px;
+      letter-spacing: 0.08em;
+      box-shadow: 0 10px 24px rgba(90, 140, 255, 0.2);
+    }
+
+    .nav-links {
+      display: flex;
+      gap: 18px;
+      color: var(--muted);
+    }
+
+    .nav-links a:hover {
+      color: var(--text);
+    }
+
+    .hero-content {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+      gap: 28px;
+      align-items: center;
+      margin-top: 40px;
+    }
+
+    .hero-text h1 {
+      font-size: clamp(32px, 5vw, 48px);
+      line-height: 1.1;
+      margin: 12px 0 12px;
+    }
+
+    .lead {
+      color: var(--muted);
+      margin-bottom: 20px;
+    }
+
+    .cta-group {
+      display: flex;
+      gap: 12px;
+      flex-wrap: wrap;
+      margin-bottom: 14px;
+    }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      padding: 12px 18px;
+      border-radius: 12px;
+      border: 1px solid var(--border);
+      font-weight: 600;
+      color: var(--text);
+      transition: transform 150ms ease, box-shadow 150ms ease, background 150ms ease, border 150ms ease;
+    }
+
+    .btn.primary {
+      background: linear-gradient(135deg, var(--accent), var(--accent-2));
+      color: #020409;
+      border-color: transparent;
+      box-shadow: 0 12px 30px rgba(90, 140, 255, 0.25);
+    }
+
+    .btn.ghost {
+      background: rgba(255, 255, 255, 0.04);
+    }
+
+    .btn.text {
+      padding: 12px 0;
+      border: none;
+      background: transparent;
+      color: var(--accent);
+    }
+
+    .btn:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
+    }
+
+    .meta {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      color: var(--muted);
+    }
+
+    .dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: linear-gradient(135deg, var(--accent), var(--accent-2));
+      display: inline-block;
+    }
+
+    .hero-card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 18px;
+      padding: 18px;
+      box-shadow: var(--shadow);
+    }
+
+    .card-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 12px;
+    }
+
+    .card-label {
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      font-size: 12px;
+      color: var(--muted);
+      margin: 0 0 4px;
+    }
+
+    .card-title {
+      font-weight: 700;
+      margin: 0;
+    }
+
+    .badge {
+      padding: 6px 10px;
+      border-radius: 999px;
+      background: rgba(107, 240, 196, 0.12);
+      color: var(--accent);
+      border: 1px solid rgba(107, 240, 196, 0.4);
+      font-size: 12px;
+    }
+
+    .card-image {
+      width: 100%;
+      border-radius: 12px;
+      border: 1px solid var(--border);
+      background: #0f1116;
+    }
+
+    .card-footer {
+      color: var(--muted);
+      margin-top: 10px;
+    }
+
+    .section {
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 60px 24px;
+    }
+
+    .section.alt {
+      background: var(--alt);
+      border-top: 1px solid var(--border);
+      border-bottom: 1px solid var(--border);
+    }
+
+    .section-header {
+      max-width: 680px;
+    }
+
+    .section h2 {
+      margin: 8px 0 6px;
+      font-size: clamp(26px, 4vw, 36px);
+    }
+
+    .subhead {
+      margin: 0;
+      color: var(--muted);
+    }
+
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 12px;
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.04);
+      border: 1px solid var(--border);
+      color: var(--muted);
+      font-weight: 600;
+      letter-spacing: 0.04em;
+      font-size: 12px;
+      text-transform: uppercase;
+    }
+
+    .feature-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+      gap: 16px;
+      margin-top: 28px;
+    }
+
+    .feature-card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      padding: 18px;
+      border-radius: 16px;
+      box-shadow: 0 16px 30px rgba(5, 10, 18, 0.3);
+    }
+
+    .feature-card h3 {
+      margin: 10px 0 8px;
+    }
+
+    .feature-card p {
+      margin: 0;
+      color: var(--muted);
+    }
+
+    .icon {
+      width: 38px;
+      height: 38px;
+      border-radius: 12px;
+      display: grid;
+      place-items: center;
+      background: rgba(90, 140, 255, 0.15);
+      color: var(--accent);
+      font-size: 18px;
+    }
+
+    .compat-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+      gap: 16px;
+      margin-top: 28px;
+    }
+
+    .compat-card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      padding: 18px;
+      border-radius: 16px;
+    }
+
+    .compat-card h3 {
+      margin: 0 0 8px;
+    }
+
+    .compat-card p {
+      margin: 0;
+      color: var(--muted);
+    }
+
+    .two-col {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+      gap: 20px;
+    }
+
+    .list {
+      padding-left: 18px;
+      color: var(--muted);
+      margin: 0;
+      display: grid;
+      gap: 10px;
+    }
+
+    .panel {
+      background: var(--card);
+      border: 1px solid var(--border);
+      padding: 20px;
+      border-radius: 16px;
+      box-shadow: 0 18px 40px rgba(5, 10, 18, 0.35);
+    }
+
+    .panel-tags {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      margin-top: 12px;
+    }
+
+    .panel-tags span {
+      padding: 6px 10px;
+      border-radius: 12px;
+      background: rgba(255, 255, 255, 0.04);
+      border: 1px solid var(--border);
+      color: var(--muted);
+      font-weight: 600;
+    }
+
+    .cta {
+      text-align: left;
+    }
+
+    .cta-card {
+      background: linear-gradient(140deg, rgba(90, 140, 255, 0.12), rgba(91, 210, 195, 0.12));
+      border: 1px solid var(--border);
+      padding: 28px;
+      border-radius: 18px;
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 18px;
+      box-shadow: var(--shadow);
+      flex-wrap: wrap;
+      flex-direction: column;
+    }
+
+    .cta-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 14px;
+    }
+
+    .cta-tile {
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 16px;
+      background: rgba(9, 12, 18, 0.35);
+    }
+
+    .cta-tile h4 {
+      margin: 0 0 6px;
+    }
+
+    .cta-tile p {
+      margin: 0 0 12px;
+      color: var(--muted);
+    }
+
+    .cta-actions {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+
+    .footer-note {
+      text-align: center;
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    .footer-note a {
+      color: var(--accent);
+    }
+
+    @media (max-width: 720px) {
+      .nav {
+        position: static;
+        flex-wrap: wrap;
+        gap: 12px;
+      }
+
+      .nav-links {
+        width: 100%;
+        justify-content: flex-start;
+        flex-wrap: wrap;
+        gap: 12px;
+      }
+
+      .cta-card {
+        flex-direction: column;
+        align-items: flex-start;
+      }
+    }
+  </style>
+</head>
+<body>
+<header class="hero">
+  <div class="nav">
+    <div class="brand">
+      <span class="brand-badge">TILP</span>
+    </div>
+    <div class="nav-links">
+      <a href="#features">Features</a>
+      <a href="#downloads">Downloads</a>
+      <a href="webtilp.html">WebTILP</a>
+      <a href="https://github.com/debrouxl/tilp_and_gfm" target="_blank">GitHub</a>
+    </div>
+  </div>
+  <div class="hero-content">
+    <div class="hero-text">
+      <p class="pill">Open-source • Cross‑platform • Reliable</p>
+      <h1>The most complete TI calculator <=> computer transfer software.</h1>
+      <p class="lead">TILP (formerly GtkTiLink) is the modern linking suite for TI calculators. Send files, capture screens,
+        upgrade OS images, manage backups, and keep devices in sync across z80/eZ80, 68k, and Nspire models.</p>
+      <div class="cta-group">
+        <a class="btn primary" href="webtilp.html">Open WebTILP</a>
+        <a class="btn ghost" href="#downloads">Download TILP</a>
+        <a class="btn ghost" href="https://github.com/debrouxl/tilp_and_gfm" target="_blank">View on GitHub</a>
+      </div>
+      <div class="meta">
+        <span class="dot"></span>GPLv2 licensed • Actively maintained
+      </div>
+    </div>
+  </div>
+</header>
+
+<main>
+  <section id="features" class="section features">
+    <div class="section-header">
+      <p class="pill">Why TILP</p>
+      <h2>Everything you need to stay in sync.</h2>
+      <p class="subhead">Designed for speed, reliability, and a clean workflow on Linux, macOS, Windows, Chromebooks, Android.</p>
+    </div>
+    <div class="feature-grid">
+      <div class="feature-card">
+        <div class="icon">⇆</div>
+        <h3>Fast transfers</h3>
+        <p>Send and receive variables, backups, FLASH apps, and OS upgrades with reliable cable and USB link support.</p>
+      </div>
+      <div class="feature-card">
+        <div class="icon">🎯</div>
+        <h3>Remote control</h3>
+        <p>Drive TI-89/TI-92+/V200, TI‑Z80/TI‑eZ80, and Nspire calculators remotely for teaching, demos, and debugging.</p>
+      </div>
+      <div class="feature-card">
+        <div class="icon">📷</div>
+        <h3>Instant screenshots</h3>
+        <p>Capture crisp calculator screens for documentation or classroom projection—no extra tooling needed.</p>
+      </div>
+      <div class="feature-card">
+        <div class="icon">🛡️</div>
+        <h3>Cross-platform</h3>
+        <p>Built with GTK, TILP runs seamlessly on Linux, macOS, and Windows with a consistent UI and UX. The Web version runs anywhere on Chrome/Edge.</p>
+      </div>
+      <div class="feature-card">
+        <div class="icon">🔌</div>
+        <h3>Link versatility</h3>
+        <p>Supports all cables plus virtual links for emulators.</p>
+      </div>
+      <div class="feature-card">
+        <div class="icon">🧭</div>
+        <h3>Clear workflows</h3>
+        <p>Keep backups, manage folders, and sync devices with confidence. Logs, status, and progress are always visible.</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="section two-col">
+    <div>
+      <hr>
+    </div>
+  </section>
+
+  <section class="section two-col">
+    <div class="text">
+      <p class="pill">Workflow</p>
+      <h2>Great for classrooms, hobbyists, and developers.</h2>
+      <ul class="list">
+        <li><strong>Teach and present:</strong> Easy screen capture and remote control for projection and quick demos.</li>
+        <li><strong>Develop faster:</strong> Transfer variables, apps, OSes, screenshots in seconds.</li>
+        <li><strong>Stay safe:</strong> Keep reliable backups and restore points for experiments.</li>
+        <li><strong>Contribute:</strong> Fully open-source with an active community on GitHub.</li>
+      </ul>
+    </div>
+    <div class="panel">
+      <h3>Built to feel native.</h3>
+      <p>GTK-powered UI keeps controls familiar on every platform, with sensible defaults, gettext-based i18n/l10n, and a focus on clarity.</p>
+      <div class="panel-tags">
+        <span>C & C++</span>
+        <span>GTK+</span>
+        <span>glib</span>
+        <span>gettext</span>
+      </div>
+    </div>
+  </section>
+
+  <section class="section two-col">
+    <div>
+      <hr>
+    </div>
+  </section>
+
+  <section class="section two-col">
+    <div class="panel">
+      <h3>Link from the browser.</h3>
+      <p>WebTILP runs fully client‑side in the browser. You get device info, transfers, screenshots, backups...
+        Installation‑free on desktops, Chromebooks, and Android phones/tablets.</p>
+      <div class="panel-tags">
+        <span>Built in WASM</span>
+        <span>Uses WebUSB</span>
+        <span>For Chrome/Edge</span>
+      </div>
+      <div class="cta-actions" style="margin-top: 16px;">
+        <a class="btn primary" href="webtilp.html">Open WebTILP</a>
+        <a class="btn ghost" href="https://github.com/debrouxl/tilibs" target="_blank">Source code</a>
+      </div>
+    </div>
+    <div class="text">
+      <p class="pill">Also in the browser!</p>
+      <h2>Connect in seconds.</h2>
+      <ul class="list">
+        <li><strong>Install‑free:</strong> Runs anywhere you have Chrome/Edge.</li>
+        <li><strong>Devices:</strong> Works across desktops, Chromebooks, and Android phones/tablets.</li>
+        <li><strong>Cables:</strong> DirectLink or SilverLink USB adapters.</li>
+        <li><strong>Workflow:</strong> Authorize once, then reconnect instantly.</li>
+      </ul>
+    </div>
+  </section>
+
+  <section id="downloads" class="section cta">
+    <div class="cta-card">
+      <div>
+        <h2>Use TILP now!</h2>
+        <p class="subhead">Choose the build for your platform, or use WebTILP in the browser.</p>
+      </div>
+      <div class="cta-actions">
+        <a class="btn primary" href="https://github.com/debrouxl/tilp_and_gfm/releases" target="_blank">Releases</a>
+        <a class="btn ghost" href="https://github.com/debrouxl/tilp_and_gfm" target="_blank">Source</a>
+        <a class="btn ghost" href="webtilp.html">Launch WebTILP</a>
+      </div>
+      <div class="cta-grid">
+        <div class="cta-tile">
+          <h4>Desktop TILP</h4>
+          <p>Full feature set with native UI, and works fully offline with no internet required.</p>
+          <a class="btn text" href="https://github.com/debrouxl/tilp_and_gfm/releases" target="_blank">Download builds →</a>
+        </div>
+        <div class="cta-tile">
+          <h4>WebTILP</h4>
+          <p>Client‑side only with WebUSB. Works on desktops, Chromebooks, and Android.</p>
+          <a class="btn text" href="webtilp.html">Launch WebTILP →</a>
+        </div>
+        <div class="cta-tile">
+          <h4>tilibs</h4>
+          <p>Build your own tools on top of the same libraries that power TILP.</p>
+          <a class="btn text" href="https://github.com/debrouxl/tilibs" target="_blank">Browse tilibs →</a>
+        </div>
+      </div>
+      <div>
+        <h3>tilibs</h3>
+        <p class="subhead">tilibs are the libraries powering TILP:</p>
+        <ul class="list">
+          <li><strong>libticonv:</strong> Charset conversion and model utilities to keep TI filenames and text correct across platforms.</li>
+          <li><strong>libtifiles:</strong> TI file format toolkit for variables, apps, OS files, backups, and TiGroup archives.</li>
+          <li><strong>libticables:</strong> Link cable layer handling physical and virtual connections, including USB, parallel, serial, and emulator-backed links.</li>
+          <li><strong>libticalcs:</strong> High-level calculator protocol layer for transfers, screenshots, remote control, and device discovery.</li>
+        </ul>
+      </div>
+      <div class="cta-actions">
+        <a class="btn ghost" href="https://github.com/debrouxl/tilibs" target="_blank">GitHub</a>
+      </div>
+    </div>
+  </section>
+
+  <section class="section footer-note">
+    <p>TILP is free software released under the <a href="https://www.gnu.org/licenses/old-licenses/gpl-2.0.html" target="_blank">GNU
+      GPLv2</a>, and is not affiliated with Texas Instruments (TI).<br>TI trademarks belong to Texas Instruments Incorporated.</p>
+    <p>Community support: <a href="https://github.com/debrouxl/tilp_and_gfm">On GitHub</a>.</p>
+  </section>
+</main>
+</body>
+</html>
