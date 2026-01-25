@@ -277,7 +277,7 @@ struct _FlashContent
 	uint8_t		hw_id;
 	uint32_t		data_length;
 
-	uint8_t*		data_part;	// TI-68k and TI-eZ80 FlashApps.
+	uint8_t*		data_part;	// TI-68k and TI-eZ80 FlashApps, TI-Nspire OSes.
 	unsigned int			num_pages;	// TI-Z80 only
 	FlashPage**	pages;		// TI-Z80 only
 
