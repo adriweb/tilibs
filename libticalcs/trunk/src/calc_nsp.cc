@@ -801,53 +801,77 @@ static int		dump_rom_1	(CalcHandle* handle)
 
 static int		dump_rom_2	(CalcHandle* handle, CalcDumpSize size, const char *filename)
 {
-	ticalcs_info("FIXME: make ROM dumping work above OS 1.x, using the Fron method");
+	(void)handle;
+	(void)size;
+	(void)filename;
+	// to do manually with polydumper...
+	return ERR_UNSUPPORTED;
+}
 
-	FILE* f = fopen(filename, "wb");
-	if (f == nullptr)
+static int nsp_send_ack_for_packet(CalcHandle* handle, const NSPRawPacket* packet)
+{
+	NSPRawPacket ack{};
+
+	ack.data_size = 2;
+	ack.src_addr = NSP_SRC_ADDR;
+	ack.src_port = (packet->seq == 0 ? NSP_PORT_PKT_ACK1 : NSP_PORT_PKT_ACK2);
+	ack.dst_addr = NSP_DEV_ADDR;
+	ack.dst_port = packet->src_port;
+	ack.data[0] = MSB(packet->dst_port);
+	ack.data[1] = LSB(packet->dst_port);
+
+	return nsp_send(handle, &ack);
+}
+
+static int nsp_send_simple_cmd(CalcHandle* handle, uint16_t src_port, uint16_t dst_port, uint8_t cmd, const uint8_t* payload, uint8_t payload_size)
+{
+	NSPRawPacket pkt{};
+
+	pkt.data_size = payload_size + 1;
+	pkt.src_addr = NSP_SRC_ADDR;
+	pkt.src_port = src_port;
+	pkt.dst_addr = NSP_DEV_ADDR;
+	pkt.dst_port = dst_port;
+	pkt.data[0] = cmd;
+	if (payload_size && payload != nullptr)
 	{
-		return ERR_OPEN_FILE;
+		memcpy(pkt.data + 1, payload, payload_size);
 	}
 
-	int ret = nsp_session_open(handle, NSP_SID_FILE_MGMT);
-	if (!ret)
-	{
-		ret = nsp_cmd_s_get_file(handle, "../phoenix/install/TI-Nspire.tnc");
-		if (!ret)
-		{
-			uint32_t varsize;
+	return nsp_send(handle, &pkt);
+}
 
-			ret = nsp_cmd_r_get_file(handle, &varsize);
-			if (!ret)
-			{
-				ret = nsp_cmd_s_file_ok(handle);
-				if (!ret)
-				{
-					uint8_t *data;
+static int nsp_send_device_info(CalcHandle* handle, uint16_t dst_port)
+{
+	// Static device-info reply blob captured from real handhelds
+	static const uint8_t info[] = {
+		0x01, 0x00, 0x00, 0x00, 0x00, 0x06, 0x62, 0xC8, 0x00, 0x00, 0x00, 0x00, 0x00, 0x07, 0x34, 0x00,
+		0x00, 0x00, 0x00, 0x00, 0x00, 0x02, 0xA7, 0x9F, 0x74, 0x00, 0x00, 0x00, 0x00, 0x03, 0x39, 0x61,
+		0xC0, 0xFF, 0x01, 0x00, 0x84, 0x03, 0x02, 0x07, 0x01, 0x03, 0x00, 0x00, 0x63, 0x03, 0x02, 0x00,
+		0x8D, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00, 0x00, 0x01, 0x40, 0x00, 0xF0, 0x10,
+		0x01, 0x1F, 0x38, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x31, 0x30, 0x35, 0x32, 0x31, 0x46, 0x33,
+		0x43, 0x30, 0x00, 0x31, 0x30, 0x30, 0x38, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x31, 0x30, 0x35,
+		0x32, 0x31, 0x46, 0x33, 0x43, 0x30, 0x36, 0x34, 0x34, 0x45, 0x30, 0x33, 0x30, 0x43, 0x00
+	};
 
-					ret = nsp_cmd_r_file_contents(handle, &varsize, &data);
-					if (!ret)
-					{
-						ret = nsp_cmd_s_status(handle, NSP_ERR_OK);
-						if (!ret)
-						{
-							if (fwrite(data, varsize, 1, f) < 1)
-							{
-								ret = ERR_SAVE_FILE;
-							}
-						}
-						g_free(data);
-					}
-				}
-			}
-		}
+	return nsp_send_simple_cmd(handle, NSP_PORT_DEV_INFOS, dst_port, info[0], info + 1, (uint8_t)(sizeof(info) - 1));
+}
 
-		DO_CLOSE_SESSION(handle);
-	}
 
-	fclose(f);
+static int nsp_send_device_name(CalcHandle* handle, uint16_t dst_port)
+{
+    const char name[] = "TI-Nspire(tm) Handheld";
 
-	return ret;
+    return nsp_send_simple_cmd(handle, NSP_PORT_DEV_INFOS, dst_port, NSP_CMD_DI_MODEL,
+                               (const uint8_t*)name, (uint8_t)sizeof(name));
+}
+
+static int nsp_send_supported_fext(CalcHandle* handle, uint16_t dst_port)
+{
+    const char fext[] = "tnc";
+
+    return nsp_send_simple_cmd(handle, NSP_PORT_DEV_INFOS, dst_port, NSP_CMD_DI_FEXT,
+                               (const uint8_t*)fext, (uint8_t)sizeof(fext));
 }
 
 static int		del_var		(CalcHandle* handle, VarRequest* vr)
@@ -1156,7 +1180,183 @@ static int		del_folder  (CalcHandle* handle, VarRequest* vr)
 
 static int		recv_os    (CalcHandle* handle, FlashContent* content)
 {
-	return ERR_UNSUPPORTED;
+	int ret = 0;
+	bool started = false;
+	bool sent_status = false;
+	bool completed = false;
+	uint32_t remaining = 0, written_so_far = 0;
+
+	if (content == nullptr)
+	{
+		return -1;
+	}
+
+	content->data_length = 0;
+	content->data_part = nullptr;
+	strcpy(content->name, "ti-nspire_os_received");
+
+	handle->updat->cnt1 = 0;
+	handle->updat->max1 = 0;
+	ticalcs_update_pbar(handle);
+
+	while (!ret && !completed)
+	{
+		NSPRawPacket pkt{};
+
+		ret = nsp_recv(handle, &pkt);
+		if (ret)
+		{
+			break;
+		}
+		if (handle->updat->cancel)
+		{
+			ret = ERR_ABORT;
+			break;
+		}
+
+		if (pkt.ack == 0x0A)
+		{
+			continue;
+		}
+
+		if (pkt.src_port == NSP_PORT_DISCONNECT)
+		{
+			ret = nsp_send_ack_for_packet(handle, &pkt);
+			continue;
+		}
+
+		if (pkt.dst_port == NSP_PORT_ADDR_ASSIGN)
+		{
+			ret = nsp_send_ack_for_packet(handle, &pkt);
+			if (!ret)
+			{
+				ret = nsp_addr_assign(handle, NSP_DEV_ADDR);
+			}
+			continue;
+		}
+
+		if (pkt.dst_port == NSP_PORT_LOGIN)
+		{
+			ret = nsp_send_nack_ex(handle, pkt.src_port);
+			continue;
+		}
+
+		if (pkt.dst_port == NSP_PORT_DEV_INFOS)
+		{
+			ret = nsp_send_ack_for_packet(handle, &pkt);
+			if (!ret && pkt.data_size >= 1)
+			{
+				switch (pkt.data[0])
+				{
+					case NSP_CMD_DI_VERSION:
+						ret = nsp_send_device_info(handle, pkt.src_port);
+						break;
+					case NSP_CMD_DI_MODEL:
+						ret = nsp_send_device_name(handle, pkt.src_port);
+						break;
+					case NSP_CMD_DI_FEXT:
+						ret = nsp_send_supported_fext(handle, pkt.src_port);
+						break;
+					case 0x04:
+						ret = nsp_send_simple_cmd(handle, NSP_PORT_DEV_INFOS, pkt.src_port, pkt.data[0], nullptr, 0);
+						break;
+					default:
+						break;
+				}
+			}
+			continue;
+		}
+
+		if (pkt.dst_port != NSP_PORT_OS_INSTALL)
+		{
+			continue;
+		}
+
+		ret = nsp_send_ack_for_packet(handle, &pkt);
+		if (ret)
+		{
+			break;
+		}
+		if (pkt.data_size < 1)
+		{
+			ret = ERR_INVALID_PACKET;
+			break;
+		}
+
+		switch (pkt.data[0])
+		{
+			case NSP_CMD_OS_INSTALL:
+			{
+				if (pkt.data_size < 5)
+				{
+					ret = ERR_INVALID_PACKET;
+					break;
+				}
+
+				remaining = ((uint32_t)pkt.data[1] << 24) | ((uint32_t)pkt.data[2] << 16) | ((uint32_t)pkt.data[3] << 8) | (uint32_t)pkt.data[4];
+				started = true;
+				sent_status = false;
+
+				content->data_length = remaining;
+				content->data_part = (uint8_t *)g_malloc0(content->data_length);
+				if (content->data_part == nullptr)
+				{
+					ret = ERR_MALLOC;
+					break;
+				}
+
+				if (remaining > 0)
+				{
+					handle->updat->max1 = (int)remaining;
+					handle->updat->cnt1 = 0;
+					ticalcs_update_pbar(handle);
+				}
+
+				ret = nsp_send_simple_cmd(handle, NSP_PORT_OS_INSTALL, pkt.src_port, NSP_CMD_OS_OK, nullptr, 0);
+				break;
+			}
+			case NSP_CMD_OS_CONTENTS:
+			{
+				if (!started)
+				{
+					ret = ERR_INVALID_PACKET;
+					break;
+				}
+
+				if (pkt.data_size > 1)
+				{
+					const size_t size = pkt.data_size - 1;
+					memcpy(&(content->data_part[written_so_far]), pkt.data + 1, size);
+					written_so_far += size;
+					remaining -= (int64_t)size;
+					handle->updat->cnt1 += (int)size;
+					handle->updat->pbar();
+				}
+
+				if (!ret && !sent_status)
+				{
+					const uint8_t ok = 0x00;
+					ret = nsp_send_simple_cmd(handle, NSP_PORT_OS_INSTALL, pkt.src_port, NSP_CMD_STATUS, &ok, 1);
+					sent_status = true;
+				}
+
+				if (!ret && (remaining <= 0 || pkt.data_size < NSP_DATA_SIZE))
+				{
+					const uint8_t progress = 0x64;
+					ret = nsp_send_simple_cmd(handle, NSP_PORT_OS_INSTALL, NSP_PORT_OS_INSTALL, NSP_CMD_OS_PROGRESS, &progress, 1);
+					if (!ret)
+					{
+						completed = true;
+					}
+				}
+				break;
+			}
+			default:
+				break;
+		}
+	}
+
+	return ret;
 }
 
 #define CALC_NSP_COMMON_COUNTERS \
