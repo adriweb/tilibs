@@ -840,10 +840,31 @@ static int slv_get_(CableHandle *h, uint8_t *data)
 	if (nBytesRead <= 0)
 	{
 		TO_START(clk);
+		#ifdef __EMSCRIPTEN__
+		int other_errors = 0;
+		#endif
 		do
 		{
 			// NOTE: slv_get() has already checked for uHdl != NULL .
 			ret = slv_bulk_read(uHdl, uInEnd, (unsigned char*)rBuf, max_ps_in, &len, to);
+			#ifdef __EMSCRIPTEN__
+			if (ret == LIBUSB_ERROR_OTHER)
+			{
+				other_errors++;
+				if (other_errors >= 10)
+				{
+					break;
+				}
+				if (TO_ELAPSED(clk, h->timeout))
+				{
+					break;
+				}
+				usleep(2000);
+				ret = 0;
+				len = 0;
+				continue;
+			}
+			#endif
 		}
 		while(!len && !ret);
 
