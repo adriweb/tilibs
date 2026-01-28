@@ -407,6 +407,17 @@ int TICALL nsp_recv_ack(CalcHandle *handle)
 			continue;
 		}
 
+		if (pkt.ack == 0x00 && pkt.data_size > 0)
+		{
+			int ack_ret = nsp_send_ack_for_raw(handle, &pkt);
+			if (ack_ret)
+			{
+				return ack_ret;
+			}
+			ticalcs_debug("  ignoring unexpected packet while waiting for ack");
+			continue;
+		}
+
 		if (pkt.src_port != NSP_PORT_PKT_ACK2)
 		{
 			ticalcs_info("XXX weird src_port\n");
