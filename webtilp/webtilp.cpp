@@ -932,6 +932,19 @@ uint32_t calc_features(CableHandle* cable_handle) {
 }
 
 EMSCRIPTEN_KEEPALIVE
+int calc_send_key(CableHandle* cable_handle, uint32_t key) {
+    if (!cable_handle) {
+        printf("ERROR: NULL cable handle provided\n");
+        return -1;
+    }
+    int ready_result = ensure_calc_ready(cable_handle, 0);
+    if (ready_result != 0) {
+        return ready_result;
+    }
+    return ticalcs_calc_send_key(g_calc_handle, key);
+}
+
+EMSCRIPTEN_KEEPALIVE
 const char* calc_get_info_string(CableHandle* cable_handle) {
     static char info_buf[4096];
     CalcInfos infos;
