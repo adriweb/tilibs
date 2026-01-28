@@ -1773,6 +1773,7 @@ const els = {
     btnGetInfo: document.getElementById('btnGetInfo'),
     btnSyncClock: document.getElementById('btnSyncClock'),
     btnRefreshDirlist: document.getElementById('btnRefreshDirlist'),
+    btnNewFolder: document.getElementById('btnNewFolder'),
     btnSendFiles: document.getElementById('btnSendFiles'),
     btnReceiveBackup: document.getElementById('btnReceiveBackup'),
     btnReceiveOs: document.getElementById('btnReceiveOs'),
@@ -1788,11 +1789,13 @@ const els = {
     keyCodeInput: document.getElementById('keyCodeInput'),
     btnSendKey: document.getElementById('btnSendKey'),
     settingsModal: document.getElementById('settingsModal'),
+    newFolderModal: document.getElementById('newFolderModal'),
     splashScreen: document.getElementById('splashScreen'),
     mainContent: document.getElementById('mainContent'),
     btnSplashConnect: document.getElementById('btnSplashConnect'),
     splashWebUsbWarning: document.getElementById('splashWebUsbWarning'),
     btnCloseSettings: document.getElementById('btnCloseSettings'),
+    btnCloseNewFolder: document.getElementById('btnCloseNewFolder'),
     btnSaveSettings: document.getElementById('btnSaveSettings'),
     btnResetSettings: document.getElementById('btnResetSettings'),
     settingCableModel: document.getElementById('settingCableModel'),
@@ -1803,6 +1806,10 @@ const els = {
     transferModal: document.getElementById('transferModal'),
     transferTableBody: document.getElementById('transferTableBody'),
     btnCloseTransfer: document.getElementById('btnCloseTransfer'),
+    newFolderName: document.getElementById('newFolderName'),
+    newFolderParent: document.getElementById('newFolderParent'),
+    btnCancelNewFolder: document.getElementById('btnCancelNewFolder'),
+    btnCreateNewFolder: document.getElementById('btnCreateNewFolder'),
     btnCancelTransfer: document.getElementById('btnCancelTransfer'),
     btnConfirmTransfer: document.getElementById('btnConfirmTransfer'),
     btnThemeToggle: document.getElementById('btnThemeToggle')
@@ -2067,6 +2074,39 @@ function openSettingsModal() {
 
 function closeSettingsModal() {
     els.settingsModal.classList.add('hidden');
+}
+
+function populateNewFolderParents() {
+    if (!els.newFolderParent) {
+        return;
+    }
+    const folders = isNspireActive()
+        ? getDirlistFolders().sort((a, b) => a.localeCompare(b))
+        : [];
+    const options = ['<option value="">(root)</option>']
+        .concat(folders.map(folder => `<option value="${folder}">${folder}</option>`));
+    els.newFolderParent.innerHTML = options.join('');
+}
+
+function openNewFolderModal() {
+    if (!els.newFolderModal) {
+        return;
+    }
+    populateNewFolderParents();
+    if (els.newFolderName) {
+        els.newFolderName.value = '';
+    }
+    els.newFolderModal.classList.remove('hidden');
+    if (els.newFolderName) {
+        els.newFolderName.focus();
+    }
+}
+
+function closeNewFolderModal() {
+    if (!els.newFolderModal) {
+        return;
+    }
+    els.newFolderModal.classList.add('hidden');
 }
 
 function resetSettings() {
@@ -2585,6 +2625,7 @@ async function updateCapabilities() {
     const hasClock = (features & FEATURE_FLAGS.OPS_CLOCK) !== 0;
     const hasRomDump = (features & FEATURE_FLAGS.OPS_ROMDUMP) !== 0;
     const hasKeys = (features & FEATURE_FLAGS.OPS_KEYS) !== 0;
+    const hasNewFolder = (features & FEATURE_FLAGS.OPS_NEWFLD) !== 0;
     const isNspire = isNspireActive();
     const canReceiveOs = hasRomDump && isNspire;
     updateKeyControlsState(hasKeys);
@@ -2625,6 +2666,16 @@ async function updateCapabilities() {
     }
 
     updateNspireOsButtons(isNspire, canReceiveOs);
+
+    if (!hasNewFolder) {
+        els.btnNewFolder.classList.add('disabled');
+        els.btnNewFolder.disabled = true;
+        els.btnNewFolder.title = 'Folder creation not supported by this calculator';
+    } else {
+        els.btnNewFolder.classList.remove('disabled');
+        els.btnNewFolder.disabled = false;
+        els.btnNewFolder.title = '';
+    }
 
     if (!hasClock) {
         els.btnSyncClock.classList.add('disabled');
@@ -3233,21 +3284,38 @@ function renderTreeView(entries, filter, showLocation) {
 
 function buildTree(entries) {
     const root = new Map();
-    entries.forEach(entry => {
-        const folder = entry.folder || '';
-        const segments = folder ? folder.split('/') : [];
+    const ensureFolderPath = (path, entry = null) => {
+        if (!path) {
+            return;
+        }
+        const segments = path.split('/').filter(Boolean);
         let cursor = root;
-        segments.forEach(seg => {
+        segments.forEach((seg, idx) => {
             if (!cursor.has(seg)) {
-                cursor.set(seg, { name: seg, children: new Map(), entries: [], isFolder: true });
+                cursor.set(seg, { name: seg, children: new Map(), entries: [], isFolder: true, entry: null });
+            }
+            if (entry && idx === segments.length - 1) {
+                cursor.get(seg).entry = entry;
             }
             cursor = cursor.get(seg).children;
         });
-        const parent = cursor;
-        if (!parent.has('__entries__')) {
-            parent.set('__entries__', { entries: [] });
+    };
+    entries.forEach(entry => {
+        if (entry.is_folder === 1) {
+            ensureFolderPath(getEntryFolderPath(entry), entry);
+            return;
         }
-        parent.get('__entries__').entries.push(entry);
+        const folder = entry.folder || '';
+        ensureFolderPath(folder);
+        const segments = folder ? folder.split('/') : [];
+        let cursor = root;
+        segments.forEach(seg => {
+            cursor = cursor.get(seg).children;
+        });
+        if (!cursor.has('__entries__')) {
+            cursor.set('__entries__', { entries: [] });
+        }
+        cursor.get('__entries__').entries.push(entry);
     });
 
     function mapToNodes(map, prefix) {
@@ -3260,7 +3328,8 @@ function buildTree(entries) {
                 nodes.push({
                     name: value.name,
                     path,
-                    children: mapToNodes(value.children, path)
+                    children: mapToNodes(value.children, path),
+                    entry: value.entry || null
                 });
             }
         });
@@ -3274,7 +3343,30 @@ function renderTreeNode(node, filter, showLocation) {
     if (node.entry) {
         const entry = node.entry;
         if (entry.is_folder === 1) {
-            return document.createDocumentFragment();
+            const folderName = entry.name || node.name || 'Folder';
+            const nameHay = folderName.toLowerCase();
+            const childrenWrap = document.createElement('div');
+            childrenWrap.className = 'tree-children';
+            let hasChild = false;
+            node.children.forEach(child => {
+                const childEl = renderTreeNode(child, filter, showLocation);
+                if (childEl.childNodes.length === 0 && childEl.nodeType === 11) {
+                    return;
+                }
+                childrenWrap.appendChild(childEl);
+                hasChild = true;
+            });
+            if (filter && !nameHay.includes(filter) && !hasChild) {
+                return document.createDocumentFragment();
+            }
+            const nodeEl = document.createElement('div');
+            const header = document.createElement('div');
+            header.className = 'tree-node';
+            header.innerHTML = `<strong>${folderName}</strong>`;
+            header.dataset.folderPath = node.path || getEntryFolderPath(entry);
+            nodeEl.appendChild(header);
+            nodeEl.appendChild(childrenWrap);
+            return nodeEl;
         }
         const hay = `${entry.name} ${entry.type} ${entry.type_name || ''} ${entry.kind}`.toLowerCase();
         if (filter && !hay.includes(filter)) {
@@ -3313,13 +3405,18 @@ function renderTreeNode(node, filter, showLocation) {
 
     const childrenWrap = document.createElement('div');
     childrenWrap.className = 'tree-children';
+    let hasChild = false;
     node.children.forEach(child => {
         const childEl = renderTreeNode(child, filter, showLocation);
         if (childEl.childNodes.length === 0 && childEl.nodeType === 11) {
             return;
         }
         childrenWrap.appendChild(childEl);
+        hasChild = true;
     });
+    if (filter && node.name && !node.name.toLowerCase().includes(filter) && !hasChild) {
+        return document.createDocumentFragment();
+    }
     nodeEl.appendChild(childrenWrap);
     return nodeEl;
 }
@@ -3618,7 +3715,7 @@ function getDirlistFolders() {
     const folders = new Set(['']);
     state.dirlist.forEach(entry => {
         if (entry.is_folder === 1 && entry.name) {
-            folders.add(entry.name);
+            folders.add(getEntryFolderPath(entry));
             return;
         }
         if (entry.folder) {
@@ -3752,7 +3849,9 @@ function openTransferModal(plan, options) {
 
         if (options.hasFolder) {
             const folderSelect = row.querySelector('[data-field="folder"]');
-            folderSelect.value = item.entryFolder || '';
+            if (folderSelect) {
+                folderSelect.value = item.entryFolder || '';
+            }
         }
     });
 
@@ -3914,7 +4013,7 @@ async function performTransfers(plan, module, options) {
             'number',
             ['number', 'string', 'string', 'number'],
             [handle, item.path, folderOverride, locationCode],
-            { timeoutMs: PROGRESS_IDLE_TIMEOUT_MS, useProgress: true }
+            { timeoutMs: 60000, useProgress: true }
         );
 
         if (result === 0) {
@@ -4217,6 +4316,43 @@ async function deleteSelected() {
     }
 }
 
+async function createNewFolder() {
+    const name = (els.newFolderName?.value || '').trim();
+    if (!name) {
+        log('Folder name is required.');
+        return;
+    }
+    const parent = (els.newFolderParent?.value || '').trim();
+    if (parent && !isNspireActive()) {
+        log('Nested folders are only supported on TI-Nspire.');
+        return;
+    }
+    const folderPath = parent ? `${parent}/${name}` : name;
+    setButtonLoading(els.btnCreateNewFolder, true, 'Creating folder...');
+    try {
+        await authorizeDevice();
+        const module = await initModule();
+        const handle = await ensureHandle();
+        await updateCapabilities();
+        if ((state.features & FEATURE_FLAGS.OPS_NEWFLD) === 0) {
+            log('Folder creation is not supported by this calculator.');
+            return;
+        }
+        const result = await ccallAsync(module, 'calc_new_folder', 'number', ['number', 'string'], [handle, folderPath], { timeoutMs: PROGRESS_IDLE_TIMEOUT_MS, useProgress: true });
+        if (result !== 0) {
+            log(`Failed to create folder (${formatErrorResult(module, result)}).`);
+            return;
+        }
+        log(`Folder created: ${folderPath}.`);
+        closeNewFolderModal();
+        await refreshDirlist();
+    } catch (err) {
+        logError(err, 'Create folder failed');
+    } finally {
+        setButtonLoading(els.btnCreateNewFolder, false);
+    }
+}
+
 async function takeScreenshot() {
     setButtonLoading(els.btnScreenshot, true);
     try {
@@ -4387,6 +4523,26 @@ function bindEvents() {
     }
     els.btnSettings.addEventListener('click', openSettingsModal);
     els.btnCloseSettings.addEventListener('click', closeSettingsModal);
+    if (els.btnNewFolder) {
+        els.btnNewFolder.addEventListener('click', openNewFolderModal);
+    }
+    if (els.btnCloseNewFolder) {
+        els.btnCloseNewFolder.addEventListener('click', closeNewFolderModal);
+    }
+    if (els.btnCancelNewFolder) {
+        els.btnCancelNewFolder.addEventListener('click', closeNewFolderModal);
+    }
+    if (els.btnCreateNewFolder) {
+        els.btnCreateNewFolder.addEventListener('click', createNewFolder);
+    }
+    if (els.newFolderName) {
+        els.newFolderName.addEventListener('keydown', event => {
+            if (event.key === 'Enter') {
+                event.preventDefault();
+                createNewFolder();
+            }
+        });
+    }
     els.btnSaveSettings.addEventListener('click', saveSettingsFromModal);
     els.btnResetSettings.addEventListener('click', resetSettings);
     els.settingCableModel.addEventListener('change', () => {
@@ -4405,6 +4561,13 @@ function bindEvents() {
             closeSettingsModal();
         }
     });
+    if (els.newFolderModal) {
+        els.newFolderModal.addEventListener('click', event => {
+            if (event.target === els.newFolderModal) {
+                closeNewFolderModal();
+            }
+        });
+    }
     els.btnIsReady.addEventListener('click', isReady);
     els.btnGetInfo.addEventListener('click', getDeviceInfo);
     els.btnSyncClock.addEventListener('click', syncClock);
@@ -4605,8 +4768,14 @@ function bindEvents() {
         sendDroppedFiles(files, folder);
     });
     document.addEventListener('keydown', event => {
-        if (event.key === 'Escape' && !els.settingsModal.classList.contains('hidden')) {
-            closeSettingsModal();
+        if (event.key === 'Escape') {
+            if (els.settingsModal && !els.settingsModal.classList.contains('hidden')) {
+                closeSettingsModal();
+                return;
+            }
+            if (els.newFolderModal && !els.newFolderModal.classList.contains('hidden')) {
+                closeNewFolderModal();
+            }
         }
     });
 }

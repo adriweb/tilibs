@@ -1320,6 +1320,33 @@ int calc_del_var(CableHandle* cable_handle, const char* folder, const char* name
 }
 
 EMSCRIPTEN_KEEPALIVE
+int calc_new_folder(CableHandle* cable_handle, const char* folder_path) {
+    if (!cable_handle) {
+        printf("ERROR: NULL cable handle provided\n");
+        return -1;
+    }
+    if (!folder_path || !*folder_path) {
+        printf("ERROR: No folder name provided\n");
+        return -2;
+    }
+
+    int ready_result = ensure_calc_ready(cable_handle, 0);
+    if (ready_result != 0) {
+        return ready_result;
+    }
+
+    if (tilp_calc_check_version("2.09") < 0) {
+        return -3;
+    }
+
+    VarEntry req;
+    memset(&req, 0, sizeof(req));
+    strncpy(req.folder, folder_path, sizeof(req.folder) - 1);
+
+    return ticalcs_calc_new_fld(g_calc_handle, &req);
+}
+
+EMSCRIPTEN_KEEPALIVE
 int calc_change_attr(CableHandle* cable_handle, const char* folder, const char* name, uint8_t type, int attr) {
     if (!cable_handle) {
         printf("ERROR: NULL cable handle provided\n");
