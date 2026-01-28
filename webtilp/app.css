@@ -41,7 +41,6 @@ body[data-theme="light-modern"] {
         radial-gradient(circle at 85% 15%, rgba(242, 153, 74, 0.2), transparent 45%),
         #f5f7fb;
     .var-table th { background: rgb(164 164 164 / 90%); }
-    .tree-view { background: rgb(228 228 228 / 60%); }
     #log { background: initial; color: initial; }
 }
 
@@ -625,6 +624,7 @@ body {
     border-radius: 12px;
     border: 1px solid var(--border);
     background: rgba(9, 12, 18, 0.2);
+    position: relative;
 }
 
 .var-table {
@@ -635,17 +635,54 @@ body {
 
 .var-table th,
 .var-table td {
-    padding: 10px 12px;
+    padding: 6px 12px;
     border-bottom: 1px solid var(--border);
     text-align: left;
 }
 
 .var-table th {
-    background: rgba(31, 35, 48, 0.9);
+    background: rgba(31, 35, 48);
     position: sticky;
     top: 0;
     z-index: 1;
     cursor: pointer;
+}
+
+.folder-sticky {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    background: rgba(31, 35, 48, 0.95);
+    border-bottom: 1px solid var(--border);
+    pointer-events: none;
+}
+
+.folder-sticky.hidden {
+    display: none;
+}
+
+.folder-sticky table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+}
+
+.folder-sticky td {
+    padding: 6px 12px;
+    border-bottom: 1px solid var(--border);
+    text-align: left;
+    font-weight: 600;
+    color: var(--text);
+    background: rgba(31, 35, 48, 0.95);
+}
+
+.folder-sticky tr:last-child td {
+    border-bottom: 1px solid var(--border);
+}
+
+.folder-sticky.hide-location td:nth-child(5),
+.folder-sticky.hide-kind td:nth-child(7) {
+    display: none;
 }
 
 .var-table tr:hover {
@@ -655,6 +692,10 @@ body {
 .var-table tr.drop-target {
     background: rgba(79, 211, 180, 0.18);
     outline: 1px dashed rgba(79, 211, 180, 0.6);
+}
+
+.var-table tr[data-is-folder='1'] > td > span {
+    font-weight: bold;
 }
 
 .var-table.hide-location th[data-sort="location"],
@@ -676,15 +717,6 @@ body {
     border-top-color: var(--muted);
 }
 
-.tree-view {
-    max-height: 360px;
-    overflow: auto;
-    border-radius: 12px;
-    border: 1px solid var(--border);
-    padding: 12px;
-    background: rgba(10, 12, 18, 0.6);
-}
-
 .hidden {
     display: none;
 }
@@ -693,49 +725,6 @@ body {
     display: none;
 }
 
-.tree-node {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 6px 8px;
-    border-radius: 8px;
-    cursor: pointer;
-    user-select: none;
-}
-
-.tree-node * {
-    pointer-events: none;
-}
-
-.tree-node input[type="checkbox"],
-.tree-node .row-actions,
-.tree-node .row-actions button {
-    pointer-events: auto;
-}
-
-.tree-node.drop-target {
-    background: rgba(79, 211, 180, 0.18);
-    outline: 1px dashed rgba(79, 211, 180, 0.6);
-}
-
-.tree-node:hover {
-    background: rgba(79, 211, 180, 0.1);
-}
-
-.tree-node input[type="checkbox"] {
-    margin: 0;
-}
-
-.tree-children {
-    margin-left: 18px;
-    border-left: 1px dashed rgba(255, 255, 255, 0.08);
-    padding-left: 12px;
-}
-
-.tree-meta {
-    color: var(--muted);
-    font-size: 12px;
-}
 
 .var-table.hide-kind th:nth-child(7),
 .var-table.hide-kind td:nth-child(7) {
@@ -745,10 +734,47 @@ body {
 .row-actions {
     display: inline-flex;
     gap: 6px;
-    margin-left: 6px;
+    margin-left: auto;
     opacity: 0;
     transform: translateY(-1px);
     transition: opacity 120ms ease;
+}
+
+.name-cell {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+}
+
+.name-left {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    flex: 1;
+    min-width: 0;
+}
+
+.name-label {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.indent-bars {
+    display: inline-flex;
+    align-items: stretch;
+    gap: 16px;
+    margin-right: 2px;
+    left: 2px;
+    position: relative;
+    height: 20px;
+}
+
+.indent-bar {
+    width: 16px;
+    border-left: 1px dotted rgba(255, 255, 255, 0.16);
+    height: 100%;
 }
 
 .row-actions .btn-inline {
@@ -759,10 +785,25 @@ body {
 }
 
 tr:hover .row-actions,
-tr:focus-within .row-actions,
-.tree-node:hover .row-actions,
-.tree-node:focus-within .row-actions {
+tr:focus-within .row-actions {
     opacity: 1;
+}
+
+tr.is-active .row-actions {
+    opacity: 1;
+}
+
+@media (hover: none) {
+    .row-actions {
+        opacity: 0;
+    }
+    tr.is-active .row-actions {
+        opacity: 1;
+    }
+    .folder-sticky td {
+        padding-top: 10px;
+        padding-bottom: 10px;
+    }
 }
 
 #screenshotCanvas {
