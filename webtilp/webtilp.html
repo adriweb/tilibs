@@ -105,6 +105,24 @@
                         <button class="btn ghost" id="btnDumpRom">🧠  Dump ROM</button>
                     </div>
                 </div>
+
+                <section class="panel" id="keysPanel" style="margin-top: 15px">
+                    <div class="panel-header">
+                        <h2>Remote Key/Action send</h2>
+                        <div class="panel-actions"></div>
+                    </div>
+                    <div class="panel-body">
+                        <div class="keypad">
+                            <input class="form-input" id="keyCodeInput" type="text" list="keyMap834" placeholder="Key name or code (hex/dec)">
+                            <button class="btn primary" id="btnSendKey" type="button">🎯 Send Key</button>
+                        </div>
+                        <datalist id="keyMap834"></datalist>
+                        <datalist id="nspireKeyMap"></datalist>
+                        <datalist id="keyMap86"></datalist>
+                        <datalist id="keyMap89"></datalist>
+                        <datalist id="keyMap92p"></datalist>
+                    </div>
+                </section>
             </div>
         </section>
 
