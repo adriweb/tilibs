@@ -11,7 +11,6 @@ const state = {
     features: 0,
     dirlist: [],
     selectedFiles: [],
-    treeView: false,
     logLines: [],
     sort: { key: 'name', dir: 'asc' },
     settings: null,
@@ -30,6 +29,8 @@ const state = {
 };
 
 let currentDropTarget = null;
+let stickyHideThreshold = null;
+let stickyVisible = false;
 let dropzoneActive = false;
 
 const FEATURE_FLAGS = {
@@ -1763,9 +1764,8 @@ const els = {
     fileInput: document.getElementById('fileInput'),
     varTableBody: document.getElementById('varTableBody'),
     filterInput: document.getElementById('filterInput'),
-    treeView: document.getElementById('treeView'),
     tableView: document.getElementById('tableView'),
-    btnToggleView: document.getElementById('btnToggleView'),
+    folderSticky: document.getElementById('folderSticky'),
     btnConnect: document.getElementById('btnConnect'),
     btnNuke: document.getElementById('btnNuke'),
     btnSettings: document.getElementById('btnSettings'),
@@ -2644,15 +2644,7 @@ async function updateCapabilities() {
     }
 
     if (!hasFolder) {
-        els.btnToggleView.classList.add('hidden');
-        if (state.treeView) {
-            state.treeView = false;
-            els.btnToggleView.textContent = '🗂️ Tree View';
-            els.tableView.classList.remove('hidden');
-            els.treeView.classList.add('hidden');
-        }
-    } else {
-        els.btnToggleView.classList.remove('hidden');
+        // Folder grouping handled in table view only.
     }
 
     if (!hasBackup) {
@@ -3201,49 +3193,147 @@ function renderDirlist(entries) {
         table.classList.toggle('hide-location', !showLocation);
         table.classList.toggle('hide-kind', !showKind);
     }
-    if (state.treeView) {
-        renderTreeView(entries, filter, showLocation);
-    } else {
-        renderTableView(entries, filter);
+    if (els.folderSticky) {
+        els.folderSticky.classList.toggle('hide-kind', !showKind);
+        els.folderSticky.classList.toggle('hide-location', !showLocation);
     }
+    renderTableView(entries, filter);
+    updateStickyFolderHeader();
     updateSelectionActionButtons();
 }
 
 function renderTableView(entries, filter) {
     els.varTableBody.innerHTML = '';
-    const list = entries
-        .filter(entry => {
-            const hay = `${entry.name} ${entry.type} ${entry.type_name || ''} ${entry.kind}`.toLowerCase();
-            return hay.includes(filter);
+    const tree = buildTree(entries);
+
+    const entryMatchesFilter = (entry) => {
+        if (!filter) {
+            return true;
+        }
+        const hay = `${entry.name} ${entry.type} ${entry.type_name || ''} ${entry.kind}`.toLowerCase();
+        return hay.includes(filter);
+    };
+
+    const nodeHasMatch = (node) => {
+        if (!filter) {
+            return true;
+        }
+        if (node.entry) {
+            if (node.entry.is_folder === 1) {
+                const nameHay = (node.entry.name || node.name || '').toLowerCase();
+                if (nameHay.includes(filter)) {
+                    return true;
+                }
+            } else if (entryMatchesFilter(node.entry)) {
+                return true;
+            }
+        }
+        if (node.children) {
+            return node.children.some(child => nodeHasMatch(child));
+        }
+        return false;
+    };
+
+    const buildSyntheticFolderEntry = (node) => {
+        const path = node.path || node.name || '';
+        const parts = path.split('/').filter(Boolean);
+        const name = parts.pop() || node.name || 'Folder';
+        const folder = parts.join('/');
+        return {
+            name,
+            folder,
+            type: 0,
+            type_name: 'Directory',
+            size: 0,
+            kind: 'folder',
+            is_folder: 1,
+            attr: 0
+        };
+    };
+
+    const renderTableRow = (entry, depth) => {
+        const isArchived = entry.attr === 3;
+        const isFolder = entry.is_folder === 1;
+        const location = entry.kind === 'app' ? 'Flash' : (isArchived ? 'Archive' : 'RAM');
+        const typeLabel = isFolder ? 'Directory' : (entry.type_name || `Unknown (${entry.type})`);
+        const sizeValue = Number(entry.size) || 0;
+        const sizeLabel = isFolder ? '-' : formatBytes(sizeValue);
+        const indentBars = depth > 0
+            ? `<span class="indent-bars">${'<span class="indent-bar"></span>'.repeat(depth)}</span>`
+            : '';
+        const kindLabel = isFolder ? 'folder' : (entry.kind || '');
+        const row = document.createElement('tr');
+        row.dataset.folderTarget = getEntryFolderPath(entry);
+        row.dataset.isFolder = isFolder ? '1' : '0';
+        row.dataset.folderPath = getEntryFolderPath(entry);
+        row.dataset.depth = String(depth);
+        const rowActions = `
+            <div class="row-actions">
+                <button class="btn ghost btn-inline action-download" title="Download">⬇️</button>
+                <button class="btn ghost btn-inline action-rename" title="Rename">✏️</button>
+                <button class="btn ghost btn-inline action-delete" title="Delete">🗑️</button>
+            </div>`;
+        const displayName = isFolder ? `📂 ${entry.name}` : entry.name;
+        row.innerHTML = `
+            <td><input type="checkbox" data-name="${entry.name}" data-folder="${entry.folder}" data-folder-path="${getEntryFolderPath(entry)}" data-is-folder="${isFolder ? '1' : '0'}" data-type="${entry.type}" data-kind="${isFolder ? 'folder' : entry.kind}"></td>
+            <td>
+                <div class="name-cell">
+                    <div class="name-left">${indentBars}<span class="name-label">${displayName}</span></div>
+                    ${rowActions}
+                </div>
+            </td>
+            <td>${typeLabel}</td>
+            <td title="${isFolder ? '' : `${sizeValue} bytes`}">${sizeLabel}</td>
+            <td>${isFolder ? '-' : location}</td>
+            <td>${entry.folder || '-'}</td>
+            <td>${kindLabel}</td>
+        `;
+        els.varTableBody.appendChild(row);
+    };
+
+    const sortNodes = (nodes) => {
+        const key = state.sort.key;
+        const dir = state.sort.dir;
+        return [...nodes].sort((a, b) => {
+            const entryA = a.entry || buildSyntheticFolderEntry(a);
+            const entryB = b.entry || buildSyntheticFolderEntry(b);
+            return compareEntries(entryA, entryB, key, dir);
         });
-    list.sort((a, b) => compareEntries(a, b, state.sort.key, state.sort.dir));
-    list.forEach(entry => {
-            const isArchived = entry.attr === 3;
-            const isFolder = entry.is_folder === 1;
-            const location = entry.kind === 'app' ? 'Flash' : (isArchived ? 'Archive' : 'RAM');
-            const typeLabel = isFolder ? 'Directory' : (entry.type_name || `Unknown (${entry.type})`);
-            const sizeValue = Number(entry.size) || 0;
-            const sizeLabel = formatBytes(sizeValue);
-            const row = document.createElement('tr');
-            row.dataset.folderTarget = getEntryFolderPath(entry);
-            row.dataset.isFolder = isFolder ? '1' : '0';
-            const rowActions = `
-                <div class="row-actions">
-                    <button class="btn ghost btn-inline action-download" title="Download">⬇️</button>
-                    <button class="btn ghost btn-inline action-rename" title="Rename">✏️</button>
-                    <button class="btn ghost btn-inline action-delete" title="Delete">🗑️</button>
-                </div>`;
-            row.innerHTML = `
-                <td><input type="checkbox" data-name="${entry.name}" data-folder="${entry.folder}" data-folder-path="${getEntryFolderPath(entry)}" data-is-folder="${isFolder ? '1' : '0'}" data-type="${entry.type}" data-kind="${isFolder ? 'folder' : entry.kind}"></td>
-                <td>${entry.name}</td>
-                <td>${typeLabel}</td>
-                <td title="${sizeValue} bytes">${sizeLabel}</td>
-                <td>${isFolder ? '-' : location}</td>
-                <td>${entry.folder || '-'}</td>
-                <td>${entry.kind} ${rowActions}</td>
-            `;
-            els.varTableBody.appendChild(row);
-        });
+    };
+
+    const renderTableNode = (node, depth, forceShowChildren) => {
+        const isFolderNode = (node.entry && node.entry.is_folder === 1) || (!node.entry && node.children);
+        if (isFolderNode) {
+            const folderEntry = node.entry || buildSyntheticFolderEntry(node);
+            const folderName = folderEntry.name || node.name || 'Folder';
+            const matchesFolder = !filter || folderName.toLowerCase().includes(filter);
+            const shouldShow = forceShowChildren || matchesFolder || nodeHasMatch(node);
+            if (!shouldShow) {
+                return false;
+            }
+            renderTableRow(folderEntry, depth);
+            const sortedChildren = sortNodes(node.children || []);
+            const childForce = forceShowChildren || matchesFolder;
+            sortedChildren.forEach(child => {
+                renderTableNode(child, depth + 1, childForce);
+            });
+            return true;
+        }
+
+        if (node.entry) {
+            if (!forceShowChildren && !entryMatchesFilter(node.entry)) {
+                return false;
+            }
+            renderTableRow(node.entry, depth);
+            return true;
+        }
+
+        return false;
+    };
+
+    sortNodes(tree).forEach(node => {
+        renderTableNode(node, 0, false);
+    });
 }
 
 function compareEntries(a, b, key, dir) {
@@ -3282,14 +3372,6 @@ function compareEntries(a, b, key, dir) {
         return diff;
     }
     return String(a.name || '').localeCompare(String(b.name || '')) * factor;
-}
-
-function renderTreeView(entries, filter, showLocation) {
-    els.treeView.innerHTML = '';
-    const tree = buildTree(entries);
-    tree.forEach(node => {
-        els.treeView.appendChild(renderTreeNode(node, filter, showLocation, false));
-    });
 }
 
 function buildTree(entries) {
@@ -3347,113 +3429,6 @@ function buildTree(entries) {
     }
 
     return mapToNodes(root, '');
-}
-
-function renderTreeNode(node, filter, showLocation, forceShowChildren) {
-    if (node.entry) {
-        const entry = node.entry;
-        if (entry.is_folder === 1) {
-            const folderName = entry.name || node.name || 'Folder';
-            const nameHay = folderName.toLowerCase();
-            const matchesFolder = !filter || nameHay.includes(filter);
-            const childrenWrap = document.createElement('div');
-            childrenWrap.className = 'tree-children';
-            let hasChild = false;
-            node.children.forEach(child => {
-                const childEl = renderTreeNode(child, filter, showLocation, forceShowChildren || matchesFolder);
-                if (childEl.childNodes.length === 0 && childEl.nodeType === 11) {
-                    return;
-                }
-                childrenWrap.appendChild(childEl);
-                hasChild = true;
-            });
-            if (filter && !matchesFolder && !hasChild && !forceShowChildren) {
-                return document.createDocumentFragment();
-            }
-            const nodeEl = document.createElement('div');
-            const header = document.createElement('div');
-            header.className = 'tree-node';
-            header.innerHTML = `
-                <input type="checkbox" data-name="${entry.name}" data-folder="${entry.folder}" data-folder-path="${node.path || getEntryFolderPath(entry)}" data-is-folder="1" data-type="${entry.type}" data-kind="folder">
-                <strong>📂 ${folderName}</strong>
-                <span class="row-actions">
-                    <button class="btn ghost btn-inline action-download" title="Download folder contents">⬇️</button>
-                    <button class="btn ghost btn-inline action-rename" title="Rename">✏️</button>
-                    <button class="btn ghost btn-inline action-delete" title="Delete">🗑️</button>
-                </span>
-            `;
-            header.dataset.folderPath = node.path || getEntryFolderPath(entry);
-            nodeEl.appendChild(header);
-            nodeEl.appendChild(childrenWrap);
-            return nodeEl;
-        }
-        const hay = `${entry.name} ${entry.type} ${entry.type_name || ''} ${entry.kind}`.toLowerCase();
-        if (!forceShowChildren && filter && !hay.includes(filter)) {
-            return document.createDocumentFragment();
-        }
-        const isArchived = entry.attr === 3;
-        const isFolder = entry.is_folder === 1;
-        const typeLabel = isFolder ? 'Directory' : (entry.type_name || `Unknown (${entry.type})`);
-        const metaParts = [];
-        if (typeLabel !== 'Document') {
-            metaParts.push({ label: typeLabel, title: '' });
-        }
-        if (!isFolder && showLocation) {
-            const location = entry.kind === 'app' ? 'Flash' : (isArchived ? 'Archive' : 'RAM');
-            metaParts.push({ label: location, title: '' });
-        }
-        if (!isFolder) {
-            const sizeValue = Number(entry.size) || 0;
-            const sizeLabel = formatBytes(sizeValue);
-            metaParts.push({ label: sizeLabel, title: `${sizeValue} bytes` });
-        }
-        const metaHtml = metaParts
-            .map(part => {
-                const titleAttr = part.title ? ` title="${part.title}"` : '';
-                return `<span${titleAttr}>${part.label}</span>`;
-            })
-            .join(' · ');
-        const nodeEl = document.createElement('div');
-        nodeEl.className = 'tree-node';
-        nodeEl.dataset.folderPath = entry.folder || '';
-        nodeEl.innerHTML = `
-            <input type="checkbox" data-name="${entry.name}" data-folder="${entry.folder}" data-folder-path="${getEntryFolderPath(entry)}" data-is-folder="${isFolder ? '1' : '0'}" data-type="${entry.type}" data-kind="${isFolder ? 'folder' : entry.kind}">
-            <div>
-                <div>${entry.name}</div>
-                <div class="tree-meta">${metaHtml}</div>
-            </div>
-            <span class="row-actions">
-                <button class="btn ghost btn-inline action-download" title="Download">⬇️</button>
-                <button class="btn ghost btn-inline action-rename" title="Rename">✏️</button>
-                <button class="btn ghost btn-inline action-delete" title="Delete">🗑️</button>
-            </span>
-        `;
-        return nodeEl;
-    }
-
-    const nodeEl = document.createElement('div');
-    const header = document.createElement('div');
-    header.className = 'tree-node';
-    header.innerHTML = `<strong>📂 ${node.name || 'Root'}</strong>`;
-    header.dataset.folderPath = node.path || '';
-    nodeEl.appendChild(header);
-
-    const childrenWrap = document.createElement('div');
-    childrenWrap.className = 'tree-children';
-    let hasChild = false;
-    node.children.forEach(child => {
-        const childEl = renderTreeNode(child, filter, showLocation, forceShowChildren);
-        if (childEl.childNodes.length === 0 && childEl.nodeType === 11) {
-            return;
-        }
-        childrenWrap.appendChild(childEl);
-        hasChild = true;
-    });
-    if (!forceShowChildren && filter && node.name && !node.name.toLowerCase().includes(filter) && !hasChild) {
-        return document.createDocumentFragment();
-    }
-    nodeEl.appendChild(childrenWrap);
-    return nodeEl;
 }
 
 function getEntryFolderPath(entry) {
@@ -3522,6 +3497,16 @@ function setSelectedFiles(files, sourceLabel) {
         sendSelectedFiles();
     }
 }
+
+document.addEventListener('click', event => {
+    const row = event.target.closest('tr');
+    if (row && row.closest('#varTableBody')) {
+        return;
+    }
+    document.querySelectorAll('#varTableBody tr.is-active').forEach(activeRow => {
+        activeRow.classList.remove('is-active');
+    });
+});
 
 function updateSendFilesButtonState() {
     if (!els.btnSendFiles) {
@@ -3659,9 +3644,7 @@ function readProgressTick() {
 }
 
 function getSelectedVarInputs() {
-    const tableInputs = Array.from(els.varTableBody.querySelectorAll('input[type="checkbox"]:checked'));
-    const treeInputs = Array.from(els.treeView.querySelectorAll('input[type="checkbox"]:checked'));
-    return state.treeView ? treeInputs : tableInputs;
+    return Array.from(els.varTableBody.querySelectorAll('input[type="checkbox"]:checked'));
 }
 
 function buildSelectionKey(input) {
@@ -3680,18 +3663,6 @@ function getSelectedVarKeys() {
     return keys;
 }
 
-function applySelectionKeys(keys, container) {
-    if (!keys || !container) {
-        return;
-    }
-    container.querySelectorAll('input[type="checkbox"]').forEach(input => {
-        if (input.disabled) {
-            return;
-        }
-        input.checked = keys.has(buildSelectionKey(input));
-    });
-}
-
 function buildEntryFromCheckbox(checkbox) {
     return {
         name: checkbox.dataset.name,
@@ -3701,6 +3672,139 @@ function buildEntryFromCheckbox(checkbox) {
         isFolder: checkbox.dataset.isFolder === '1',
         folderPath: checkbox.dataset.folderPath || ''
     };
+}
+
+function ensureFolderSticky() {
+    if (!els.folderSticky) {
+        return;
+    }
+    if (els.folderSticky.dataset.ready) {
+        return;
+    }
+    els.folderSticky.dataset.ready = '1';
+    els.folderSticky.innerHTML = `
+        <table class="var-table">
+            <colgroup>
+                <col><col><col><col><col><col><col>
+            </colgroup>
+            <tbody></tbody>
+        </table>
+    `;
+}
+
+function updateStickyFolderHeader() {
+    if (!els.folderSticky || !els.tableView) {
+        return;
+    }
+    ensureFolderSticky();
+    const headerRow = els.tableView.querySelector('thead');
+    const table = els.tableView.querySelector('table');
+    if (!table) {
+        els.folderSticky.classList.add('hidden');
+        return;
+    }
+    const headerHeight = headerRow ? (headerRow.offsetHeight - 1) : 0;
+    els.folderSticky.style.top = `${headerHeight}px`;
+
+    const allRows = Array.from(els.varTableBody.querySelectorAll('tr'));
+    const folderRows = allRows.filter(row => row.dataset.isFolder === '1');
+    if (!folderRows.length) {
+        els.folderSticky.classList.add('hidden');
+        return;
+    }
+    const scrollTop = els.tableView.scrollTop + headerHeight;
+    if (els.tableView.scrollTop <= 0) {
+        els.folderSticky.classList.add('hidden');
+        stickyVisible = false;
+        return;
+    }
+    let current = null;
+    for (const row of folderRows) {
+        if (row.offsetTop <= scrollTop) {
+            current = row;
+        } else {
+            break;
+        }
+    }
+    if (!current) {
+        els.folderSticky.classList.add('hidden');
+        stickyVisible = false;
+        return;
+    }
+
+    const currentDepth = Number(current.dataset.depth || 0);
+    const currentIndex = allRows.indexOf(current);
+    let boundary = Number.POSITIVE_INFINITY;
+    for (let i = currentIndex + 1; i < allRows.length; i++) {
+        const nextRow = allRows[i];
+        const nextDepth = Number(nextRow.dataset.depth || 0);
+        if (nextDepth <= currentDepth) {
+            boundary = nextRow.offsetTop;
+            break;
+        }
+    }
+    const buffer = 8;
+    stickyHideThreshold = Number.isFinite(boundary) ? boundary + buffer : null;
+    if (stickyHideThreshold != null && scrollTop >= stickyHideThreshold) {
+        if (stickyVisible) {
+            els.folderSticky.classList.add('hidden');
+            stickyVisible = false;
+        }
+        return;
+    }
+
+    const folderInput = current.querySelector('input[type="checkbox"]');
+    const fullPath = folderInput?.dataset.folderPath || '';
+    const parts = fullPath.split('/').filter(Boolean);
+    const tbody = els.folderSticky.querySelector('tbody');
+    if (!tbody) {
+        return;
+    }
+    tbody.innerHTML = '';
+    let parentPath = '';
+    const rowsByPath = new Map();
+    folderRows.forEach(row => {
+        rowsByPath.set(row.dataset.folderPath || '', row);
+    });
+    parts.forEach((part, idx) => {
+        const rowPath = parentPath ? `${parentPath}/${part}` : part;
+        const folderRow = rowsByPath.get(rowPath);
+        const nameLabel = folderRow ? folderRow.querySelector('.name-label') : null;
+        const nameText = nameLabel ? nameLabel.textContent.trim() : `📂 ${part}`;
+        const indentBars = idx > 0
+            ? `<span class="indent-bars">${'<span class="indent-bar"></span>'.repeat(idx)}</span>`
+            : '';
+        const tr = document.createElement('tr');
+        const padCell = folderRow ? folderRow.querySelector('td') : null;
+        const padWidth = padCell ? padCell.offsetWidth : 0;
+        tr.innerHTML = `
+            <td style="${padWidth ? `width:${padWidth}px;min-width:${padWidth}px;` : ''}"></td>
+            <td class="folder-sticky-name" colspan="6">
+                <div class="name-cell">
+                    <div class="name-left">${indentBars}<span class="name-label">${nameText}</span></div>
+                </div>
+            </td>
+        `;
+        tbody.appendChild(tr);
+        parentPath = rowPath;
+    });
+    els.folderSticky.classList.remove('hidden');
+    stickyVisible = true;
+
+    const headerCells = table.querySelectorAll('thead th');
+    const stickyTable = els.folderSticky.querySelector('table');
+    const colgroup = stickyTable ? stickyTable.querySelector('colgroup') : null;
+    if (stickyTable) {
+        stickyTable.style.width = `${table.offsetWidth}px`;
+    }
+    if (colgroup) {
+        const cols = colgroup.querySelectorAll('col');
+        headerCells.forEach((cell, idx) => {
+            if (cols[idx]) {
+                cols[idx].style.width = `${cell.offsetWidth}px`;
+            }
+        });
+    }
 }
 
 async function sendDroppedFiles(files, dropFolder) {
@@ -4823,20 +4927,6 @@ function bindEvents() {
         els.btnSplashConnect.addEventListener('click', connect);
     }
     els.filterInput.addEventListener('input', () => renderDirlist(state.dirlist));
-    els.btnToggleView.addEventListener('click', () => {
-        const selectedKeys = getSelectedVarKeys();
-        state.treeView = !state.treeView;
-        els.btnToggleView.textContent = state.treeView ? '📋 Table View' : '🗂️ Tree View';
-        els.tableView.classList.toggle('hidden', state.treeView);
-        els.treeView.classList.toggle('hidden', !state.treeView);
-        renderDirlist(state.dirlist);
-        if (state.treeView) {
-            applySelectionKeys(selectedKeys, els.treeView);
-        } else {
-            applySelectionKeys(selectedKeys, els.varTableBody);
-        }
-        updateSelectionActionButtons();
-    });
     document.querySelectorAll('th[data-sort]').forEach(header => {
         header.addEventListener('click', () => {
             const key = header.dataset.sort;
@@ -4899,6 +4989,9 @@ function bindEvents() {
             if (!checkbox) {
                 return;
             }
+            if (row) {
+                row.classList.add('is-active');
+            }
             const entry = buildEntryFromCheckbox(checkbox);
             if (actionButton.classList.contains('action-rename')) {
                 renameEntry(entry);
@@ -4918,6 +5011,7 @@ function bindEvents() {
         if (!row) {
             return;
         }
+        row.classList.add('is-active');
         const target = row.querySelector('input[type="checkbox"]');
         if (!target || target.disabled) {
             return;
@@ -4927,47 +5021,20 @@ function bindEvents() {
     });
     els.varTableBody.addEventListener('change', event => {
         if (event.target && event.target.matches('input[type="checkbox"]')) {
+            const row = event.target.closest('tr');
+            if (row) {
+                row.classList.toggle('is-active', event.target.checked);
+            }
             updateSelectionActionButtons();
         }
     });
-    els.treeView.addEventListener('click', event => {
-        const actionButton = event.target.closest('button.action-rename, button.action-delete, button.action-download');
-        if (actionButton) {
-            const node = actionButton.closest('.tree-node');
-            const checkbox = node ? node.querySelector('input[type=\"checkbox\"]') : null;
-            if (!checkbox) {
-                return;
-            }
-            const entry = buildEntryFromCheckbox(checkbox);
-            if (actionButton.classList.contains('action-rename')) {
-                renameEntry(entry);
-            } else if (actionButton.classList.contains('action-download')) {
-                downloadEntry(entry);
-            } else {
-                deleteEntry(entry);
-            }
-            return;
-        }
-        const checkbox = event.target.closest('input[type="checkbox"]');
-        if (checkbox) {
-            updateSelectionActionButtons();
-            return;
-        }
-        const node = event.target.closest('.tree-node');
-        if (!node) {
-            return;
-        }
-        const target = node.querySelector('input[type="checkbox"]');
-        if (!target || target.disabled) {
-            return;
-        }
-        target.checked = !target.checked;
-        updateSelectionActionButtons();
-    });
-    els.treeView.addEventListener('change', event => {
-        if (event.target && event.target.matches('input[type="checkbox"]')) {
-            updateSelectionActionButtons();
-        }
+    if (els.tableView) {
+        els.tableView.addEventListener('scroll', () => {
+            updateStickyFolderHeader();
+        });
+    }
+    window.addEventListener('resize', () => {
+        updateStickyFolderHeader();
     });
     els.tableView.addEventListener('dragenter', event => {
         if (event.dataTransfer && event.dataTransfer.types.includes('Files')) {
@@ -4978,7 +5045,18 @@ function bindEvents() {
         if (event.dataTransfer && event.dataTransfer.types.includes('Files')) {
             event.preventDefault();
             const row = event.target.closest('tr');
-            setDropHighlight(row);
+            if (row && row.dataset && row.dataset.folderPath) {
+                let folderRow = null;
+                if (row.dataset.isFolder === '1') {
+                    folderRow = row;
+                } else {
+                    folderRow = Array.from(els.varTableBody.querySelectorAll('tr[data-is-folder="1"]'))
+                        .find(candidate => candidate.dataset.folderPath === row.dataset.folderPath);
+                }
+                setDropHighlight(folderRow || row);
+            } else {
+                setDropHighlight(row);
+            }
         }
     });
     els.tableView.addEventListener('dragleave', () => {
@@ -4991,34 +5069,11 @@ function bindEvents() {
             return;
         }
         clearDropHighlight();
-        const row = event.target.closest('tr');
-        const folder = row ? (row.dataset.folderTarget || '') : '';
-        sendDroppedFiles(files, folder);
-    });
-    els.treeView.addEventListener('dragenter', event => {
-        if (event.dataTransfer && event.dataTransfer.types.includes('Files')) {
-            event.preventDefault();
-        }
-    });
-    els.treeView.addEventListener('dragover', event => {
-        if (event.dataTransfer && event.dataTransfer.types.includes('Files')) {
-            event.preventDefault();
-            const node = event.target.closest('.tree-node');
-            setDropHighlight(node);
-        }
-    });
-    els.treeView.addEventListener('dragleave', () => {
-        clearDropHighlight();
-    });
-    els.treeView.addEventListener('drop', event => {
-        event.preventDefault();
-        const files = getDroppedFiles(event);
-        if (!files.length) {
-            return;
-        }
-        clearDropHighlight();
         const folderNode = event.target.closest('[data-folder-path]');
-        const folder = folderNode ? folderNode.dataset.folderPath || '' : '';
+        const row = event.target.closest('tr');
+        const folder = folderNode
+            ? (folderNode.dataset.folderPath || '')
+            : (row ? (row.dataset.folderTarget || '') : '');
         sendDroppedFiles(files, folder);
     });
     document.addEventListener('keydown', event => {
