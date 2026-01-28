@@ -707,6 +707,12 @@ body {
     pointer-events: none;
 }
 
+.tree-node input[type="checkbox"],
+.tree-node .row-actions,
+.tree-node .row-actions button {
+    pointer-events: auto;
+}
+
 .tree-node.drop-target {
     background: rgba(79, 211, 180, 0.18);
     outline: 1px dashed rgba(79, 211, 180, 0.6);
@@ -729,6 +735,34 @@ body {
 .tree-meta {
     color: var(--muted);
     font-size: 12px;
+}
+
+.var-table.hide-kind th:nth-child(7),
+.var-table.hide-kind td:nth-child(7) {
+    display: none;
+}
+
+.row-actions {
+    display: inline-flex;
+    gap: 6px;
+    margin-left: 6px;
+    opacity: 0;
+    transform: translateY(-1px);
+    transition: opacity 120ms ease;
+}
+
+.row-actions .btn-inline {
+    padding: 2px 6px;
+    font-size: 12px;
+    line-height: 1;
+    min-height: auto;
+}
+
+tr:hover .row-actions,
+tr:focus-within .row-actions,
+.tree-node:hover .row-actions,
+.tree-node:focus-within .row-actions {
+    opacity: 1;
 }
 
 #screenshotCanvas {
