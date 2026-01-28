@@ -4271,9 +4271,6 @@ async function receiveSelected() {
                 log(`Failed to receive ${entry.name} (${formatErrorResult(module, result)}).`);
             }
         }
-        if (receivedAny) {
-            await silentReconnectAfterNspireTransfer();
-        }
     } catch (err) {
         logError(err, 'Receive selected failed');
     } finally {
