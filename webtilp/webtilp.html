@@ -133,13 +133,13 @@
                     <input class="search" id="filterInput" type="search" placeholder="Filter name or type">
                     <button class="btn primary" id="btnRefreshDirlist">🔄 Refresh List</button>
                     <button class="btn subtle" id="btnNewFolder" disabled>📁 New Folder</button>
-                    <button class="btn subtle" id="btnToggleView">🗂️ Tree View</button>
                     <button class="btn subtle" id="btnRecvSelected" disabled>⬇️ Receive Selected</button>
                     <button class="btn danger" id="btnDeleteSelected" disabled>🗑️ Delete Selected</button>
                 </div>
             </div>
             <div class="panel-body">
                 <div class="table-wrap" id="tableView">
+                    <div class="folder-sticky hidden" id="folderSticky"></div>
                     <table class="var-table">
                         <thead>
                             <tr>
@@ -155,7 +155,6 @@
                         <tbody id="varTableBody"></tbody>
                     </table>
                 </div>
-                <div class="tree-view hidden" id="treeView"></div>
             </div>
         </section>
 
