@@ -701,6 +701,10 @@ static int		send_os    (CalcHandle* handle, FlashContent* content)
 		return -1;
 	}
 
+	handle->priv.nsp_pending_cmd = 0;
+	handle->priv.nsp_pending_status = 0;
+	handle->priv.nsp_has_pending_status = 0;
+
 	tifiles_hexdump(content->data_part + content->data_length - 16, 16);
 
 	do
@@ -718,13 +722,70 @@ static int		send_os    (CalcHandle* handle, FlashContent* content)
 			ret = nsp_cmd_r_os_install(handle);
 			if (!ret)
 			{
-				uint8_t status;
+				uint8_t status = 0;
 				ret = nsp_cmd_s_os_contents(handle, 253, content->data_part);
 				if (ret)
 				{
 					break;
 				}
-				ret = nsp_cmd_r_status(handle, &status);
+				if (handle->priv.nsp_pending_cmd == NSP_CMD_STATUS && handle->priv.nsp_has_pending_status)
+				{
+					status = handle->priv.nsp_pending_status;
+					handle->priv.nsp_pending_cmd = 0;
+					handle->priv.nsp_has_pending_status = 0;
+					handle->priv.nsp_pending_status = 0;
+					if (status != 0x00)
+					{
+						ret = ERR_CALC_ERROR3;
+						const unsigned int count = ticalcs_nsp_error_count();
+						for (unsigned int i = 0; i < count; i++)
+						{
+							if (ticalcs_nsp_error_code_from_index(i) == status)
+							{
+								ret = ERR_CALC_ERROR3 + (int)i + 1;
+								break;
+							}
+						}
+					}
+				}
+				else if (handle->priv.nsp_pending_cmd == NSP_CMD_OS_OK)
+				{
+					handle->priv.nsp_pending_cmd = 0;
+				}
+				else
+				{
+					NSPVirtualPacket* pkt = nsp_vtl_pkt_new(handle);
+					ret = nsp_recv_data(handle, pkt);
+					if (!ret)
+					{
+						if (pkt->cmd == NSP_CMD_OS_OK)
+						{
+							ret = 0;
+						}
+						else if (pkt->cmd == NSP_CMD_STATUS)
+						{
+							status = pkt->data[0];
+							if (status != 0x00)
+							{
+								ret = ERR_CALC_ERROR3;
+								const unsigned int count = ticalcs_nsp_error_count();
+								for (unsigned int i = 0; i < count; i++)
+								{
+									if (ticalcs_nsp_error_code_from_index(i) == status)
+									{
+										ret = ERR_CALC_ERROR3 + (int)i + 1;
+										break;
+									}
+								}
+							}
+						}
+						else
+						{
+							ret = ERR_INVALID_PACKET;
+						}
+					}
+					nsp_vtl_pkt_del(handle, pkt);
+				}
 				if (ret)
 				{
 					break;
