@@ -3195,9 +3195,11 @@ async function refreshDirlist() {
 function renderDirlist(entries) {
     const filter = (els.filterInput.value || '').toLowerCase();
     const showLocation = !isNspireActive();
+    const showKind = !isNspireActive();
     const table = els.varTableBody.closest('table');
     if (table) {
         table.classList.toggle('hide-location', !showLocation);
+        table.classList.toggle('hide-kind', !showKind);
     }
     if (state.treeView) {
         renderTreeView(entries, filter, showLocation);
@@ -3220,17 +3222,25 @@ function renderTableView(entries, filter) {
             const isFolder = entry.is_folder === 1;
             const location = entry.kind === 'app' ? 'Flash' : (isArchived ? 'Archive' : 'RAM');
             const typeLabel = isFolder ? 'Directory' : (entry.type_name || `Unknown (${entry.type})`);
+            const sizeValue = Number(entry.size) || 0;
+            const sizeLabel = formatBytes(sizeValue);
             const row = document.createElement('tr');
             row.dataset.folderTarget = getEntryFolderPath(entry);
             row.dataset.isFolder = isFolder ? '1' : '0';
+            const rowActions = `
+                <div class="row-actions">
+                    <button class="btn ghost btn-inline action-download" title="Download">⬇️</button>
+                    <button class="btn ghost btn-inline action-rename" title="Rename">✏️</button>
+                    <button class="btn ghost btn-inline action-delete" title="Delete">🗑️</button>
+                </div>`;
             row.innerHTML = `
-                <td><input type="checkbox" data-name="${entry.name}" data-folder="${entry.folder}" data-type="${entry.type}" data-kind="${entry.kind}" ${isFolder ? 'disabled title="Folder"' : ''}></td>
+                <td><input type="checkbox" data-name="${entry.name}" data-folder="${entry.folder}" data-folder-path="${getEntryFolderPath(entry)}" data-is-folder="${isFolder ? '1' : '0'}" data-type="${entry.type}" data-kind="${isFolder ? 'folder' : entry.kind}"></td>
                 <td>${entry.name}</td>
                 <td>${typeLabel}</td>
-                <td>${entry.size}</td>
+                <td title="${sizeValue} bytes">${sizeLabel}</td>
                 <td>${isFolder ? '-' : location}</td>
                 <td>${entry.folder || '-'}</td>
-                <td>${entry.kind}</td>
+                <td>${entry.kind} ${rowActions}</td>
             `;
             els.varTableBody.appendChild(row);
         });
@@ -3278,7 +3288,7 @@ function renderTreeView(entries, filter, showLocation) {
     els.treeView.innerHTML = '';
     const tree = buildTree(entries);
     tree.forEach(node => {
-        els.treeView.appendChild(renderTreeNode(node, filter, showLocation));
+        els.treeView.appendChild(renderTreeNode(node, filter, showLocation, false));
     });
 }
 
@@ -3339,59 +3349,84 @@ function buildTree(entries) {
     return mapToNodes(root, '');
 }
 
-function renderTreeNode(node, filter, showLocation) {
+function renderTreeNode(node, filter, showLocation, forceShowChildren) {
     if (node.entry) {
         const entry = node.entry;
         if (entry.is_folder === 1) {
             const folderName = entry.name || node.name || 'Folder';
             const nameHay = folderName.toLowerCase();
+            const matchesFolder = !filter || nameHay.includes(filter);
             const childrenWrap = document.createElement('div');
             childrenWrap.className = 'tree-children';
             let hasChild = false;
             node.children.forEach(child => {
-                const childEl = renderTreeNode(child, filter, showLocation);
+                const childEl = renderTreeNode(child, filter, showLocation, forceShowChildren || matchesFolder);
                 if (childEl.childNodes.length === 0 && childEl.nodeType === 11) {
                     return;
                 }
                 childrenWrap.appendChild(childEl);
                 hasChild = true;
             });
-            if (filter && !nameHay.includes(filter) && !hasChild) {
+            if (filter && !matchesFolder && !hasChild && !forceShowChildren) {
                 return document.createDocumentFragment();
             }
             const nodeEl = document.createElement('div');
             const header = document.createElement('div');
             header.className = 'tree-node';
-            header.innerHTML = `<strong>${folderName}</strong>`;
+            header.innerHTML = `
+                <input type="checkbox" data-name="${entry.name}" data-folder="${entry.folder}" data-folder-path="${node.path || getEntryFolderPath(entry)}" data-is-folder="1" data-type="${entry.type}" data-kind="folder">
+                <strong>📂 ${folderName}</strong>
+                <span class="row-actions">
+                    <button class="btn ghost btn-inline action-download" title="Download folder contents">⬇️</button>
+                    <button class="btn ghost btn-inline action-rename" title="Rename">✏️</button>
+                    <button class="btn ghost btn-inline action-delete" title="Delete">🗑️</button>
+                </span>
+            `;
             header.dataset.folderPath = node.path || getEntryFolderPath(entry);
             nodeEl.appendChild(header);
             nodeEl.appendChild(childrenWrap);
             return nodeEl;
         }
         const hay = `${entry.name} ${entry.type} ${entry.type_name || ''} ${entry.kind}`.toLowerCase();
-        if (filter && !hay.includes(filter)) {
+        if (!forceShowChildren && filter && !hay.includes(filter)) {
             return document.createDocumentFragment();
         }
         const isArchived = entry.attr === 3;
         const isFolder = entry.is_folder === 1;
         const typeLabel = isFolder ? 'Directory' : (entry.type_name || `Unknown (${entry.type})`);
-        const metaParts = [typeLabel];
+        const metaParts = [];
+        if (typeLabel !== 'Document') {
+            metaParts.push({ label: typeLabel, title: '' });
+        }
         if (!isFolder && showLocation) {
             const location = entry.kind === 'app' ? 'Flash' : (isArchived ? 'Archive' : 'RAM');
-            metaParts.push(location);
+            metaParts.push({ label: location, title: '' });
         }
         if (!isFolder) {
-            metaParts.push(`${entry.size} bytes`);
+            const sizeValue = Number(entry.size) || 0;
+            const sizeLabel = formatBytes(sizeValue);
+            metaParts.push({ label: sizeLabel, title: `${sizeValue} bytes` });
         }
+        const metaHtml = metaParts
+            .map(part => {
+                const titleAttr = part.title ? ` title="${part.title}"` : '';
+                return `<span${titleAttr}>${part.label}</span>`;
+            })
+            .join(' · ');
         const nodeEl = document.createElement('div');
         nodeEl.className = 'tree-node';
         nodeEl.dataset.folderPath = entry.folder || '';
         nodeEl.innerHTML = `
-            <input type="checkbox" data-name="${entry.name}" data-folder="${entry.folder}" data-type="${entry.type}" data-kind="${entry.kind}" ${isFolder ? 'disabled title="Folder"' : ''}>
+            <input type="checkbox" data-name="${entry.name}" data-folder="${entry.folder}" data-folder-path="${getEntryFolderPath(entry)}" data-is-folder="${isFolder ? '1' : '0'}" data-type="${entry.type}" data-kind="${isFolder ? 'folder' : entry.kind}">
             <div>
                 <div>${entry.name}</div>
-                <div class="tree-meta">${metaParts.join(' · ')}</div>
+                <div class="tree-meta">${metaHtml}</div>
             </div>
+            <span class="row-actions">
+                <button class="btn ghost btn-inline action-download" title="Download">⬇️</button>
+                <button class="btn ghost btn-inline action-rename" title="Rename">✏️</button>
+                <button class="btn ghost btn-inline action-delete" title="Delete">🗑️</button>
+            </span>
         `;
         return nodeEl;
     }
@@ -3399,7 +3434,7 @@ function renderTreeNode(node, filter, showLocation) {
     const nodeEl = document.createElement('div');
     const header = document.createElement('div');
     header.className = 'tree-node';
-    header.innerHTML = `<strong>${node.name || 'Root'}</strong>`;
+    header.innerHTML = `<strong>📂 ${node.name || 'Root'}</strong>`;
     header.dataset.folderPath = node.path || '';
     nodeEl.appendChild(header);
 
@@ -3407,14 +3442,14 @@ function renderTreeNode(node, filter, showLocation) {
     childrenWrap.className = 'tree-children';
     let hasChild = false;
     node.children.forEach(child => {
-        const childEl = renderTreeNode(child, filter, showLocation);
+        const childEl = renderTreeNode(child, filter, showLocation, forceShowChildren);
         if (childEl.childNodes.length === 0 && childEl.nodeType === 11) {
             return;
         }
         childrenWrap.appendChild(childEl);
         hasChild = true;
     });
-    if (filter && node.name && !node.name.toLowerCase().includes(filter) && !hasChild) {
+    if (!forceShowChildren && filter && node.name && !node.name.toLowerCase().includes(filter) && !hasChild) {
         return document.createDocumentFragment();
     }
     nodeEl.appendChild(childrenWrap);
@@ -3500,7 +3535,8 @@ function updateSendFilesButtonState() {
 }
 
 function updateSelectionActionButtons() {
-    const hasSelection = getSelectedVarInputs().length > 0;
+    const selectionCount = getSelectedVarInputs().length;
+    const hasSelection = selectionCount > 0;
     if (els.btnRecvSelected) {
         els.btnRecvSelected.disabled = !hasSelection;
     }
@@ -3654,6 +3690,17 @@ function applySelectionKeys(keys, container) {
         }
         input.checked = keys.has(buildSelectionKey(input));
     });
+}
+
+function buildEntryFromCheckbox(checkbox) {
+    return {
+        name: checkbox.dataset.name,
+        folder: checkbox.dataset.folder,
+        type: Number(checkbox.dataset.type),
+        kind: checkbox.dataset.kind,
+        isFolder: checkbox.dataset.isFolder === '1',
+        folderPath: checkbox.dataset.folderPath || ''
+    };
 }
 
 async function sendDroppedFiles(files, dropFolder) {
@@ -4244,7 +4291,8 @@ async function receiveSelected() {
             name: input.dataset.name,
             folder: input.dataset.folder,
             type: Number(input.dataset.type),
-            kind: input.dataset.kind
+            kind: input.dataset.kind,
+            isFolder: input.dataset.isFolder === '1'
         }));
     if (!selections.length) {
         log('No variables selected.');
@@ -4260,6 +4308,10 @@ async function receiveSelected() {
             module.FS.mkdir('/downloads');
         }
         for (const entry of selections) {
+            if (entry.isFolder) {
+                log(`Skipping folder ${entry.name} (receive not supported).`);
+                continue;
+            }
             const result = entry.kind === 'app'
                 ? await ccallAsync(module, 'calc_recv_app', 'number', ['number', 'string', 'number', 'string'], [handle, entry.name, entry.type, '/downloads'], { timeoutMs: PROGRESS_IDLE_TIMEOUT_MS, useProgress: true })
                 : await ccallAsync(module, 'calc_recv_var', 'number', ['number', 'string', 'string', 'number', 'string'], [handle, entry.folder, entry.name, entry.type, '/downloads'], { timeoutMs: PROGRESS_IDLE_TIMEOUT_MS, useProgress: true });
@@ -4283,7 +4335,9 @@ async function deleteSelected() {
         .map(input => ({
             name: input.dataset.name,
             folder: input.dataset.folder,
-            type: Number(input.dataset.type)
+            type: Number(input.dataset.type),
+            isFolder: input.dataset.isFolder === '1',
+            folderPath: input.dataset.folderPath || ''
         }));
     if (!selections.length) {
         log('No variables selected.');
@@ -4298,6 +4352,99 @@ async function deleteSelected() {
         const module = await initModule();
         const handle = await ensureHandle();
         for (const entry of selections) {
+            if (entry.isFolder) {
+                const folderPath = entry.folderPath || entry.name;
+                const result = await ccallAsync(module, 'calc_del_folder', 'number', ['number', 'string'], [handle, folderPath], { timeoutMs: PROGRESS_IDLE_TIMEOUT_MS, useProgress: true });
+                if (result === 0) {
+                    log(`Deleted folder ${folderPath}.`);
+                } else {
+                    log(`Failed to delete folder ${folderPath} (${formatErrorResult(module, result)}).`);
+                }
+            } else {
+                const result = await ccallAsync(module, 'calc_del_var', 'number', ['number', 'string', 'string', 'number'], [handle, entry.folder, entry.name, entry.type], { timeoutMs: PROGRESS_IDLE_TIMEOUT_MS, useProgress: true });
+                if (result === 0) {
+                    log(`Deleted ${entry.name}.`);
+                } else {
+                    log(`Failed to delete ${entry.name} (${formatErrorResult(module, result)}).`);
+                }
+            }
+        }
+        await refreshDirlist();
+    } catch (err) {
+        logError(err, 'Delete selected failed');
+    } finally {
+        setButtonLoading(els.btnDeleteSelected, false);
+    }
+}
+
+async function renameEntry(entry) {
+    if (entry.isFolder && !isNspireActive()) {
+        log('Folder renaming is only supported on TI-Nspire.');
+        return;
+    }
+    const label = entry.isFolder ? 'folder' : 'item';
+    const currentName = entry.name || '';
+    const newName = prompt(`Rename ${label}:`, currentName);
+    if (!newName) {
+        log('Rename cancelled.');
+        return;
+    }
+    const trimmed = newName.trim();
+    if (!trimmed || trimmed === currentName) {
+        log('Rename cancelled.');
+        return;
+    }
+    if (trimmed.includes('/')) {
+        log('Folder or item names cannot include "/".');
+        return;
+    }
+
+    setButtonLoading(els.btnDeleteSelected, true);
+    try {
+        await authorizeDevice();
+        const module = await initModule();
+        const handle = await ensureHandle();
+        const oldFolder = entry.folder || '';
+        const newFolder = oldFolder;
+        const result = await ccallAsync(
+            module,
+            'calc_rename_var',
+            'number',
+            ['number', 'string', 'string', 'number', 'string', 'string', 'number'],
+            [handle, oldFolder, currentName, entry.type, newFolder, trimmed, entry.type],
+            { timeoutMs: PROGRESS_IDLE_TIMEOUT_MS, useProgress: true }
+        );
+        if (result !== 0) {
+            log(`Rename failed (${formatErrorResult(module, result)}).`);
+            return;
+        }
+        log(`Renamed ${currentName} to ${trimmed}.`);
+        await refreshDirlist();
+    } catch (err) {
+        logError(err, 'Rename failed');
+    } finally {
+        setButtonLoading(els.btnDeleteSelected, false);
+    }
+}
+
+async function deleteEntry(entry) {
+    if (!confirm(`Delete ${entry.isFolder ? 'folder' : 'item'} ${entry.name}?`)) {
+        return;
+    }
+    setButtonLoading(els.btnDeleteSelected, true);
+    try {
+        await authorizeDevice();
+        const module = await initModule();
+        const handle = await ensureHandle();
+        if (entry.isFolder) {
+            const folderPath = entry.folderPath || entry.name;
+            const result = await ccallAsync(module, 'calc_del_folder', 'number', ['number', 'string'], [handle, folderPath], { timeoutMs: PROGRESS_IDLE_TIMEOUT_MS, useProgress: true });
+            if (result === 0) {
+                log(`Deleted folder ${folderPath}.`);
+            } else {
+                log(`Failed to delete folder ${folderPath} (${formatErrorResult(module, result)}).`);
+            }
+        } else {
             const result = await ccallAsync(module, 'calc_del_var', 'number', ['number', 'string', 'string', 'number'], [handle, entry.folder, entry.name, entry.type], { timeoutMs: PROGRESS_IDLE_TIMEOUT_MS, useProgress: true });
             if (result === 0) {
                 log(`Deleted ${entry.name}.`);
@@ -4307,9 +4454,85 @@ async function deleteSelected() {
         }
         await refreshDirlist();
     } catch (err) {
-        logError(err, 'Delete selected failed');
+        logError(err, 'Delete failed');
     } finally {
         setButtonLoading(els.btnDeleteSelected, false);
+    }
+}
+
+async function downloadEntry(entry) {
+    if (entry.isFolder) {
+        await downloadFolderEntries(entry.folderPath || entry.name);
+        return;
+    }
+    setButtonLoading(els.btnRecvSelected, true);
+    try {
+        await authorizeDevice();
+        const module = await initModule();
+        const handle = await ensureHandle();
+        if (!module.FS.analyzePath('/downloads').exists) {
+            module.FS.mkdir('/downloads');
+        }
+        const result = entry.kind === 'app'
+            ? await ccallAsync(module, 'calc_recv_app', 'number', ['number', 'string', 'number', 'string'], [handle, entry.name, entry.type, '/downloads'], { timeoutMs: PROGRESS_IDLE_TIMEOUT_MS, useProgress: true })
+            : await ccallAsync(module, 'calc_recv_var', 'number', ['number', 'string', 'string', 'number', 'string'], [handle, entry.folder, entry.name, entry.type, '/downloads'], { timeoutMs: PROGRESS_IDLE_TIMEOUT_MS, useProgress: true });
+        if (result === 0) {
+            await downloadLastReceived(module);
+            log(`Received ${entry.name}.`);
+        } else {
+            log(`Failed to receive ${entry.name} (${formatErrorResult(module, result)}).`);
+        }
+    } catch (err) {
+        logError(err, 'Download failed');
+    } finally {
+        setButtonLoading(els.btnRecvSelected, false);
+    }
+}
+
+async function downloadFolderEntries(folderPath) {
+    const target = normalizeFolderPath(folderPath);
+    const entries = state.dirlist.filter(entry => {
+        if (entry.is_folder === 1) {
+            return false;
+        }
+        const entryFolder = normalizeFolderPath(entry.folder);
+        return entryFolder === target;
+    });
+    if (!entries.length) {
+        log(`No items found in folder ${target || '(root)'}.`);
+        return;
+    }
+    if (!confirm(`Download ${entries.length} item(s) from ${target || 'root'}?`)) {
+        return;
+    }
+    setButtonLoading(els.btnRecvSelected, true);
+    try {
+        await authorizeDevice();
+        const module = await initModule();
+        const handle = await ensureHandle();
+        if (!module.FS.analyzePath('/downloads').exists) {
+            module.FS.mkdir('/downloads');
+        }
+        for (const entry of entries) {
+            const result = await ccallAsync(
+                module,
+                'calc_recv_var',
+                'number',
+                ['number', 'string', 'string', 'number', 'string'],
+                [handle, entry.folder, entry.name, entry.type, '/downloads'],
+                { timeoutMs: PROGRESS_IDLE_TIMEOUT_MS, useProgress: true }
+            );
+            if (result === 0) {
+                await downloadLastReceived(module);
+                log(`Received ${entry.name}.`);
+            } else {
+                log(`Failed to receive ${entry.name} (${formatErrorResult(module, result)}).`);
+            }
+        }
+    } catch (err) {
+        logError(err, 'Folder download failed');
+    } finally {
+        setButtonLoading(els.btnRecvSelected, false);
     }
 }
 
@@ -4669,6 +4892,23 @@ function bindEvents() {
     els.fileInput.addEventListener('dragleave', dropzoneDragLeave);
     els.fileInput.addEventListener('drop', dropzoneDrop);
     els.varTableBody.addEventListener('click', event => {
+        const actionButton = event.target.closest('button.action-rename, button.action-delete, button.action-download');
+        if (actionButton) {
+            const row = actionButton.closest('tr');
+            const checkbox = row ? row.querySelector('input[type=\"checkbox\"]') : null;
+            if (!checkbox) {
+                return;
+            }
+            const entry = buildEntryFromCheckbox(checkbox);
+            if (actionButton.classList.contains('action-rename')) {
+                renameEntry(entry);
+            } else if (actionButton.classList.contains('action-download')) {
+                downloadEntry(entry);
+            } else {
+                deleteEntry(entry);
+            }
+            return;
+        }
         const checkbox = event.target.closest('input[type="checkbox"]');
         if (checkbox) {
             updateSelectionActionButtons();
@@ -4691,6 +4931,23 @@ function bindEvents() {
         }
     });
     els.treeView.addEventListener('click', event => {
+        const actionButton = event.target.closest('button.action-rename, button.action-delete, button.action-download');
+        if (actionButton) {
+            const node = actionButton.closest('.tree-node');
+            const checkbox = node ? node.querySelector('input[type=\"checkbox\"]') : null;
+            if (!checkbox) {
+                return;
+            }
+            const entry = buildEntryFromCheckbox(checkbox);
+            if (actionButton.classList.contains('action-rename')) {
+                renameEntry(entry);
+            } else if (actionButton.classList.contains('action-download')) {
+                downloadEntry(entry);
+            } else {
+                deleteEntry(entry);
+            }
+            return;
+        }
         const checkbox = event.target.closest('input[type="checkbox"]');
         if (checkbox) {
             updateSelectionActionButtons();
