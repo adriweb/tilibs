@@ -1347,6 +1347,78 @@ int calc_new_folder(CableHandle* cable_handle, const char* folder_path) {
 }
 
 EMSCRIPTEN_KEEPALIVE
+int calc_del_folder(CableHandle* cable_handle, const char* folder_path) {
+    if (!cable_handle) {
+        printf("ERROR: NULL cable handle provided\n");
+        return -1;
+    }
+    if (!folder_path || !*folder_path) {
+        printf("ERROR: No folder name provided\n");
+        return -2;
+    }
+
+    int ready_result = ensure_calc_ready(cable_handle, 0);
+    if (ready_result != 0) {
+        return ready_result;
+    }
+
+    if (tilp_calc_check_version("2.09") < 0) {
+        return -3;
+    }
+
+    VarEntry req;
+    memset(&req, 0, sizeof(req));
+    strncpy(req.folder, folder_path, sizeof(req.folder) - 1);
+
+    return ticalcs_calc_del_fld(g_calc_handle, &req);
+}
+
+EMSCRIPTEN_KEEPALIVE
+int calc_rename_var(CableHandle* cable_handle,
+                    const char* old_folder,
+                    const char* old_name,
+                    uint8_t old_type,
+                    const char* new_folder,
+                    const char* new_name,
+                    uint8_t new_type) {
+    if (!cable_handle) {
+        printf("ERROR: NULL cable handle provided\n");
+        return -1;
+    }
+    if (!old_name || !*old_name || !new_name || !*new_name) {
+        printf("ERROR: Invalid rename parameters\n");
+        return -2;
+    }
+
+    int ready_result = ensure_calc_ready(cable_handle, 0);
+    if (ready_result != 0) {
+        return ready_result;
+    }
+
+    if (tilp_calc_check_version("2.09") < 0) {
+        return -3;
+    }
+
+    VarEntry old_req;
+    memset(&old_req, 0, sizeof(old_req));
+    if (old_folder && *old_folder) {
+        strncpy(old_req.folder, old_folder, sizeof(old_req.folder) - 1);
+    }
+    strncpy(old_req.name, old_name, sizeof(old_req.name) - 1);
+    old_req.type = old_type;
+
+    VarEntry new_req;
+    memset(&new_req, 0, sizeof(new_req));
+    if (new_folder && *new_folder) {
+        strncpy(new_req.folder, new_folder, sizeof(new_req.folder) - 1);
+    }
+    strncpy(new_req.name, new_name, sizeof(new_req.name) - 1);
+    new_req.type = new_type;
+
+    return ticalcs_calc_rename_var(g_calc_handle, &old_req, &new_req);
+}
+
+EMSCRIPTEN_KEEPALIVE
 int calc_change_attr(CableHandle* cable_handle, const char* folder, const char* name, uint8_t type, int attr) {
     if (!cable_handle) {
         printf("ERROR: NULL cable handle provided\n");
