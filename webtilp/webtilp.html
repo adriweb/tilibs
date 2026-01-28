@@ -132,6 +132,7 @@
                 <div class="panel-actions">
                     <input class="search" id="filterInput" type="search" placeholder="Filter name or type">
                     <button class="btn primary" id="btnRefreshDirlist">🔄 Refresh List</button>
+                    <button class="btn subtle" id="btnNewFolder" disabled>📁 New Folder</button>
                     <button class="btn subtle" id="btnToggleView">🗂️ Tree View</button>
                     <button class="btn subtle" id="btnRecvSelected" disabled>⬇️ Receive Selected</button>
                     <button class="btn danger" id="btnDeleteSelected" disabled>🗑️ Delete Selected</button>
@@ -248,6 +249,32 @@
             <div class="modal-footer">
                 <button class="btn ghost" id="btnCancelTransfer">Cancel</button>
                 <button class="btn primary" id="btnConfirmTransfer">🚀 Start Transfer</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal hidden" id="newFolderModal" aria-hidden="true">
+        <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="newFolderTitle">
+            <div class="modal-header">
+                <h3 id="newFolderTitle">Create Folder</h3>
+                <button class="btn ghost" id="btnCloseNewFolder">✖️</button>
+            </div>
+            <div class="modal-body">
+                <div class="settings-grid">
+                    <div class="form-field">
+                        <label for="newFolderName">Folder name</label>
+                        <input type="text" id="newFolderName" class="form-input" placeholder="New folder name">
+                    </div>
+                    <div class="form-field">
+                        <label for="newFolderParent">Parent folder</label>
+                        <select id="newFolderParent" class="form-input"></select>
+                    </div>
+                </div>
+                <div class="form-note">Pick a parent folder or root to create a top-level folder.</div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn ghost" id="btnCancelNewFolder">Cancel</button>
+                <button class="btn primary" id="btnCreateNewFolder">Create</button>
             </div>
         </div>
     </div>
