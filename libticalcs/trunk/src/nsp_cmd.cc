@@ -929,22 +929,35 @@ int TICALL nsp_cmd_r_progress(CalcHandle *handle, uint8_t *value)
 
 	ticalcs_info("  OS installation status:");
 
-	retval = nsp_recv_data(handle, pkt);
-	if (!retval)
+	for (;;)
 	{
+		retval = nsp_recv_data(handle, pkt);
+		if (retval)
+		{
+			break;
+		}
 		*value = pkt->data[0];
 
 		switch(pkt->cmd)
 		{
 		case NSP_CMD_OS_PROGRESS:
 			ticalcs_info("  %i/100", *value);
-			break;
+			return 0;
 		case NSP_CMD_STATUS:
-			retval = ERR_CALC_ERROR3 + err_code(*value);
-			break;
+			return ERR_CALC_ERROR3 + err_code(*value);
 		default:
-			retval = ERR_INVALID_PACKET;
-			break;
+			if (pkt->cmd == NSP_CMD_OS_OK)
+			{
+				*value = 100;
+				ticalcs_info("  OS OK received, assuming 100/100");
+				return 0;
+			}
+			if (pkt->src_port == NSP_PORT_PKT_ACK2)
+			{
+				// Ignore stray acks during progress polling.
+				continue;
+			}
+			return ERR_INVALID_PACKET;
 		}
 	}
 

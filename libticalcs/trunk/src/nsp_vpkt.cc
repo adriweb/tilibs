@@ -42,6 +42,7 @@
 #include "logging.h"
 #include "error.h"
 
+#include "nsp_cmd.h"
 #include "nsp_vpkt.h"
 
 // Creation/Destruction/Garbage Collecting of packets
@@ -289,6 +290,23 @@ int TICALL nsp_send_ack(CalcHandle* handle)
 	return nsp_send(handle, &pkt);
 }
 
+static int nsp_send_ack_for_raw(CalcHandle* handle, const NSPRawPacket* packet)
+{
+	NSPRawPacket ack;
+
+	memset(&ack, 0, sizeof(ack));
+	ack.data_size = 2;
+	ack.src_addr = NSP_SRC_ADDR;
+	ack.src_port = (packet->seq == 0 ? NSP_PORT_PKT_ACK1 : NSP_PORT_PKT_ACK2);
+	ack.dst_addr = NSP_DEV_ADDR;
+	ack.dst_port = packet->src_port;
+	ack.data[0] = MSB(packet->dst_port);
+	ack.data[1] = LSB(packet->dst_port);
+
+	return nsp_send(handle, &ack);
+}
+
+
 int TICALL nsp_send_nack(CalcHandle* handle)
 {
 	VALIDATE_HANDLE(handle);
@@ -331,20 +349,73 @@ int TICALL nsp_recv_ack(CalcHandle *handle)
 
 	ticalcs_info("  receiving ack:");
 
-	memset(&pkt, 0, sizeof(pkt));
-
-	ret = nsp_recv(handle, &pkt);
-	if (!ret)
+	for (;;)
 	{
+		memset(&pkt, 0, sizeof(pkt));
+
+		ret = nsp_recv(handle, &pkt);
+		if (ret)
+		{
+			return ret;
+		}
+
+		if (pkt.data_size >= 1 && (pkt.data[0] == NSP_CMD_OS_OK || pkt.data[0] == NSP_CMD_STATUS))
+		{
+			handle->priv.nsp_pending_cmd = pkt.data[0];
+			handle->priv.nsp_has_pending_status = 0;
+			handle->priv.nsp_pending_status = 0;
+
+			if (pkt.data[0] == NSP_CMD_OS_OK)
+			{
+				int ack_ret = nsp_send_ack_for_raw(handle, &pkt);
+				if (ack_ret)
+				{
+					return ack_ret;
+				}
+				ticalcs_info("  OS OK packet received while waiting for ack");
+			}
+			else if (pkt.data_size >= 2)
+			{
+				const uint8_t status = pkt.data[1];
+				handle->priv.nsp_pending_status = status;
+				handle->priv.nsp_has_pending_status = 1;
+				if (status == 0x00)
+				{
+					int ack_ret = nsp_send_ack_for_raw(handle, &pkt);
+					if (ack_ret)
+					{
+						return ack_ret;
+					}
+					ticalcs_info("  OS STATUS OK packet received while waiting for ack");
+				}
+				else
+				{
+					int ret_err = ERR_CALC_ERROR3;
+					const unsigned int count = ticalcs_nsp_error_count();
+					for (unsigned int i = 0; i < count; i++)
+					{
+						if (ticalcs_nsp_error_code_from_index(i) == status)
+						{
+							ret_err = ERR_CALC_ERROR3 + (int)i + 1;
+							break;
+						}
+					}
+					return ret_err;
+				}
+			}
+			// Continue reading until we get the actual ACK.
+			continue;
+		}
+
 		if (pkt.src_port != NSP_PORT_PKT_ACK2)
 		{
 			ticalcs_info("XXX weird src_port\n");
-			ret = ERR_INVALID_PACKET;
+			return ERR_INVALID_PACKET;
 		}
 		if (pkt.dst_port != handle->priv.nsp_src_port)
 		{
 			ticalcs_info("XXX weird .dst_port\n");
-			ret = ERR_INVALID_PACKET;
+			return ERR_INVALID_PACKET;
 		}
 
 		if (pkt.data_size >= 2)
@@ -353,24 +424,25 @@ int TICALL nsp_recv_ack(CalcHandle *handle)
 			if (addr != handle->priv.nsp_dst_port)
 			{
 				ticalcs_info("XXX weird addr\n");
-				ret = ERR_INVALID_PACKET;
+				return ERR_INVALID_PACKET;
 			}
 		}
 		else
 		{
 			ticalcs_info("XXX weird addr\n");
-			ret = ERR_INVALID_PACKET;
+			return ERR_INVALID_PACKET;
 		}
 
 		if (pkt.ack != 0x0A)
 		{
 			ticalcs_info("XXX weird .ack\n");
-			ret = ERR_INVALID_PACKET;
+			return ERR_INVALID_PACKET;
 		}
-	}
 
-	return ret;
+		return 0;
+	}
 }
+
 
 // Service Disconnection
 
