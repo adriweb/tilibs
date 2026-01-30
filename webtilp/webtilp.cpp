@@ -1132,6 +1132,28 @@ int calc_recv_backup(CableHandle* cable_handle, const char* path) {
 }
 
 EMSCRIPTEN_KEEPALIVE
+int calc_recv_tigroup(CableHandle* cable_handle, const char* path, int mode) {
+    if (!cable_handle) {
+        printf("ERROR: NULL cable handle provided\n");
+        return -1;
+    }
+    if (!path || !*path) {
+        printf("ERROR: No tigroup path provided\n");
+        return -2;
+    }
+    int ready_result = ensure_calc_ready(cable_handle, 0);
+    if (ready_result != 0) {
+        return ready_result;
+    }
+
+    int result = ticalcs_calc_recv_tigroup2(g_calc_handle, path, (TigMode)mode);
+    if (result == 0) {
+        write_last_path(path);
+    }
+    return result;
+}
+
+EMSCRIPTEN_KEEPALIVE
 int calc_recv_os(CableHandle* cable_handle, const char* path) {
     if (!cable_handle) {
         printf("ERROR: NULL cable handle provided\n");
@@ -1570,6 +1592,8 @@ int send_file_custom(CableHandle* cable_handle, const char* filename, const char
         result = ticalcs_calc_send_os2(g_calc_handle, filename);
     } else if (tifiles_file_is_app(filename)) {
         result = ticalcs_calc_send_app2(g_calc_handle, filename);
+    } else if (tifiles_file_is_tigroup(filename)) {
+        result = ticalcs_calc_send_tigroup2(g_calc_handle, filename, (TigMode)(TIG_ALL | TIG_BACKUP));
     } else if (fclass == TIFILE_BACKUP) {
         result = ticalcs_calc_send_backup2(g_calc_handle, filename);
     } else {
