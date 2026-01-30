@@ -277,6 +277,56 @@
             </div>
         </div>
     </div>
+
+    <div class="modal hidden" id="backupModal" aria-hidden="true">
+        <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="backupTitle">
+            <div class="modal-header">
+                <h3 id="backupTitle">Backup Options</h3>
+                <button class="btn ghost" id="btnCloseBackup">✖️</button>
+            </div>
+            <div class="modal-body">
+                <div class="settings-grid">
+                    <div class="form-field">
+                        <label>Backup format</label>
+                        <label class="form-option">
+                            <input type="radio" name="backupFormat" id="backupFormatBackup" value="backup" checked>
+                            Standard backup file
+                        </label>
+                        <label class="form-option">
+                            <input type="radio" name="backupFormat" id="backupFormatTigroup" value="tigroup">
+                            TIGroup (.tig)
+                        </label>
+                    </div>
+                    <div class="form-field" id="tigroupOptions">
+                        <label>Include in TIGroup</label>
+                        <label class="form-option">
+                            <input type="checkbox" id="backupIncludeRam" checked>
+                            RAM
+                        </label>
+                        <label class="form-option">
+                            <input type="checkbox" id="backupIncludeArchive" checked>
+                            Archive
+                        </label>
+                        <label class="form-option">
+                            <input type="checkbox" id="backupIncludeFlash" checked>
+                            Flash apps
+                        </label>
+                    </div>
+                </div>
+                <div class="form-note">Standard backups may fail on large memory contents. TIGroup is recommended for big backups.</div>
+                <div class="modal-overlay hidden" id="backupModalOverlay">
+                    <div class="modal-overlay-card">
+                        <div class="spinner"></div>
+                        <div id="backupModalOverlayText">Loading directory listing…</div>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn ghost" id="btnCancelBackup">Cancel</button>
+                <button class="btn primary" id="btnConfirmBackup">📥 Create Backup</button>
+            </div>
+        </div>
+    </div>
     <footer class="footer">
         <span>Powered by <a href="https://github.com/debrouxl/tilibs/" target="_blank">tilibs</a>.</span>
         <span>WebUSB/WASM build by <a href="https://github.com/adriweb/tilibs/tree/exp2-full-emscripten" target="_blank">Adriweb</a>.</span>
