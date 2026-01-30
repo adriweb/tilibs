@@ -911,6 +911,7 @@ tr.is-active .row-actions {
 
 .modal-body {
     padding: 18px 20px 10px;
+    position: relative;
 }
 
 .modal-footer {
@@ -920,6 +921,47 @@ tr.is-active .row-actions {
     gap: 12px;
     border-top: 1px solid var(--border);
     background: rgba(15, 17, 23, 0.6);
+}
+
+.modal-overlay {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(7, 9, 14, 0.78);
+    backdrop-filter: blur(3px);
+    z-index: 2;
+}
+
+.modal-overlay.hidden {
+    display: none;
+}
+
+.modal-overlay-card {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px 16px;
+    background: var(--surface-alt);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    box-shadow: 0 12px 30px var(--shadow);
+    font-size: 13px;
+}
+
+.spinner {
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    border: 2px solid rgba(255, 255, 255, 0.2);
+    border-top-color: var(--accent);
+    animation: spin 0.9s linear infinite;
+}
+
+@keyframes spin {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
 }
 
 .transfer-table th,
