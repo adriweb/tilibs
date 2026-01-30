@@ -56,6 +56,13 @@ const FEATURE_FLAGS = {
     FTS_BACKUP  : 1 << 20,
 };
 
+const TIG_MODE = {
+    NONE: 0,
+    RAM: 1 << 0,
+    ARCHIVE: 1 << 1,
+    FLASH: 1 << 2
+};
+
 const CCALL_TIMEOUT_MS = 12000;
 const CCALL_MIN_GAP_MS = 100;
 const CREATE_HANDLE_RETRY_DELAY_MS = 300;
@@ -1790,12 +1797,14 @@ const els = {
     btnSendKey: document.getElementById('btnSendKey'),
     settingsModal: document.getElementById('settingsModal'),
     newFolderModal: document.getElementById('newFolderModal'),
+    backupModal: document.getElementById('backupModal'),
     splashScreen: document.getElementById('splashScreen'),
     mainContent: document.getElementById('mainContent'),
     btnSplashConnect: document.getElementById('btnSplashConnect'),
     splashWebUsbWarning: document.getElementById('splashWebUsbWarning'),
     btnCloseSettings: document.getElementById('btnCloseSettings'),
     btnCloseNewFolder: document.getElementById('btnCloseNewFolder'),
+    btnCloseBackup: document.getElementById('btnCloseBackup'),
     btnSaveSettings: document.getElementById('btnSaveSettings'),
     btnResetSettings: document.getElementById('btnResetSettings'),
     settingCableModel: document.getElementById('settingCableModel'),
@@ -1810,9 +1819,19 @@ const els = {
     newFolderParent: document.getElementById('newFolderParent'),
     btnCancelNewFolder: document.getElementById('btnCancelNewFolder'),
     btnCreateNewFolder: document.getElementById('btnCreateNewFolder'),
+    btnCancelBackup: document.getElementById('btnCancelBackup'),
+    btnConfirmBackup: document.getElementById('btnConfirmBackup'),
     btnCancelTransfer: document.getElementById('btnCancelTransfer'),
     btnConfirmTransfer: document.getElementById('btnConfirmTransfer'),
-    btnThemeToggle: document.getElementById('btnThemeToggle')
+    btnThemeToggle: document.getElementById('btnThemeToggle'),
+    backupFormatBackup: document.getElementById('backupFormatBackup'),
+    backupFormatTigroup: document.getElementById('backupFormatTigroup'),
+    tigroupOptions: document.getElementById('tigroupOptions'),
+    backupIncludeRam: document.getElementById('backupIncludeRam'),
+    backupIncludeArchive: document.getElementById('backupIncludeArchive'),
+    backupIncludeFlash: document.getElementById('backupIncludeFlash'),
+    backupModalOverlay: document.getElementById('backupModalOverlay'),
+    backupModalOverlayText: document.getElementById('backupModalOverlayText')
 };
 
 state.settings = loadSettings();
@@ -3876,6 +3895,23 @@ function getDirlistFolders() {
     return Array.from(folders).filter(folder => folder !== '');
 }
 
+function estimateBackupSize() {
+    let total = 0;
+    state.dirlist.forEach(entry => {
+        if (!entry || entry.is_folder === 1) {
+            return;
+        }
+        if (entry.kind !== 'var' && entry.kind !== 'app') {
+            return;
+        }
+        const size = Number(entry.size);
+        if (Number.isFinite(size) && size > 0) {
+            total += size;
+        }
+    });
+    return total;
+}
+
 function isVarFileClass(fileClass) {
     return ['single', 'group', 'regular', 'tigroup'].includes(fileClass);
 }
@@ -4045,6 +4081,112 @@ function openTransferModal(plan, options) {
         els.btnConfirmTransfer.addEventListener('click', onConfirm);
         els.btnCancelTransfer.addEventListener('click', onCancel);
         els.btnCloseTransfer.addEventListener('click', onCancel);
+    });
+}
+
+function setBackupModalLoading(isLoading, message) {
+    if (els.backupModalOverlay) {
+        els.backupModalOverlay.classList.toggle('hidden', !isLoading);
+    }
+    if (els.backupModalOverlayText && message) {
+        els.backupModalOverlayText.textContent = message;
+    }
+    if (els.btnConfirmBackup) {
+        els.btnConfirmBackup.disabled = isLoading;
+    }
+    if (els.backupFormatBackup) {
+        els.backupFormatBackup.disabled = isLoading;
+    }
+    if (els.backupFormatTigroup) {
+        const allowTigroup = els.backupModal?.dataset.allowTigroup === '1';
+        els.backupFormatTigroup.disabled = isLoading || !allowTigroup;
+    }
+    if (els.backupIncludeRam) {
+        els.backupIncludeRam.disabled = isLoading;
+    }
+    if (els.backupIncludeArchive) {
+        els.backupIncludeArchive.disabled = isLoading;
+    }
+    if (els.backupIncludeFlash) {
+        els.backupIncludeFlash.disabled = isLoading;
+    }
+}
+
+function openBackupModal(options) {
+    const allowTigroup = options?.allowTigroup ?? false;
+    const defaultFormat = options?.defaultFormat || 'backup';
+    const defaultMode = options?.defaultMode ?? (TIG_MODE.RAM | TIG_MODE.ARCHIVE | TIG_MODE.FLASH);
+
+    if (els.backupModal) {
+        els.backupModal.dataset.allowTigroup = allowTigroup ? '1' : '0';
+    }
+    if (els.backupFormatBackup) {
+        els.backupFormatBackup.checked = defaultFormat !== 'tigroup';
+    }
+    if (els.backupFormatTigroup) {
+        els.backupFormatTigroup.checked = defaultFormat === 'tigroup';
+        els.backupFormatTigroup.disabled = !allowTigroup;
+    }
+    if (els.tigroupOptions) {
+        els.tigroupOptions.classList.toggle('hidden', !allowTigroup || defaultFormat !== 'tigroup');
+    }
+    if (els.backupIncludeRam) {
+        els.backupIncludeRam.checked = (defaultMode & TIG_MODE.RAM) !== 0;
+    }
+    if (els.backupIncludeArchive) {
+        els.backupIncludeArchive.checked = (defaultMode & TIG_MODE.ARCHIVE) !== 0;
+    }
+    if (els.backupIncludeFlash) {
+        els.backupIncludeFlash.checked = (defaultMode & TIG_MODE.FLASH) !== 0;
+    }
+
+    const updateModeVisibility = () => {
+        const isTigroup = els.backupFormatTigroup?.checked && allowTigroup;
+        if (els.tigroupOptions) {
+            els.tigroupOptions.classList.toggle('hidden', !isTigroup);
+        }
+    };
+
+    els.backupModal.classList.remove('hidden');
+    setBackupModalLoading(false);
+
+    return new Promise(resolve => {
+        const cleanup = () => {
+            els.btnConfirmBackup.removeEventListener('click', onConfirm);
+            els.btnCancelBackup.removeEventListener('click', onCancel);
+            els.btnCloseBackup.removeEventListener('click', onCancel);
+            els.backupFormatBackup?.removeEventListener('change', updateModeVisibility);
+            els.backupFormatTigroup?.removeEventListener('change', updateModeVisibility);
+        };
+        const onCancel = () => {
+            cleanup();
+            els.backupModal.classList.add('hidden');
+            resolve(null);
+        };
+        const onConfirm = () => {
+            const format = els.backupFormatTigroup?.checked && allowTigroup ? 'tigroup' : 'backup';
+            let mode = TIG_MODE.RAM | TIG_MODE.ARCHIVE | TIG_MODE.FLASH;
+            if (format === 'tigroup') {
+                mode = 0;
+                if (els.backupIncludeRam?.checked) {
+                    mode |= TIG_MODE.RAM;
+                }
+                if (els.backupIncludeArchive?.checked) {
+                    mode |= TIG_MODE.ARCHIVE;
+                }
+                if (els.backupIncludeFlash?.checked) {
+                    mode |= TIG_MODE.FLASH;
+                }
+            }
+            cleanup();
+            els.backupModal.classList.add('hidden');
+            resolve({ format, mode });
+        };
+        els.btnConfirmBackup.addEventListener('click', onConfirm);
+        els.btnCancelBackup.addEventListener('click', onCancel);
+        els.btnCloseBackup.addEventListener('click', onCancel);
+        els.backupFormatBackup?.addEventListener('change', updateModeVisibility);
+        els.backupFormatTigroup?.addEventListener('change', updateModeVisibility);
     });
 }
 
@@ -4255,25 +4397,71 @@ async function sendSelectedFiles() {
 }
 
 async function receiveBackup() {
-    if (!confirm('This feature currently tries to make a group file, and it may not work depending on the size of the memory contents. It will be improved soon. Continue anyway?')) {
-        return;
-    }
     setButtonLoading(els.btnReceiveBackup, true);
     try {
         await authorizeDevice();
         const module = await initModule();
         const handle = await ensureHandle();
+        await updateCapabilities();
+        const allowTigroup = (state.features & FEATURE_FLAGS.FTS_FLASH) !== 0;
+        let defaultFormat = allowTigroup ? 'tigroup' : 'backup';
+        let defaultMode = TIG_MODE.RAM | TIG_MODE.ARCHIVE | TIG_MODE.FLASH;
+        let backupChoice = null;
+
+        while (true) {
+            const backupChoicePromise = openBackupModal({
+                allowTigroup,
+                defaultFormat,
+                defaultMode
+            });
+            if (!state.dirlist.length) {
+                setBackupModalLoading(true, 'Loading directory listing…');
+                try {
+                    await refreshDirlist();
+                } finally {
+                    setBackupModalLoading(false);
+                }
+            }
+            backupChoice = await backupChoicePromise;
+            if (!backupChoice) {
+                return;
+            }
+            defaultFormat = backupChoice.format;
+            defaultMode = backupChoice.mode;
+
+            if (backupChoice.format === 'tigroup' && backupChoice.mode === TIG_MODE.NONE) {
+                log('Select at least one data type for TIGroup.');
+                defaultFormat = 'tigroup';
+                continue;
+            }
+            if (backupChoice.format === 'backup') {
+                const estimatedSize = estimateBackupSize();
+                if (estimatedSize > 65535) {
+                    const proceed = confirm('Backup data may exceed 65535 bytes and fail. TIGroup is recommended for large backups. Continue with standard backup anyway?');
+                    if (!proceed) {
+                        if (allowTigroup) {
+                            defaultFormat = 'tigroup';
+                        }
+                        continue;
+                    }
+                }
+            }
+            break;
+        }
         if (!module.FS.analyzePath('/downloads').exists) {
             module.FS.mkdir('/downloads');
         }
-        const target = '/downloads/backup.8xg';
-        const result = await ccallAsync(module, 'calc_recv_backup', 'number', ['number', 'string'], [handle, target], { timeoutMs: PROGRESS_IDLE_TIMEOUT_MS, useProgress: true });
+        const isTigroup = backupChoice.format === 'tigroup';
+        const target = isTigroup ? '/downloads/backup.tig' : '/downloads/backup.8xg';
+        const result = isTigroup
+            ? await ccallAsync(module, 'calc_recv_tigroup', 'number', ['number', 'string', 'number'], [handle, target, backupChoice.mode], { timeoutMs: PROGRESS_IDLE_TIMEOUT_MS, useProgress: true })
+            : await ccallAsync(module, 'calc_recv_backup', 'number', ['number', 'string'], [handle, target], { timeoutMs: PROGRESS_IDLE_TIMEOUT_MS, useProgress: true });
         if (result !== 0) {
             log(`Backup failed (${formatErrorResult(module, result)}).`);
             return;
         }
-        await downloadLastReceived(module, 'backup.8xg');
-        log('Backup received.');
+        await downloadLastReceived(module, isTigroup ? 'backup.tig' : 'backup.8xg');
+        log(isTigroup ? 'TIGroup backup received.' : 'Backup received.');
     } catch (err) {
         logError(err, 'Receive backup failed');
     } finally {
