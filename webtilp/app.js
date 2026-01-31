@@ -4604,18 +4604,37 @@ async function dumpRom() {
     }
 }
 async function receiveSelected() {
-    const selections = getSelectedVarInputs()
-        .map(input => ({
-            name: input.dataset.name,
-            folder: input.dataset.folder,
-            type: Number(input.dataset.type),
-            kind: input.dataset.kind,
-            isFolder: input.dataset.isFolder === '1'
-        }));
+    const selections = getSelectedVarInputs().map(buildEntryFromCheckbox);
     if (!selections.length) {
         log('No variables selected.');
         return;
     }
+    const normalizePath = (value) => normalizeFolderPath(value || '');
+    const isUnderFolder = (folder, parent) => {
+        if (!parent) {
+            return true;
+        }
+        return folder === parent || folder.startsWith(`${parent}/`);
+    };
+    const folderSelections = selections
+        .filter(entry => entry.isFolder)
+        .map(entry => normalizePath(entry.folderPath || entry.name))
+        .filter(Boolean)
+        .sort((a, b) => a.length - b.length);
+    const keptFolders = [];
+    folderSelections.forEach(folder => {
+        if (!keptFolders.some(parent => isUnderFolder(folder, parent))) {
+            keptFolders.push(folder);
+        }
+    });
+    const uniqueSelections = selections.filter(entry => {
+        if (entry.isFolder) {
+            const folderPath = normalizePath(entry.folderPath || entry.name);
+            return keptFolders.includes(folderPath);
+        }
+        const entryFolder = normalizePath(entry.folder);
+        return !keptFolders.some(parent => isUnderFolder(entryFolder, parent));
+    });
     setButtonLoading(els.btnRecvSelected, true);
     try {
         await authorizeDevice();
@@ -4625,9 +4644,10 @@ async function receiveSelected() {
         if (!module.FS.analyzePath('/downloads').exists) {
             module.FS.mkdir('/downloads');
         }
-        for (const entry of selections) {
+        for (const entry of uniqueSelections) {
             if (entry.isFolder) {
-                log(`Skipping folder ${entry.name} (receive not supported).`);
+                const ok = await downloadFolderEntriesWithSession(module, handle, entry.folderPath || entry.name, true);
+                receivedAny = receivedAny || ok;
                 continue;
             }
             const result = entry.kind === 'app'
@@ -4807,7 +4827,7 @@ async function downloadEntry(entry) {
     }
 }
 
-async function downloadFolderEntries(folderPath) {
+async function downloadFolderEntriesWithSession(module, handle, folderPath, confirmDownload) {
     const target = normalizeFolderPath(folderPath);
     const entries = state.dirlist.filter(entry => {
         if (entry.is_folder === 1) {
@@ -4818,11 +4838,33 @@ async function downloadFolderEntries(folderPath) {
     });
     if (!entries.length) {
         log(`No items found in folder ${target || '(root)'}.`);
-        return;
+        return false;
     }
-    if (!confirm(`Download ${entries.length} item(s) from ${target || 'root'}?`)) {
-        return;
+    if (confirmDownload) {
+        if (!confirm(`Download ${entries.length} item(s) from ${target || 'root'}?`)) {
+            return false;
+        }
     }
+    for (const entry of entries) {
+        const result = await ccallAsync(
+            module,
+            'calc_recv_var',
+            'number',
+            ['number', 'string', 'string', 'number', 'string'],
+            [handle, entry.folder, entry.name, entry.type, '/downloads'],
+            { timeoutMs: PROGRESS_IDLE_TIMEOUT_MS, useProgress: true }
+        );
+        if (result === 0) {
+            await downloadLastReceived(module);
+            log(`Received ${entry.name}.`);
+        } else {
+            log(`Failed to receive ${entry.name} (${formatErrorResult(module, result)}).`);
+        }
+    }
+    return true;
+}
+
+async function downloadFolderEntries(folderPath) {
     setButtonLoading(els.btnRecvSelected, true);
     try {
         await authorizeDevice();
@@ -4831,22 +4873,7 @@ async function downloadFolderEntries(folderPath) {
         if (!module.FS.analyzePath('/downloads').exists) {
             module.FS.mkdir('/downloads');
         }
-        for (const entry of entries) {
-            const result = await ccallAsync(
-                module,
-                'calc_recv_var',
-                'number',
-                ['number', 'string', 'string', 'number', 'string'],
-                [handle, entry.folder, entry.name, entry.type, '/downloads'],
-                { timeoutMs: PROGRESS_IDLE_TIMEOUT_MS, useProgress: true }
-            );
-            if (result === 0) {
-                await downloadLastReceived(module);
-                log(`Received ${entry.name}.`);
-            } else {
-                log(`Failed to receive ${entry.name} (${formatErrorResult(module, result)}).`);
-            }
-        }
+        await downloadFolderEntriesWithSession(module, handle, folderPath, true);
     } catch (err) {
         logError(err, 'Folder download failed');
     } finally {
