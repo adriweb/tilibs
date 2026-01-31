@@ -357,7 +357,7 @@ static int ensure_calc_ready(CableHandle* cable_handle, int force)
     }
 
     if (!g_calc_ready || force) {
-        emscripten_sleep(100);
+        usleep(100000);
         int ready_result = ticalcs_calc_isready(g_calc_handle);
         int retries = 0;
         while ((ready_result == TICALCS_ERR_BUSY
@@ -367,7 +367,8 @@ static int ensure_calc_ready(CableHandle* cable_handle, int force)
             || ready_result == TICABLES_ERR_WRITE_ERROR
             || ready_result == TICABLES_ERR_WRITE_TIMEOUT) && retries < 4) {
             printf("Calculator busy or link error, retrying...\n");
-            emscripten_sleep(200);
+            usleep(100000);
+            emscripten_sleep(100);
             ready_result = ticalcs_calc_isready(g_calc_handle);
             retries++;
         }
@@ -376,7 +377,7 @@ static int ensure_calc_ready(CableHandle* cable_handle, int force)
             g_calc_ready = 0;
             return ready_result;
         }
-        emscripten_sleep(100);
+        usleep(100000);
         g_calc_ready = 1;
     }
 
@@ -981,13 +982,13 @@ static int tilp_calc_check_version(const char *ti9x_ver)
     if (tifiles_is_flash(g_calc_model) && ticonv_model_is_ti68k(g_calc_model))
     {
         CalcInfos infos;
-        emscripten_sleep(100);
+        usleep(100000);
         if (ticalcs_calc_get_version(g_calc_handle, &infos) != 0)
         {
             return -1;
         }
 
-        emscripten_sleep(100);
+        usleep(100000);
 
         if (strcmp(infos.os_version, ti9x_ver) < 0)
         {
