@@ -5,6 +5,8 @@
 #include <glib.h>
 #include <stdint.h>
 #include <string.h>
+#include <unistd.h>
+
 #include "ticables.h"
 #include "ticalcs.h"
 #include "tifiles.h"
@@ -1080,11 +1082,12 @@ int calc_dirlist_json(CableHandle* cable_handle, const char* path) {
         return result;
     }
 
-    emscripten_sleep(100);
-
     int mem_ok = 0;
     uint32_t ram_free = 0, flash_free = 0;
-    mem_ok = (ticalcs_calc_get_memfree(g_calc_handle, &ram_free, &flash_free) == 0);
+    if(ticalcs_calc_features(g_calc_handle) & FTS_MEMFREE) {
+        usleep(150000);
+        mem_ok = (ticalcs_calc_get_memfree(g_calc_handle, &ram_free, &flash_free) == 0);
+    }
 
     FILE* fp = fopen(out_path, "wb");
     if (!fp) {
