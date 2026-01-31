@@ -25,13 +25,17 @@ const state = {
     partialOsPath: '',
     nspireOsReceiveStarted: false,
     lastCcallTs: 0,
-    handlePromise: null
+    handlePromise: null,
+    stickyPath: '',
+    stickyTableWidth: 0,
+    stickyHeaderWidths: []
 };
 
 let currentDropTarget = null;
 let stickyHideThreshold = null;
 let stickyVisible = false;
 let dropzoneActive = false;
+let stickyUpdateScheduled = false;
 
 const FEATURE_FLAGS = {
     OPS_ISREADY : 1 << 0,
@@ -3732,11 +3736,6 @@ function updateStickyFolderHeader() {
         return;
     }
     const scrollTop = els.tableView.scrollTop + headerHeight;
-    if (els.tableView.scrollTop <= 0) {
-        els.folderSticky.classList.add('hidden');
-        stickyVisible = false;
-        return;
-    }
     let current = null;
     for (const row of folderRows) {
         if (row.offsetTop <= scrollTop) {
@@ -3748,6 +3747,15 @@ function updateStickyFolderHeader() {
     if (!current) {
         els.folderSticky.classList.add('hidden');
         stickyVisible = false;
+        state.stickyPath = '';
+        return;
+    }
+
+    const lastRow = allRows[allRows.length - 1];
+    if (lastRow && (lastRow.offsetTop + lastRow.offsetHeight) <= scrollTop) {
+        els.folderSticky.classList.add('hidden');
+        stickyVisible = false;
+        state.stickyPath = '';
         return;
     }
 
@@ -3774,47 +3782,44 @@ function updateStickyFolderHeader() {
 
     const folderInput = current.querySelector('input[type="checkbox"]');
     const fullPath = folderInput?.dataset.folderPath || '';
+    if (fullPath === state.stickyPath && stickyVisible) {
+        const headerCells = table.querySelectorAll('thead th');
+        if (table.offsetWidth !== state.stickyTableWidth || headerCells.length !== state.stickyHeaderWidths.length) {
+            state.stickyTableWidth = table.offsetWidth;
+            state.stickyHeaderWidths = Array.from(headerCells).map(cell => cell.offsetWidth);
+        } else {
+            return;
+        }
+    }
     const parts = fullPath.split('/').filter(Boolean);
     const tbody = els.folderSticky.querySelector('tbody');
     if (!tbody) {
         return;
     }
     tbody.innerHTML = '';
-    let parentPath = '';
-    const rowsByPath = new Map();
-    folderRows.forEach(row => {
-        rowsByPath.set(row.dataset.folderPath || '', row);
-    });
-    parts.forEach((part, idx) => {
-        const rowPath = parentPath ? `${parentPath}/${part}` : part;
-        const folderRow = rowsByPath.get(rowPath);
-        const nameLabel = folderRow ? folderRow.querySelector('.name-label') : null;
-        const nameText = nameLabel ? nameLabel.textContent.trim() : `📂 ${part}`;
-        const indentBars = idx > 0
-            ? `<span class="indent-bars">${'<span class="indent-bar"></span>'.repeat(idx)}</span>`
-            : '';
-        const tr = document.createElement('tr');
-        const padCell = folderRow ? folderRow.querySelector('td') : null;
-        const padWidth = padCell ? padCell.offsetWidth : 0;
-        tr.innerHTML = `
-            <td style="${padWidth ? `width:${padWidth}px;min-width:${padWidth}px;` : ''}"></td>
-            <td class="folder-sticky-name" colspan="6">
-                <div class="name-cell">
-                    <div class="name-left">${indentBars}<span class="name-label">${nameText}</span></div>
-                </div>
-            </td>
-        `;
-        tbody.appendChild(tr);
-        parentPath = rowPath;
-    });
+    const label = parts.length ? `📂 ${parts.join(' > ')}` : '📂';
+    const padCell = current.querySelector('td');
+    const padWidth = padCell ? padCell.offsetWidth : 0;
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+        <td style="${padWidth ? `width:${padWidth}px;min-width:${padWidth}px;` : ''}"></td>
+        <td class="folder-sticky-name" colspan="6">
+            <div class="name-cell">
+                <div class="name-left"><span class="name-label">${label}</span></div>
+            </div>
+        </td>
+    `;
+    tbody.appendChild(tr);
     els.folderSticky.classList.remove('hidden');
     stickyVisible = true;
+    state.stickyPath = fullPath;
 
     const headerCells = table.querySelectorAll('thead th');
     const stickyTable = els.folderSticky.querySelector('table');
     const colgroup = stickyTable ? stickyTable.querySelector('colgroup') : null;
     if (stickyTable) {
         stickyTable.style.width = `${table.offsetWidth}px`;
+        state.stickyTableWidth = table.offsetWidth;
     }
     if (colgroup) {
         const cols = colgroup.querySelectorAll('col');
@@ -3823,7 +3828,19 @@ function updateStickyFolderHeader() {
                 cols[idx].style.width = `${cell.offsetWidth}px`;
             }
         });
+        state.stickyHeaderWidths = Array.from(headerCells).map(cell => cell.offsetWidth);
     }
+}
+
+function scheduleStickyUpdate() {
+    if (stickyUpdateScheduled) {
+        return;
+    }
+    stickyUpdateScheduled = true;
+    requestAnimationFrame(() => {
+        stickyUpdateScheduled = false;
+        updateStickyFolderHeader();
+    });
 }
 
 async function sendDroppedFiles(files, dropFolder) {
@@ -5218,11 +5235,11 @@ function bindEvents() {
     });
     if (els.tableView) {
         els.tableView.addEventListener('scroll', () => {
-            updateStickyFolderHeader();
+            scheduleStickyUpdate();
         });
     }
     window.addEventListener('resize', () => {
-        updateStickyFolderHeader();
+        scheduleStickyUpdate();
     });
     els.tableView.addEventListener('dragenter', event => {
         if (event.dataTransfer && event.dataTransfer.types.includes('Files')) {
