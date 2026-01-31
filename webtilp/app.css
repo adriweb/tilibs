@@ -739,6 +739,7 @@ body {
     opacity: 0;
     transform: translateY(-1px);
     transition: opacity 120ms ease;
+    pointer-events: none;
 }
 
 .name-cell {
@@ -788,18 +789,17 @@ body {
 tr:hover .row-actions,
 tr:focus-within .row-actions {
     opacity: 1;
-}
-
-tr.is-active .row-actions {
-    opacity: 1;
+    pointer-events: auto;
 }
 
 @media (hover: none) {
     .row-actions {
         opacity: 0;
+        pointer-events: none;
     }
     tr.is-active .row-actions {
         opacity: 1;
+        pointer-events: auto;
     }
     .folder-sticky td {
         padding-top: 10px;
