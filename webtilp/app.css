@@ -648,6 +648,11 @@ body {
     cursor: pointer;
 }
 
+.var-table td:first-of-type
+{
+    width: 45px;
+}
+
 .folder-sticky {
     position: sticky;
     top: 0;
