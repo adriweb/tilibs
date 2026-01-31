@@ -5210,7 +5210,7 @@ function bindEvents() {
     els.fileInput.addEventListener('dragover', dropzoneDragOver);
     els.fileInput.addEventListener('dragleave', dropzoneDragLeave);
     els.fileInput.addEventListener('drop', dropzoneDrop);
-    els.varTableBody.addEventListener('click', event => {
+    els.varTableBody.addEventListener('click', async event => {
         const actionButton = event.target.closest('button.action-rename, button.action-delete, button.action-download');
         if (actionButton) {
             const row = actionButton.closest('tr');
@@ -5222,12 +5222,16 @@ function bindEvents() {
                 row.classList.add('is-active');
             }
             const entry = buildEntryFromCheckbox(checkbox);
-            if (actionButton.classList.contains('action-rename')) {
-                renameEntry(entry);
-            } else if (actionButton.classList.contains('action-download')) {
-                downloadEntry(entry);
-            } else {
-                deleteEntry(entry);
+            try {
+                if (actionButton.classList.contains('action-rename')) {
+                    await renameEntry(entry);
+                } else if (actionButton.classList.contains('action-download')) {
+                    await downloadEntry(entry);
+                } else {
+                    await deleteEntry(entry);
+                }
+            } finally {
+                row?.classList.remove('is-active');
             }
             return;
         }
