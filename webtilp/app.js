@@ -2552,6 +2552,15 @@ async function autoConnectIfAuthorized() {
     }
 
     state.authorizedDevice = devices[0];
+
+    if (isNspireActive()) {
+        // Nspires can't reconnect automatically, let's USB reset and ask the user for the device again
+        console.warn('[WebTILP] Nspire detected, will reset+forget for a fresh start.');
+        await ensureCableOpen();
+        await nukeConnection(false);
+        return;
+    }
+
     const pid = state.authorizedDevice.productId;
     const cableSetting = state.settings?.cableModel ?? 'auto';
     const calcSetting = state.settings?.calcModel ?? 'auto';
@@ -4984,15 +4993,14 @@ function clearLog() {
     setButtonLoading(els.btnClearLog, false);
 }
 
-async function nukeConnection() {
+async function nukeConnection(tryReconnect = true) {
     if (els.btnNuke) {
         setButtonLoading(els.btnNuke, true);
     }
     clearActiveOperations('Operation cancelled by emergency reset.');
-    try {
-        await state.authorizedDevice?.reset();
-    } catch (err) {
-        console.warn('[WebTILP] Emergency reset failed', err);
+    try { await state.authorizedDevice?.reset(); } catch (e) {}
+    if (isNspireActive()) {
+        try { await state.authorizedDevice?.forget(); } catch (e) {}
     }
     try {
         if (state.module) {
@@ -5019,7 +5027,12 @@ async function nukeConnection() {
     if (els.btnNuke) {
         setButtonLoading(els.btnNuke, false);
     }
-    await connect();
+
+    try {
+        tryReconnect && await connect();
+    } catch (err) {
+        console.warn('Failed to reconnect automatically, just do it manually.', err);
+    }
 }
 
 async function silentReconnectAfterNspireTransfer() {
