@@ -3299,11 +3299,13 @@ function renderTableView(entries, filter) {
         row.dataset.isFolder = isFolder ? '1' : '0';
         row.dataset.folderPath = getEntryFolderPath(entry);
         row.dataset.depth = String(depth);
+        const canRename = (state.features & FEATURE_FLAGS.OPS_RENAME) !== 0;
+        const canDelete = (state.features & FEATURE_FLAGS.OPS_DELVAR) !== 0;
         const rowActions = `
             <div class="row-actions">
                 <button class="btn ghost btn-inline action-download" title="Download">⬇️</button>
-                <button class="btn ghost btn-inline action-rename" title="Rename">✏️</button>
-                <button class="btn ghost btn-inline action-delete" title="Delete">🗑️</button>
+                ${canRename ? '<button class="btn ghost btn-inline action-rename" title="Rename">✏️</button>' : ''}
+                ${canDelete ? '<button class="btn ghost btn-inline action-delete" title="Delete">🗑️</button>' : ''}
             </div>`;
         const displayName = isFolder ? `📂 ${entry.name}` : entry.name;
         row.innerHTML = `
