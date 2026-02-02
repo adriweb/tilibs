@@ -30,7 +30,8 @@ const state = {
     lastCheckedIndex: null,
     stickyPath: '',
     stickyTableWidth: 0,
-    stickyHeaderWidths: []
+    stickyHeaderWidths: [],
+    dirlistPromptPromise: null
 };
 
 let currentDropTarget = null;
@@ -4095,6 +4096,27 @@ function scheduleStickyUpdate() {
     });
 }
 
+async function ensureDirlistLoadedWithPrompt() {
+    if (state.dirlist.length) {
+        return;
+    }
+    if (state.dirlistPromptPromise) {
+        await state.dirlistPromptPromise;
+        return;
+    }
+    state.dirlistPromptPromise = (async () => {
+        const confirmDirlist = confirm('Directory listing has not been loaded yet. It is highly recommended before transfers. Load it now?');
+        if (confirmDirlist) {
+            await refreshDirlist();
+        }
+    })();
+    try {
+        await state.dirlistPromptPromise;
+    } finally {
+        state.dirlistPromptPromise = null;
+    }
+}
+
 async function sendDroppedFiles(files, dropFolder) {
     if (!files.length) {
         return;
@@ -4112,12 +4134,7 @@ async function sendDroppedFiles(files, dropFolder) {
         await ensureCableOpen();
         await updateCapabilities();
 
-        if (!state.dirlist.length) {
-            const confirmDirlist = confirm('Directory listing has not been loaded yet. It is highly recommended before transfers. Load it now?');
-            if (confirmDirlist) {
-                await refreshDirlist();
-            }
-        }
+        await ensureDirlistLoadedWithPrompt();
 
         const hasFolder = (state.features & FEATURE_FLAGS.FTS_FOLDER) !== 0;
         const hasArchive = (state.features & FEATURE_FLAGS.OPS_CHATTR) !== 0 || (state.features & FEATURE_FLAGS.FTS_FLASH) !== 0;
@@ -4617,12 +4634,7 @@ async function sendSelectedFiles() {
         await ensureCableOpen();
         await updateCapabilities();
 
-        if (!state.dirlist.length) {
-            const confirmDirlist = confirm('Directory listing has not been loaded yet. It is highly recommended before transfers. Load it now?');
-            if (confirmDirlist) {
-                await refreshDirlist();
-            }
-        }
+        await ensureDirlistLoadedWithPrompt();
 
         const hasFolder = (state.features & FEATURE_FLAGS.FTS_FOLDER) !== 0;
         const hasArchive = (state.features & FEATURE_FLAGS.OPS_CHATTR) !== 0 || (state.features & FEATURE_FLAGS.FTS_FLASH) !== 0;
