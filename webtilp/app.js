@@ -26,6 +26,8 @@ const state = {
     nspireOsReceiveStarted: false,
     lastCcallTs: 0,
     handlePromise: null,
+    expandedFolders: new Set(),
+    lastCheckedIndex: null,
     stickyPath: '',
     stickyTableWidth: 0,
     stickyHeaderWidths: []
@@ -1828,6 +1830,7 @@ const els = {
     btnCancelTransfer: document.getElementById('btnCancelTransfer'),
     btnConfirmTransfer: document.getElementById('btnConfirmTransfer'),
     btnThemeToggle: document.getElementById('btnThemeToggle'),
+    selectAllVars: document.getElementById('selectAllVars'),
     backupFormatBackup: document.getElementById('backupFormatBackup'),
     backupFormatTigroup: document.getElementById('backupFormatTigroup'),
     tigroupOptions: document.getElementById('tigroupOptions'),
@@ -3376,8 +3379,10 @@ function renderDirlist(entries) {
 }
 
 function renderTableView(entries, filter) {
+    const selectionKeys = getSelectedVarKeys();
     els.varTableBody.innerHTML = '';
     const tree = buildTree(entries);
+    state.folderSizeMap = new Map();
 
     const entryMatchesFilter = (entry) => {
         if (!filter) {
@@ -3424,21 +3429,22 @@ function renderTableView(entries, filter) {
         };
     };
 
-    const renderTableRow = (entry, depth) => {
+    const renderTableRow = (entry, depth, options = {}) => {
         const isArchived = entry.attr === 3;
         const isFolder = entry.is_folder === 1;
         const location = entry.kind === 'app' ? 'Flash' : (isArchived ? 'Archive' : 'RAM');
         const typeLabel = isFolder ? 'Directory' : (entry.type_name || `Unknown (${entry.type})`);
         const sizeValue = Number(entry.size) || 0;
-        const sizeLabel = isFolder ? '-' : formatBytes(sizeValue);
+        const sizeLabel = options.sizeLabel ?? (isFolder ? '-' : formatBytes(sizeValue));
         const indentBars = depth > 0
             ? `<span class="indent-bars">${'<span class="indent-bar"></span>'.repeat(depth)}</span>`
             : '';
         const kindLabel = isFolder ? 'folder' : (entry.kind || '');
         const row = document.createElement('tr');
-        row.dataset.folderTarget = getEntryFolderPath(entry);
+        const normalizedFolderPath = normalizeFolderPath(getEntryFolderPath(entry));
+        row.dataset.folderTarget = normalizedFolderPath;
         row.dataset.isFolder = isFolder ? '1' : '0';
-        row.dataset.folderPath = getEntryFolderPath(entry);
+        row.dataset.folderPath = normalizedFolderPath;
         row.dataset.depth = String(depth);
         const canRename = (state.features & FEATURE_FLAGS.OPS_RENAME) !== 0;
         const canDelete = (state.features & FEATURE_FLAGS.OPS_DELVAR) !== 0;
@@ -3448,12 +3454,18 @@ function renderTableView(entries, filter) {
                 ${canRename ? '<button class="btn ghost btn-inline action-rename" title="Rename">✏️</button>' : ''}
                 ${canDelete ? '<button class="btn ghost btn-inline action-delete" title="Delete">🗑️</button>' : ''}
             </div>`;
-        const displayName = isFolder ? `📂 ${entry.name}` : entry.name;
+        const toggleButton = isFolder
+            ? `<button class="folder-toggle" type="button" data-folder-path="${normalizedFolderPath}" aria-label="${options.expanded ? 'Collapse folder' : 'Expand folder'}">${options.expanded ? '▾' : '▸'}</button>`
+            : '';
+        const displayName = isFolder
+            ? `<span class="folder-icon" data-folder-path="${normalizedFolderPath}">📂</span> ${entry.name}`
+            : entry.name;
+        const summaryText = options.summary ? `<em class="folder-summary">(${options.summary})</em>` : '';
         row.innerHTML = `
-            <td><input type="checkbox" data-name="${entry.name}" data-folder="${entry.folder}" data-folder-path="${getEntryFolderPath(entry)}" data-is-folder="${isFolder ? '1' : '0'}" data-type="${entry.type}" data-kind="${isFolder ? 'folder' : entry.kind}"></td>
+            <td><input type="checkbox" data-name="${entry.name}" data-folder="${entry.folder}" data-folder-path="${normalizedFolderPath}" data-is-folder="${isFolder ? '1' : '0'}" data-type="${entry.type}" data-kind="${isFolder ? 'folder' : entry.kind}"></td>
             <td>
                 <div class="name-cell">
-                    <div class="name-left">${indentBars}<span class="name-label">${displayName}</span></div>
+                    <div class="name-left">${indentBars}${toggleButton}<span class="name-label">${displayName}${summaryText}</span></div>
                     ${rowActions}
                 </div>
             </td>
@@ -3476,22 +3488,64 @@ function renderTableView(entries, filter) {
         });
     };
 
+    const collectFolderSizes = (node) => {
+        const isFolderNode = (node.entry && node.entry.is_folder === 1) || (!node.entry && node.children);
+        if (!isFolderNode) {
+            if (node.entry) {
+                return Number(node.entry.size) || 0;
+            }
+            return 0;
+        }
+        const children = node.children || [];
+        const total = children.reduce((sum, child) => sum + collectFolderSizes(child), 0);
+        const folderEntry = node.entry || buildSyntheticFolderEntry(node);
+        const folderPath = normalizeFolderPath(getEntryFolderPath(folderEntry));
+        state.folderSizeMap.set(folderPath, total);
+        return total;
+    };
+
+    tree.forEach(node => collectFolderSizes(node));
+
     const renderTableNode = (node, depth, forceShowChildren) => {
         const isFolderNode = (node.entry && node.entry.is_folder === 1) || (!node.entry && node.children);
         if (isFolderNode) {
             const folderEntry = node.entry || buildSyntheticFolderEntry(node);
             const folderName = folderEntry.name || node.name || 'Folder';
-            const matchesFolder = !filter || folderName.toLowerCase().includes(filter);
-            const shouldShow = forceShowChildren || matchesFolder || nodeHasMatch(node);
+            const matchesFolder = filter ? folderName.toLowerCase().includes(filter) : false;
+            const shouldShow = !filter || forceShowChildren || matchesFolder || nodeHasMatch(node);
             if (!shouldShow) {
                 return false;
             }
-            renderTableRow(folderEntry, depth);
-            const sortedChildren = sortNodes(node.children || []);
-            const childForce = forceShowChildren || matchesFolder;
-            sortedChildren.forEach(child => {
-                renderTableNode(child, depth + 1, childForce);
-            });
+            const folderPath = normalizeFolderPath(getEntryFolderPath(folderEntry));
+            const expanded = state.expandedFolders?.has(folderPath) || (filter && nodeHasMatch(node)) || forceShowChildren;
+            const children = node.children || [];
+            const childStats = children.reduce((acc, child) => {
+                const childIsFolder = (child.entry && child.entry.is_folder === 1) || (!child.entry && child.children);
+                if (childIsFolder) {
+                    acc.folders += 1;
+                } else {
+                    acc.files += 1;
+                }
+                return acc;
+            }, { folders: 0, files: 0 });
+            const summaryParts = [];
+            if (childStats.folders) {
+                summaryParts.push(`${childStats.folders} subfolder${childStats.folders === 1 ? '' : 's'}`);
+            }
+            if (childStats.files) {
+                summaryParts.push(`${childStats.files} file${childStats.files === 1 ? '' : 's'}`);
+            }
+            const summary = summaryParts.length ? `contains ${summaryParts.join(' and ')}` : 'empty';
+            const totalSize = state.folderSizeMap.get(folderPath) ?? 0;
+            const sizeLabel = `<em class="folder-size">(${formatBytes(totalSize)} total)</em>`;
+            renderTableRow(folderEntry, depth, { expanded, summary, sizeLabel });
+            if (expanded) {
+                const sortedChildren = sortNodes(children);
+                const childForce = forceShowChildren || matchesFolder;
+                sortedChildren.forEach(child => {
+                    renderTableNode(child, depth + 1, childForce);
+                });
+            }
             return true;
         }
 
@@ -3509,16 +3563,24 @@ function renderTableView(entries, filter) {
     sortNodes(tree).forEach(node => {
         renderTableNode(node, 0, false);
     });
+    applySelectionKeys(selectionKeys, els.varTableBody);
 }
 
 function compareEntries(a, b, key, dir) {
     const factor = dir === 'asc' ? 1 : -1;
     const getLocation = entry => entry.kind === 'app' ? 'Flash' : (entry.attr === 3 ? 'Archive' : 'RAM');
+    const getSizeValue = (entry) => {
+        if (entry.is_folder === 1) {
+            const folderPath = normalizeFolderPath(getEntryFolderPath(entry));
+            return state.folderSizeMap?.get(folderPath) ?? 0;
+        }
+        return Number(entry.size) || 0;
+    };
     const valueA = (() => {
         switch (key) {
             case 'name': return a.name || '';
             case 'type': return a.type_name || `Unknown (${a.type})`;
-            case 'size': return a.size || 0;
+            case 'size': return getSizeValue(a);
             case 'location': return getLocation(a);
             case 'folder': return a.folder || '';
             default: return a.name || '';
@@ -3528,7 +3590,7 @@ function compareEntries(a, b, key, dir) {
         switch (key) {
             case 'name': return b.name || '';
             case 'type': return b.type_name || `Unknown (${b.type})`;
-            case 'size': return b.size || 0;
+            case 'size': return getSizeValue(b);
             case 'location': return getLocation(b);
             case 'folder': return b.folder || '';
             default: return b.name || '';
@@ -3703,6 +3765,17 @@ function updateSelectionActionButtons() {
     if (els.btnDeleteSelected) {
         els.btnDeleteSelected.disabled = !hasSelection;
     }
+    if (els.selectAllVars) {
+        const allInputs = Array.from(els.varTableBody.querySelectorAll('input[type="checkbox"]:not(:disabled)'));
+        if (!allInputs.length) {
+            els.selectAllVars.checked = false;
+            els.selectAllVars.indeterminate = false;
+        } else {
+            const checkedCount = allInputs.filter(input => input.checked).length;
+            els.selectAllVars.checked = checkedCount === allInputs.length;
+            els.selectAllVars.indeterminate = checkedCount > 0 && checkedCount < allInputs.length;
+        }
+    }
 }
 
 function updateKeyControlsState(enabled) {
@@ -3836,6 +3909,22 @@ function getSelectedVarKeys() {
         keys.add(buildSelectionKey(input));
     });
     return keys;
+}
+
+function applySelectionKeys(keys, container) {
+    if (!keys || !container) {
+        return;
+    }
+    container.querySelectorAll('input[type="checkbox"]').forEach(input => {
+        if (input.disabled) {
+            return;
+        }
+        input.checked = keys.has(buildSelectionKey(input));
+        const row = input.closest('tr');
+        if (row) {
+            row.classList.toggle('is-active', input.checked);
+        }
+    });
 }
 
 function buildEntryFromCheckbox(checkbox) {
@@ -4787,9 +4876,24 @@ async function receiveSelected() {
         if (!module.FS.analyzePath('/downloads').exists) {
             module.FS.mkdir('/downloads');
         }
+        if (keptFolders.length) {
+            const totalItems = state.dirlist.filter(entry => {
+                if (entry.is_folder === 1) {
+                    return false;
+                }
+                const entryFolder = normalizePath(entry.folder);
+                if (!entryFolder) {
+                    return keptFolders.includes('');
+                }
+                return keptFolders.some(parent => entryFolder === parent || entryFolder.startsWith(`${parent}/`));
+            }).length;
+            if (!confirm(`Download ${totalItems} item(s) from ${keptFolders.length} folder(s)?`)) {
+                return;
+            }
+        }
         for (const entry of uniqueSelections) {
             if (entry.isFolder) {
-                const ok = await downloadFolderEntriesWithSession(module, handle, entry.folderPath || entry.name, true);
+                const ok = await downloadFolderEntriesWithSession(module, handle, entry.folderPath || entry.name, false);
                 receivedAny = receivedAny || ok;
                 continue;
             }
@@ -4977,7 +5081,10 @@ async function downloadFolderEntriesWithSession(module, handle, folderPath, conf
             return false;
         }
         const entryFolder = normalizeFolderPath(entry.folder);
-        return entryFolder === target;
+        if (!target) {
+            return entryFolder === '';
+        }
+        return entryFolder === target || entryFolder.startsWith(`${target}/`);
     });
     if (!entries.length) {
         log(`No items found in folder ${target || '(root)'}.`);
@@ -5314,6 +5421,20 @@ function bindEvents() {
     if (els.btnSplashConnect) {
         els.btnSplashConnect.addEventListener('click', connect);
     }
+    if (els.selectAllVars) {
+        els.selectAllVars.addEventListener('change', () => {
+            const checkboxes = Array.from(els.varTableBody.querySelectorAll('input[type="checkbox"]:not(:disabled)'));
+            checkboxes.forEach(input => {
+                input.checked = els.selectAllVars.checked;
+                const row = input.closest('tr');
+                if (row) {
+                    row.classList.toggle('is-active', input.checked);
+                }
+            });
+            state.lastCheckedIndex = null;
+            updateSelectionActionButtons();
+        });
+    }
     els.filterInput.addEventListener('input', () => renderDirlist(state.dirlist));
     document.querySelectorAll('th[data-sort]').forEach(header => {
         header.addEventListener('click', () => {
@@ -5370,6 +5491,19 @@ function bindEvents() {
     els.fileInput.addEventListener('dragleave', dropzoneDragLeave);
     els.fileInput.addEventListener('drop', dropzoneDrop);
     els.varTableBody.addEventListener('click', async event => {
+        const toggleButton = event.target.closest('.folder-toggle, .folder-icon');
+        if (toggleButton) {
+            const folderPath = toggleButton.dataset.folderPath || '';
+            if (folderPath) {
+                if (state.expandedFolders.has(folderPath)) {
+                    state.expandedFolders.delete(folderPath);
+                } else {
+                    state.expandedFolders.add(folderPath);
+                }
+                renderDirlist(state.dirlist);
+            }
+            return;
+        }
         const actionButton = event.target.closest('button.action-rename, button.action-delete, button.action-download');
         if (actionButton) {
             const row = actionButton.closest('tr');
@@ -5394,8 +5528,50 @@ function bindEvents() {
             }
             return;
         }
+        const toggleFolderSelection = (source) => {
+            if (source.dataset.isFolder !== '1') {
+                return;
+            }
+            const folderPath = normalizeFolderPath(source.dataset.folderPath || '');
+            if (!folderPath) {
+                return;
+            }
+            const allCheckboxes = Array.from(els.varTableBody.querySelectorAll('input[type="checkbox"]:not(:disabled)'));
+            allCheckboxes.forEach(input => {
+                const row = input.closest('tr');
+                const rowPath = normalizeFolderPath(row?.dataset.folderPath || input.dataset.folderPath || '');
+                if (!rowPath) {
+                    return;
+                }
+                if (rowPath === folderPath || rowPath.startsWith(`${folderPath}/`)) {
+                    input.checked = source.checked;
+                    if (row) {
+                        row.classList.toggle('is-active', input.checked);
+                    }
+                }
+            });
+        };
         const checkbox = event.target.closest('input[type="checkbox"]');
         if (checkbox) {
+            if (event.shiftKey) {
+                const checkboxes = Array.from(els.varTableBody.querySelectorAll('input[type="checkbox"]:not(:disabled)'));
+                const currentIndex = checkboxes.indexOf(checkbox);
+                if (currentIndex !== -1 && state.lastCheckedIndex != null) {
+                    const [start, end] = currentIndex > state.lastCheckedIndex
+                        ? [state.lastCheckedIndex, currentIndex]
+                        : [currentIndex, state.lastCheckedIndex];
+                    for (let i = start; i <= end; i++) {
+                        checkboxes[i].checked = checkbox.checked;
+                        const row = checkboxes[i].closest('tr');
+                        if (row) {
+                            row.classList.toggle('is-active', checkboxes[i].checked);
+                        }
+                    }
+                }
+            }
+            toggleFolderSelection(checkbox);
+            const allCheckboxes = Array.from(els.varTableBody.querySelectorAll('input[type="checkbox"]:not(:disabled)'));
+            state.lastCheckedIndex = allCheckboxes.indexOf(checkbox);
             updateSelectionActionButtons();
             return;
         }
@@ -5409,6 +5585,9 @@ function bindEvents() {
             return;
         }
         target.checked = !target.checked;
+        toggleFolderSelection(target);
+        const allCheckboxes = Array.from(els.varTableBody.querySelectorAll('input[type="checkbox"]:not(:disabled)'));
+        state.lastCheckedIndex = allCheckboxes.indexOf(target);
         updateSelectionActionButtons();
     });
     els.varTableBody.addEventListener('change', event => {
