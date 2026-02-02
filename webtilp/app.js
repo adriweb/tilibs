@@ -1890,6 +1890,147 @@ function loadSettings() {
     }
 }
 
+function normalizeOptionValue(value) {
+    return String(value || '')
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '');
+}
+
+function resolveOptionValue(options, rawValue) {
+    if (!rawValue) {
+        return null;
+    }
+    const raw = String(rawValue).trim();
+    const normalized = normalizeOptionValue(raw);
+    const byValue = options.find(option => String(option.value) === raw);
+    if (byValue) {
+        return String(byValue.value);
+    }
+    const byLabel = options.find(option => normalizeOptionValue(option.label) === normalized);
+    if (byLabel) {
+        return String(byLabel.value);
+    }
+    return null;
+}
+
+function resolveCableParam(rawValue) {
+    if (!rawValue) {
+        return null;
+    }
+    const normalized = normalizeOptionValue(rawValue);
+    if (!normalized) {
+        return null;
+    }
+    if (normalized === 'auto') {
+        return 'auto';
+    }
+    if (normalized === 'silverlink' || normalized === 'dbus') {
+        return '4';
+    }
+    if (normalized === 'directlink' || normalized === 'dusb') {
+        return '5';
+    }
+    return resolveOptionValue(CABLE_OPTIONS, rawValue);
+}
+
+function resolveCalcParam(rawValue) {
+    if (!rawValue) {
+        return null;
+    }
+    const raw = String(rawValue).trim();
+    if (/^\d+$/.test(raw)) {
+        return raw;
+    }
+    return resolveOptionValue(CALC_MODEL_OPTIONS, raw);
+}
+
+function applyUrlOverrides() {
+    const params = new URLSearchParams(window.location.search);
+    if (!params.size) {
+        return;
+    }
+
+    const nextSettings = { ...state.settings };
+    let shouldOpenSettings = false;
+    const cableValue = resolveCableParam(params.get('cable'));
+    if (cableValue != null) {
+        nextSettings.cableModel = cableValue;
+    } else if (params.get('cable')) {
+        alert(`Unknown cable URL parameter: ${params.get('cable')}`);
+    }
+    const calcParam = params.get('calc');
+    const calcValue = resolveCalcParam(calcParam);
+    if (calcValue != null) {
+        nextSettings.calcModel = calcValue;
+    } else if (calcParam) {
+        (async () => {
+            try {
+                const module = await initModule();
+                const model = module.ccall('string_to_calc_model', 'number', ['string'], [calcParam]);
+                if (model > 0) {
+                    state.settings.calcModel = String(model);
+                    if (els.settingCalcModel) {
+                        populateSelect(els.settingCalcModel, getCalcOptionsForCable(els.settingCableModel?.value || state.settings.cableModel));
+                        els.settingCalcModel.value = state.settings.calcModel;
+                        updateCalcHint(els.settingCableModel?.value || state.settings.cableModel);
+                    }
+                    const isSilverlink = String(state.settings.cableModel) === '4';
+                    if (isSilverlink && !SILVERLINK_CALC_VALUES.has(model)) {
+                        shouldOpenSettings = true;
+                        openSettingsModal();
+                    }
+                } else {
+                    alert(`Unknown calc URL parameter: ${calcParam}`);
+                }
+            } catch (err) {
+                console.warn('[WebTILP] Failed to resolve calc URL param', err);
+                alert(`Failed to resolve calc URL parameter: ${calcParam}`);
+            }
+        })();
+    }
+    const timeout = Number(params.get('timeout'));
+    if (Number.isFinite(timeout) && timeout > 0) {
+        nextSettings.cableTimeout = timeout;
+    } else if (params.get('timeout')) {
+        alert(`Invalid timeout URL parameter: ${params.get('timeout')}`);
+    }
+    const delay = Number(params.get('delay'));
+    if (Number.isFinite(delay) && delay >= 0) {
+        nextSettings.cableDelay = delay;
+    } else if (params.get('delay')) {
+        alert(`Invalid delay URL parameter: ${params.get('delay')}`);
+    }
+    state.settings = nextSettings;
+
+    const isSilverlink = String(state.settings.cableModel) === '4';
+    const calcModelValue = String(state.settings.calcModel || '');
+    const isCalcAuto = !calcParam || calcModelValue === 'auto';
+    const isCalcValidForSilverlink = SILVERLINK_CALC_VALUES.has(Number(calcModelValue));
+    if (isSilverlink && (isCalcAuto || !isCalcValidForSilverlink)) {
+        shouldOpenSettings = true;
+    }
+
+    const themeParam = params.get('theme');
+    if (themeParam) {
+        const normalized = normalizeOptionValue(themeParam);
+        const target = THEMES.find(theme => normalizeOptionValue(theme.id) === normalized || normalizeOptionValue(theme.label) === normalized);
+        if (target) {
+            applyTheme(target.id);
+        } else {
+            alert(`Unknown theme URL parameter: ${themeParam}`);
+        }
+    }
+
+    const newUrl = `${window.location.pathname}${window.location.hash || ''}`;
+    if (window.location.search) {
+        window.history.replaceState({}, document.title, newUrl);
+    }
+
+    if (shouldOpenSettings) {
+        openSettingsModal();
+    }
+}
+
 function saveSettings() {
     localStorage.setItem('webtilp.settings', JSON.stringify(state.settings));
 }
@@ -5341,6 +5482,7 @@ function bindEvents() {
 }
 
 initTheme();
+applyUrlOverrides();
 bindEvents();
 seedSettingsForm();
 updateSendFilesButtonState();
