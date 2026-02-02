@@ -1226,6 +1226,14 @@ int file_is_os(const char* filename) {
 }
 
 EMSCRIPTEN_KEEPALIVE
+int string_to_calc_model(const char* value) {
+    if (!value || !*value) {
+        return -1;
+    }
+    return ticonv_string_to_model(value);
+}
+
+EMSCRIPTEN_KEEPALIVE
 int calc_recv_var(CableHandle* cable_handle, const char* folder, const char* name, uint8_t type, const char* out_dir) {
     if (!cable_handle) {
         printf("ERROR: NULL cable handle provided\n");
