@@ -757,7 +757,7 @@ body {
 .name-left {
     display: inline-flex;
     align-items: center;
-    gap: 8px;
+    gap: 1px;
     flex: 1;
     min-width: 0;
 }
@@ -766,6 +766,45 @@ body {
     display: inline-flex;
     align-items: center;
     gap: 6px;
+}
+
+.folder-toggle {
+    border: 0;
+    background: transparent;
+    color: inherit;
+    padding: 0;
+    margin-right: 2px;
+    cursor: pointer;
+    font-size: 12px;
+    line-height: 1;
+    width: 0.75em;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.folder-toggle:focus {
+    outline: 1px solid rgba(255, 255, 255, 0.45);
+    outline-offset: 2px;
+    border-radius: 4px;
+}
+
+.folder-icon {
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+}
+
+.folder-summary {
+    opacity: 0.75;
+    font-style: italic;
+    white-space: nowrap;
+    margin-left: 10px;
+}
+
+.folder-size {
+    font-style: italic;
+    color: lightslategrey;
 }
 
 .indent-bars {
