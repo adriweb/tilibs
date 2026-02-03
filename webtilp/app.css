@@ -229,6 +229,10 @@ body {
     pointer-events: none;
 }
 
+.brand-build {
+    display: none;
+}
+
 .brand-title {
     font-size: 18px;
     font-weight: 600;
@@ -239,12 +243,50 @@ body {
     color: var(--muted);
 }
 
+.settings-offline {
+    margin-top: 16px;
+    padding: 12px;
+    border-radius: 12px;
+    border: 1px solid rgba(120, 150, 190, 0.2);
+    background: rgba(18, 24, 32, 0.6);
+    color: var(--muted);
+    font-size: 12px;
+}
+
+.settings-offline-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+}
+
+.settings-offline-actions {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+}
+
 .status {
     display: flex;
     align-items: center;
     gap: 10px;
     font-size: 14px;
     color: var(--muted);
+}
+
+.settings-button {
+    position: relative;
+}
+
+.settings-update-dot {
+    position: absolute;
+    top: 6px;
+    right: 6px;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #ff4d4d;
+    box-shadow: 0 0 0 2px rgba(10, 14, 20, 0.8);
 }
 
 .progress-indicator {
