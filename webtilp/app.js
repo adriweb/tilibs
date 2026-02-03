@@ -31,7 +31,8 @@ const state = {
     stickyPath: '',
     stickyTableWidth: 0,
     stickyHeaderWidths: [],
-    dirlistPromptPromise: null
+    dirlistPromptPromise: null,
+    offlineUpdateShown: false
 };
 
 let currentDropTarget = null;
@@ -1775,6 +1776,8 @@ const els = {
     memoryInfo: document.getElementById('memoryInfo'),
     deviceInfoList: document.getElementById('deviceInfoList'),
     log: document.getElementById('log'),
+    brandMark: document.querySelector('.brand-mark'),
+    brandBuildInfo: document.getElementById('brandBuildInfo'),
     fileInput: document.getElementById('fileInput'),
     varTableBody: document.getElementById('varTableBody'),
     filterInput: document.getElementById('filterInput'),
@@ -1783,6 +1786,7 @@ const els = {
     btnConnect: document.getElementById('btnConnect'),
     btnNuke: document.getElementById('btnNuke'),
     btnSettings: document.getElementById('btnSettings'),
+    settingsUpdateDot: document.getElementById('settingsUpdateDot'),
     btnIsReady: document.getElementById('btnIsReady'),
     btnGetInfo: document.getElementById('btnGetInfo'),
     btnSyncClock: document.getElementById('btnSyncClock'),
@@ -1798,6 +1802,10 @@ const els = {
     btnScreenshot: document.getElementById('btnScreenshot'),
     btnDownloadScreenshot: document.getElementById('btnDownloadScreenshot'),
     btnClearLog: document.getElementById('btnClearLog'),
+    offlineBanner: document.getElementById('offlineBanner'),
+    btnClearOfflineCache: document.getElementById('btnClearOfflineCache'),
+    btnReloadOffline: document.getElementById('btnReloadOffline'),
+    offlineBannerText: document.getElementById('offlineBannerText'),
     screenshotCanvas: document.getElementById('screenshotCanvas'),
     keysPanel: document.getElementById('keysPanel'),
     keyCodeInput: document.getElementById('keyCodeInput'),
@@ -1866,6 +1874,104 @@ function cycleTheme() {
     const index = THEMES.findIndex(entry => entry.id === current);
     const next = THEMES[(index + 1) % THEMES.length].id;
     applyTheme(next);
+}
+
+function showOfflineBanner() {
+    if (!els.offlineBanner) {
+        return;
+    }
+    els.offlineBanner.classList.remove('hidden');
+}
+
+function showOfflineUpdateBanner() {
+    if (!els.offlineBanner || !els.btnReloadOffline) {
+        return;
+    }
+    if (els.offlineBannerText) {
+        els.offlineBannerText.textContent = 'An update is available. Reload to use the latest version.';
+    }
+    els.btnReloadOffline.classList.remove('hidden');
+    els.offlineBanner.classList.remove('hidden');
+    if (els.settingsUpdateDot) {
+        els.settingsUpdateDot.classList.remove('hidden');
+    }
+    if (els.btnSettings) {
+        els.btnSettings.title = 'Update available';
+    }
+    state.offlineUpdateShown = true;
+}
+
+function hideOfflineUpdateBanner() {
+    if (!els.offlineBanner || !els.btnReloadOffline) {
+        return;
+    }
+    if (els.offlineBannerText) {
+        els.offlineBannerText.textContent = 'This app can now run without a network connection.';
+    }
+    els.btnReloadOffline.classList.add('hidden');
+    if (els.settingsUpdateDot) {
+        els.settingsUpdateDot.classList.add('hidden');
+    }
+    if (els.btnSettings && els.btnSettings.title === 'Update available') {
+        els.btnSettings.removeAttribute('title');
+    }
+    if (!state.offlineUpdateShown) {
+        return;
+    }
+    state.offlineUpdateShown = false;
+}
+
+async function clearOfflineCache() {
+    if (typeof caches !== 'undefined') {
+        const keys = await caches.keys();
+        await Promise.all(keys.map(key => caches.delete(key)));
+    }
+    if ('serviceWorker' in navigator) {
+        const regs = await navigator.serviceWorker.getRegistrations();
+        await Promise.all(regs.map(reg => reg.unregister()));
+    }
+    if (els.offlineBanner) {
+        els.offlineBanner.classList.add('hidden');
+    }
+    log('Offline cache cleared.');
+}
+
+async function loadBuildInfo() {
+    let info = null;
+    try {
+        const res = await fetch('version.json', { cache: 'no-store' });
+        if (res.ok) {
+            info = await res.json();
+        }
+    } catch {
+        // ignore
+    }
+    if (!info) {
+        try {
+            const res = await fetch('version.json');
+            if (res.ok) {
+                info = await res.json();
+            }
+        } catch {
+            return;
+        }
+    }
+    if (!info) {
+        return;
+    }
+    const title = `${info.gitSha || 'unknown'} ${info.buildDate || ''}`.trim();
+    if (els.brandMark) {
+        els.brandMark.title = title;
+    }
+    const previous = localStorage.getItem('webtilp.buildId');
+    if (info.buildId) {
+        if (previous && previous !== info.buildId) {
+            showOfflineUpdateBanner();
+        } else {
+            hideOfflineUpdateBanner();
+        }
+        localStorage.setItem('webtilp.buildId', info.buildId);
+    }
 }
 
 function initTheme() {
@@ -5430,6 +5536,30 @@ function bindEvents() {
     if (els.btnThemeToggle) {
         els.btnThemeToggle.addEventListener('click', cycleTheme);
     }
+    if (els.btnClearOfflineCache) {
+        els.btnClearOfflineCache.addEventListener('click', () => {
+            clearOfflineCache().catch(() => {
+                log('Failed to clear offline cache.');
+            });
+        });
+    }
+    if (els.btnReloadOffline) {
+        els.btnReloadOffline.addEventListener('click', async () => {
+            try {
+                const regs = await navigator.serviceWorker?.getRegistrations?.() || [];
+                const reg = regs.find(item => item.active);
+                if (reg?.waiting) {
+                    reg.waiting.postMessage({ type: 'SKIP_WAITING' });
+                    await new Promise(resolve => {
+                        navigator.serviceWorker.addEventListener('controllerchange', () => resolve(), { once: true });
+                    });
+                }
+            } catch {
+                // ignore
+            }
+            window.location.reload();
+        });
+    }
     if (els.btnSplashConnect) {
         els.btnSplashConnect.addEventListener('click', connect);
     }
@@ -5675,6 +5805,7 @@ function bindEvents() {
 initTheme();
 applyUrlOverrides();
 bindEvents();
+loadBuildInfo();
 seedSettingsForm();
 updateSendFilesButtonState();
 updateSelectionActionButtons();
@@ -5682,6 +5813,31 @@ updateKeyControlsState(false);
 updateWebUsbSplashState();
 autoConnectIfAuthorized();
 window.addEventListener('resize', updateScreenshotCanvasScale);
+
+if ('serviceWorker' in navigator) {
+    window.addEventListener('load', () => {
+        navigator.serviceWorker.register('sw.js').then(reg => {
+            navigator.serviceWorker.ready.then(() => {
+                showOfflineBanner();
+            }).catch(() => {
+                // best-effort
+            });
+            reg.addEventListener('updatefound', () => {
+                const worker = reg.installing;
+                if (!worker) {
+                    return;
+                }
+                worker.addEventListener('statechange', () => {
+                    if (worker.state === 'installed' && navigator.serviceWorker.controller) {
+                        showOfflineUpdateBanner();
+                    }
+                });
+            });
+        }).catch(() => {
+            // Offline support is best-effort; ignore registration failures.
+        });
+    });
+}
 if (navigator.usb) {
     navigator.usb.addEventListener('disconnect', () => {
         const silent = state.silentReconnectInProgress;
