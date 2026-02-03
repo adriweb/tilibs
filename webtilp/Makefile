@@ -60,12 +60,18 @@ EMCCFLAGS = \
 TARGET = webtilp.js
 SRC = webtilp.cpp
 
-all: $(TARGET)
+BUILD_SHA ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
+BUILD_DATE ?= $(shell date -u +"%Y-%m-%d %H:%M UTC")
+
+all: $(TARGET) stamp
+
+stamp:
+	@BUILD_SHA="$(BUILD_SHA)" BUILD_DATE="$(BUILD_DATE)" python3 -c "import hashlib, json, os, pathlib; root=pathlib.Path('.'); files=['app.css','app.js','webtilp.html','webtilp.js','webtilp.wasm','webusb_helper.js','site.webmanifest','sw.js.in']; h=hashlib.sha256(); [h.update((root/f).read_bytes()) for f in files if (root/f).exists()]; content_hash=h.hexdigest()[:12]; build_sha=os.environ.get('BUILD_SHA','unknown'); build_date=os.environ.get('BUILD_DATE','unknown'); build_id=f'{build_sha}-{content_hash}'; version={'buildId':build_id,'gitSha':build_sha,'buildDate':build_date,'contentHash':content_hash}; (root/'version.json').write_text(json.dumps(version, indent=2)+'\\n', encoding='utf-8'); sw_in=root/'sw.js.in'; sw_out=root/'sw.js'; sw_out.write_text(sw_in.read_text(encoding='utf-8').replace('__BUILD_ID__', build_id), encoding='utf-8') if sw_in.exists() else None"
 
 $(TARGET): $(SRC) $(LIBS)
 	$(EMCC) $(CFLAGS) $(SRC) $(INCLUDES) $(LIBS) -o $(TARGET) $(EMCCFLAGS)
 
 clean:
-	rm -f $(TARGET) webtilp.wasm webtilp.worker.js
+	rm -f $(TARGET) webtilp.wasm webtilp.worker.js sw.js version.json
 
-.PHONY: all clean
+.PHONY: all clean stamp
