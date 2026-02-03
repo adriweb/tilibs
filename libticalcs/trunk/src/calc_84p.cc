@@ -2420,7 +2420,6 @@ extern const CalcFncts calc_83pce_usb =
 	N_("TI-83 Premium CE thru DirectLink"),
 	OPS_ISREADY | OPS_SCREEN | OPS_DIRLIST | OPS_VARS | OPS_FLASH | OPS_OS |
 	/*OPS_IDLIST |*/ OPS_ROMDUMP | OPS_CLOCK | OPS_DELVAR | OPS_VERSION | OPS_BACKUP | OPS_KEYS |
-	OPS_RENAME | OPS_CHATTR |
 	FTS_SILENT | FTS_MEMFREE | FTS_FLASH,
 	PRODUCT_ID_TI83PCE,
 	{"",     /* is_ready */
@@ -2477,8 +2476,8 @@ extern const CalcFncts calc_83pce_usb =
 	&get_version,
 	&noop_send_cert,
 	&noop_recv_cert,
-	&rename_var,
-	&change_attr,
+	&noop_rename_var,
+	&noop_change_attr,
 	&send_all_vars_backup,
 	&tixx_recv_all_vars_backup
 };
@@ -2491,7 +2490,6 @@ extern const CalcFncts calc_84pce_usb =
 	N_("TI-84 Plus CE thru DirectLink"),
 	OPS_ISREADY | OPS_SCREEN | OPS_DIRLIST | OPS_VARS | OPS_FLASH | OPS_OS |
 	/*OPS_IDLIST |*/ OPS_ROMDUMP | OPS_CLOCK | OPS_DELVAR | OPS_VERSION | OPS_BACKUP | OPS_KEYS |
-	OPS_RENAME | OPS_CHATTR |
 	FTS_SILENT | FTS_MEMFREE | FTS_FLASH,
 	PRODUCT_ID_TI84PCE,
 	{"",     /* is_ready */
@@ -2548,8 +2546,8 @@ extern const CalcFncts calc_84pce_usb =
 	&get_version,
 	&noop_send_cert,
 	&noop_recv_cert,
-	&rename_var,
-	&change_attr,
+	&noop_rename_var,
+	&noop_change_attr,
 	&send_all_vars_backup,
 	&tixx_recv_all_vars_backup
 };
@@ -2704,7 +2702,6 @@ extern const CalcFncts calc_82aep_usb =
 	N_("TI-82 Advanced Edition Python thru DirectLink"),
 	OPS_ISREADY | OPS_SCREEN | OPS_DIRLIST | OPS_VARS | OPS_FLASH | OPS_OS |
 	/*OPS_IDLIST |*/ OPS_ROMDUMP | OPS_CLOCK | OPS_DELVAR | OPS_VERSION | OPS_BACKUP | OPS_KEYS |
-	OPS_RENAME | OPS_CHATTR |
 	FTS_SILENT | FTS_MEMFREE | FTS_FLASH,
 	PRODUCT_ID_TI82AEP,
 	{"",     /* is_ready */
@@ -2761,8 +2758,8 @@ extern const CalcFncts calc_82aep_usb =
 	&get_version,
 	&noop_send_cert,
 	&noop_recv_cert,
-	&rename_var,
-	&change_attr,
+	&noop_rename_var,
+	&noop_change_attr,
 	&send_all_vars_backup,
 	&tixx_recv_all_vars_backup
 };
