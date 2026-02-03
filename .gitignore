@@ -94,3 +94,5 @@ tifileutil/testData/
 
 webtilp/webtilp.js
 webtilp/webtilp.wasm
+webtilp/version.json
+webtilp/sw.js
