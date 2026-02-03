@@ -15,7 +15,10 @@
 <body>
     <header class="topbar">
         <div class="brand">
-            <div class="brand-mark"><span>Web<br>TILP</span><span class="brand-beta">Beta</span></div>
+            <div class="brand-mark">
+                <span>Web<br>TILP</span><span class="brand-beta">Beta</span>
+                <span class="brand-build hidden" id="brandBuildInfo"></span>
+            </div>
             <div>
                 <div class="brand-title">WebTILP</div>
                 <div class="brand-subtitle">Universal linking, right from your browser!</div>
@@ -39,7 +42,7 @@
         </div>
         <div class="actions">
             <button class="btn danger hidden" id="btnNuke" type="button" title="Force disconnect and reset">💣</button>
-            <button class="btn ghost" id="btnSettings">⚙️ Settings</button>
+            <button class="btn ghost settings-button" id="btnSettings">⚙️ Settings<span class="settings-update-dot hidden" id="settingsUpdateDot"></span></button>
             <button class="btn primary" id="btnConnect">🔌 Connect Calculator</button>
         </div>
     </header>
@@ -212,6 +215,15 @@
                     </div>
                 </div>
                 <div class="form-note">Changing settings resets the current handle. Reconnect for full effect.</div>
+                <div class="settings-offline hidden" id="offlineBanner">
+                    <div class="settings-offline-row">
+                        <span id="offlineBannerText">Offline ready.</span>
+                        <div class="settings-offline-actions">
+                            <button class="btn subtle hidden" id="btnReloadOffline">↻ Reload for update</button>
+                            <button class="btn subtle" id="btnClearOfflineCache">Clear offline cache</button>
+                        </div>
+                    </div>
+                </div>
             </div>
             <div class="modal-footer modal-footer-split" style="justify-content: space-between">
                 <button class="btn ghost theme-toggle" id="btnThemeToggle" type="button">Theme: Dark Modern</button>

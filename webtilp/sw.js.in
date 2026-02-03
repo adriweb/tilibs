@@ -1,0 +1,111 @@
+const CACHE_VERSION = '__BUILD_ID__';
+const CACHE_NAME = `webtilp-${CACHE_VERSION}`;
+
+const PRECACHE_URLS = [
+  'webtilp.html',
+  'index.html',
+  'app.js',
+  'app.css',
+  'webtilp.js',
+  'webtilp.wasm',
+  'webusb_helper.js',
+  'version.json',
+  'site.webmanifest',
+  'favicon.ico',
+  'favicon-16x16.png',
+  'favicon-32x32.png',
+  'apple-touch-icon.png',
+  'android-chrome-192x192.png',
+  'android-chrome-512x512.png',
+  'webtilp.png',
+  'webtilp_noshadow.png',
+  'webtilp_medium.png'
+];
+
+async function cacheResponse(cache, request, response) {
+  if (!response || !response.ok) {
+    return;
+  }
+  const cacheControl = response.headers.get('cache-control') || '';
+  if (cacheControl.toLowerCase().includes('no-store')) {
+    const headers = new Headers(response.headers);
+    headers.delete('cache-control');
+    headers.delete('vary');
+    const body = await response.clone().blob();
+    const sanitized = new Response(body, {
+      status: response.status,
+      statusText: response.statusText,
+      headers
+    });
+    await cache.put(request, sanitized);
+    return;
+  }
+  await cache.put(request, response.clone());
+}
+
+self.addEventListener('install', event => {
+  const base = self.location.href.replace(/[^/]*$/, '');
+  const precacheRequests = PRECACHE_URLS.map(url => new URL(url, base).toString());
+  event.waitUntil(
+    caches.open(CACHE_NAME).then(cache => Promise.all(
+      precacheRequests.map(async url => {
+        try {
+          const response = await fetch(url, { cache: 'no-store' });
+          await cacheResponse(cache, url, response);
+        } catch {
+          // ignore
+        }
+      })
+    )).then(() => self.skipWaiting())
+  );
+});
+
+self.addEventListener('activate', event => {
+  event.waitUntil(
+    (async () => {
+      const cache = await caches.open(CACHE_NAME);
+      const hasShell = await cache.match('webtilp.html');
+      if (hasShell) {
+        const keys = await caches.keys();
+        await Promise.all(keys.filter(key => key !== CACHE_NAME).map(key => caches.delete(key)));
+      }
+      await self.clients.claim();
+    })()
+  );
+});
+
+self.addEventListener('fetch', event => {
+  if (event.request.method !== 'GET') {
+    return;
+  }
+  const url = new URL(event.request.url);
+  if (url.origin !== self.location.origin) {
+    return;
+  }
+  event.respondWith((async () => {
+    const cache = await caches.open(CACHE_NAME);
+    const cached = await caches.match(event.request, { ignoreSearch: true, ignoreVary: true });
+    try {
+      const response = await fetch(event.request);
+      await cacheResponse(cache, event.request, response);
+      return response;
+    } catch {
+      if (cached) {
+        return cached;
+      }
+      if (event.request.mode === 'navigate') {
+        const fallback = await caches.match('webtilp.html');
+        if (fallback) {
+          return fallback;
+        }
+      }
+      throw new Error('Offline and no cached response.');
+    }
+  })());
+});
+
+self.addEventListener('message', event => {
+  if (event.data && event.data.type === 'SKIP_WAITING') {
+    self.skipWaiting();
+  }
+});
