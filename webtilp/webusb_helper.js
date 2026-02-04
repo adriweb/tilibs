@@ -54,11 +54,11 @@ async function requestTICalculatorDevice() {
 
         return device;
     } catch (error) {
-        if (error.name === 'NotFoundError') {
+        if (error && error.name === 'NotFoundError') {
             console.warn("No TI calculator was selected");
-        } else {
-            console.error("WebUSB device selection failed:", error);
+            return null;
         }
+        console.error("WebUSB device selection failed:", error);
         throw error;
     }
 }
