@@ -2262,21 +2262,45 @@ function isTi92Selected() {
     return String(state.settings?.calcModel ?? '') === '10';
 }
 
+function getActiveCalcModelString() {
+    if (!state.module) {
+        return null;
+    }
+    try {
+        const value = state.module.ccall('get_calc_model_string', 'string', [], []);
+        return value || null;
+    } catch (err) {
+        return null;
+    }
+}
+
 function resolveDeviceModelName(infoProductName) {
+    let calcModelLabel = getActiveCalcModelString();
     if (hasSilverlinkConnected()) {
         const calcModel = state.settings?.calcModel ?? 'auto';
         if (calcModel !== 'auto') {
-            return { primary: getCalcModelLabel(calcModel), secondary: null };
+            return { primary: getCalcModelLabel(calcModel), secondary: calcModelLabel };
         }
-        return { primary: 'Unknown', secondary: null };
+        return { primary: 'Unknown', secondary: calcModelLabel };
+    } else {
+        if (calcModelLabel.endsWith(' USB')) {
+            calcModelLabel = calcModelLabel.slice(0, -4);
+        }
+        if (isCEModelConnected() && (getDeviceInfoValue('Python on board') === 'Yes')) {
+            if (is83PCEConnected()) {
+                calcModelLabel += ' Edition Python';
+            } else {
+                calcModelLabel += ' Python';
+            }
+        }
     }
     const deviceName = state.authorizedDevice?.productName || '';
     const infoName = infoProductName || state.deviceInfoProductName || state.deviceModelName || '';
     if (deviceName && infoName && deviceName !== infoName) {
-        return { primary: deviceName, secondary: infoName };
+        return { primary: deviceName, secondary: calcModelLabel || infoName };
     }
     const primary = infoName || deviceName || 'Unknown';
-    return { primary, secondary: null };
+    return { primary, secondary: calcModelLabel };
 }
 
 function deviceMatches(a, b) {
@@ -2293,7 +2317,7 @@ function updateDeviceModelDisplay(infoProductName) {
         return;
     }
     const resolved = resolveDeviceModelName(infoProductName);
-    if (resolved.secondary) {
+    if (resolved.secondary && resolved.secondary !== resolved.primary) {
         els.deviceModel.innerHTML = `${resolved.primary}<div class="device-model-secondary">(${resolved.secondary})</div>`;
     } else {
         els.deviceModel.textContent = resolved.primary;
@@ -3198,6 +3222,7 @@ async function getDeviceInfo() {
                 const toName = info.toName || 'Unknown';
                 if (fromName !== toName) {
                     log(`Calculator model updated from ${fromName} to ${toName} based on device info.`);
+                    updateDeviceModelDisplay();
                 }
             } catch (err) {
                 console.warn('[WebTILP] Failed to parse model update info', err);
