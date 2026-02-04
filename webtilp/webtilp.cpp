@@ -24,8 +24,8 @@ enum {
     TICABLES_ERR_WRITE_TIMEOUT = 6
 };
 
-CableModel g_cable_model = CABLE_USB;
-CalcModel g_calc_model;
+static CableModel g_cable_model = CABLE_USB;
+static CalcModel g_calc_model;
 static CalcHandle* g_calc_handle = nullptr;
 static int g_calc_attached = 0;
 static int g_calc_ready = 0;
@@ -571,6 +571,11 @@ const char* get_flash_os_ext(int model) {
         return nullptr;
     }
     return tifiles_fext_of_flash_os(calc);
+}
+
+EMSCRIPTEN_KEEPALIVE
+const char* get_calc_model_string(void) {
+    return ticalcs_model_to_string(g_calc_model);
 }
 
 EMSCRIPTEN_KEEPALIVE
