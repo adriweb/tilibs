@@ -224,7 +224,7 @@ async function withProgressTimeout(promise, label, timeoutMs = CCALL_TIMEOUT_MS,
  * @param {string} returnType
  * @param {Array<string>} argTypes
  * @param {Array<any>} args
- * @param {{timeoutMs?: number|null, useProgress?: boolean}} options
+ * @param {{timeoutMs?: number|null, useProgress?: boolean, progressLabel?: string}} options
  * @returns {Promise<T>}
  */
 async function ccallAsync(module, name, returnType, argTypes, args, options = {}) {
@@ -238,9 +238,18 @@ async function ccallAsync(module, name, returnType, argTypes, args, options = {}
         ? options.timeoutMs
         : CCALL_TIMEOUT_MS;
     const useProgress = options.useProgress ?? false;
+    const progressLabel = options.progressLabel || name;
     state.lastProgressTs = Date.now();
     const result = module.ccall(name, returnType, argTypes, args, { async: true });
-    return useProgress ? withProgressTimeout(result, name, timeoutMs) : withTimeout(result, name, timeoutMs);
+    if (!useProgress) {
+        return withTimeout(result, name, timeoutMs);
+    }
+    startProgress(progressLabel);
+    try {
+        return await withProgressTimeout(result, progressLabel, timeoutMs);
+    } finally {
+        stopProgress(progressLabel);
+    }
 }
 
 const SETTINGS_DEFAULTS = {
@@ -2502,6 +2511,12 @@ function renderLog() {
 }
 
 function logError(err, context) {
+    if (err?.silent) {
+        return;
+    }
+    if (err && err.name === 'NotFoundError') {
+        return;
+    }
     if (context) {
         console.error(`[WebTILP] ${context}`, err);
     } else {
@@ -2658,22 +2673,15 @@ function refreshProgressDetails() {
     }
 }
 
-function setButtonLoading(button, loading, label) {
+function setButtonLoading(button, loading) {
     if (!button) {
         return;
     }
     if (loading) {
-        const progressLabel = (label || button.dataset.progressLabel || button.textContent || '').trim() || 'Working...';
-        button.dataset.progressLabel = progressLabel;
-        startProgress(progressLabel);
         button.dataset.prevDisabled = button.disabled ? '1' : '0';
         button.disabled = true;
         button.classList.add('loading');
         return;
-    }
-    if (button.dataset.progressLabel) {
-        stopProgress(button.dataset.progressLabel);
-        delete button.dataset.progressLabel;
     }
     button.classList.remove('loading');
     if (button.classList.contains('disabled')) {
@@ -2842,6 +2850,11 @@ async function authorizeDevice(forcePrompt = false) {
         }
     }
     const device = await module.requestTICalculatorDevice();
+    if (!device) {
+        const cancelError = new Error('No device selected.');
+        cancelError.silent = true;
+        throw cancelError;
+    }
     state.authorizedDevice = device;
     if (!hasSilverlinkConnected()) {
         state.deviceModelName = device?.productName || state.deviceModelName;
@@ -3279,7 +3292,7 @@ async function setClockFromDate(module, handle, date, settings) {
             settings.dateFormat,
             settings.state
         ],
-        { timeoutMs: PROGRESS_IDLE_TIMEOUT_MS, useProgress: true }
+        { timeoutMs: PROGRESS_IDLE_TIMEOUT_MS, useProgress: true, progressLabel: 'Syncing clock' }
     );
 }
 
@@ -3527,7 +3540,7 @@ async function refreshDirlist() {
         const module = await initModule();
         const handle = await ensureHandle();
         await updateCapabilities();
-        const result = await ccallAsync(module, 'calc_dirlist_json', 'number', ['number', 'string'], [handle, '/dirlist.json'], { timeoutMs: null, useProgress: true });
+        const result = await ccallAsync(module, 'calc_dirlist_json', 'number', ['number', 'string'], [handle, '/dirlist.json'], { timeoutMs: null, useProgress: true, progressLabel: 'Loading directory listing' });
         if (result !== 0) {
             log(`Dirlist failed (${formatErrorResult(module, result)}).`);
             return;
@@ -5061,7 +5074,7 @@ async function performTransfers(plan, module, options) {
                             'number',
                             ['number', 'string', 'string', 'number', 'number'],
                             [handle, targetFolder, targetName, item.entryType, 0],
-                            { timeoutMs: PROGRESS_IDLE_TIMEOUT_MS, useProgress: true }
+                            { timeoutMs: PROGRESS_IDLE_TIMEOUT_MS, useProgress: true, progressLabel: `Updating ${targetName}` }
                         );
                         if (clearAttrResult !== 0) {
                             const msg = `Failed to clear attributes for ${targetName} (${formatErrorResult(module, clearAttrResult)}).`;
@@ -5076,7 +5089,7 @@ async function performTransfers(plan, module, options) {
                         'number',
                         ['number', 'string', 'string', 'number'],
                         [handle, targetFolder, targetName, item.entryType],
-                        { timeoutMs: PROGRESS_IDLE_TIMEOUT_MS, useProgress: true }
+                        { timeoutMs: PROGRESS_IDLE_TIMEOUT_MS, useProgress: true, progressLabel: `Deleting ${targetName}` }
                     );
                     if (deleteResult !== 0) {
                         const deleteRaw = module ? module._get_raw_protocol_code(deleteResult) : 0;
@@ -5105,7 +5118,7 @@ async function performTransfers(plan, module, options) {
             'number',
             ['number', 'string', 'string', 'number'],
             [handle, item.path, folderOverride, locationCode],
-            { timeoutMs: 60000, useProgress: true }
+            { timeoutMs: 60000, useProgress: true, progressLabel: `Sending ${item.file.name}` }
         );
 
         if (result === 0) {
@@ -5264,8 +5277,8 @@ async function receiveBackup() {
         const isTigroup = backupChoice.format === 'tigroup';
         const target = isTigroup ? '/downloads/backup.tig' : '/downloads/backup.8xg';
         const result = isTigroup
-            ? await ccallAsync(module, 'calc_recv_tigroup', 'number', ['number', 'string', 'number'], [handle, target, backupChoice.mode], { timeoutMs: PROGRESS_IDLE_TIMEOUT_MS, useProgress: true })
-            : await ccallAsync(module, 'calc_recv_backup', 'number', ['number', 'string'], [handle, target], { timeoutMs: PROGRESS_IDLE_TIMEOUT_MS, useProgress: true });
+            ? await ccallAsync(module, 'calc_recv_tigroup', 'number', ['number', 'string', 'number'], [handle, target, backupChoice.mode], { timeoutMs: PROGRESS_IDLE_TIMEOUT_MS, useProgress: true, progressLabel: 'Receiving backup (tigroup)' })
+            : await ccallAsync(module, 'calc_recv_backup', 'number', ['number', 'string'], [handle, target], { timeoutMs: PROGRESS_IDLE_TIMEOUT_MS, useProgress: true, progressLabel: 'Receiving backup' });
         if (result !== 0) {
             log(`Backup failed (${formatErrorResult(module, result)}).`);
             return;
@@ -5308,7 +5321,7 @@ async function receiveOs() {
         const targetName = extension ? `${baseName}.${extension}` : 'ti-nspire-os.tnc';
         const target = `/downloads/${targetName}`;
         state.partialOsPath = target;
-        const result = await ccallAsync(module, 'calc_recv_os', 'number', ['number', 'string'], [handle, target], { timeoutMs: null, useProgress: true });
+        const result = await ccallAsync(module, 'calc_recv_os', 'number', ['number', 'string'], [handle, target], { timeoutMs: null, useProgress: true, progressLabel: 'Receiving OS' });
         if (result !== 0) {
             log(`OS receive failed (${formatErrorResult(module, result)}).`);
             return;
@@ -5366,7 +5379,7 @@ async function dumpRom() {
         }
 
         log('Sending ROM dumper...');
-        let result = await ccallAsync(module, 'calc_dump_rom_1', 'number', ['number'], [handle], { timeoutMs: 30000, useProgress: true });
+        let result = await ccallAsync(module, 'calc_dump_rom_1', 'number', ['number'], [handle], { timeoutMs: 30000, useProgress: true, progressLabel: 'Starting ROM dump' });
         if (result !== 0) {
             log(`ROM dump step 1 failed (${formatErrorResult(module, result)}).`);
             return;
@@ -5374,7 +5387,7 @@ async function dumpRom() {
 
         log('Receiving ROM image...');
         const target = '/downloads/romdump.bin';
-        result = await ccallAsync(module, 'calc_dump_rom_2', 'number', ['number', 'number', 'string'], [handle, 0, target], { timeoutMs: null, useProgress: true });
+        result = await ccallAsync(module, 'calc_dump_rom_2', 'number', ['number', 'number', 'string'], [handle, 0, target], { timeoutMs: null, useProgress: true, progressLabel: 'Dumping ROM' });
         if (result !== 0) {
             log(`ROM dump step 2 failed (${formatErrorResult(module, result)}).`);
             return;
@@ -5449,9 +5462,10 @@ async function receiveSelected() {
                 receivedAny = receivedAny || ok;
                 continue;
             }
+            const progressLabel = `Receiving ${entry.name}`;
             const result = entry.kind === 'app'
-                ? await ccallAsync(module, 'calc_recv_app', 'number', ['number', 'string', 'number', 'string'], [handle, entry.name, entry.type, '/downloads'], { timeoutMs: PROGRESS_IDLE_TIMEOUT_MS, useProgress: true })
-                : await ccallAsync(module, 'calc_recv_var', 'number', ['number', 'string', 'string', 'number', 'string'], [handle, entry.folder, entry.name, entry.type, '/downloads'], { timeoutMs: PROGRESS_IDLE_TIMEOUT_MS, useProgress: true });
+                ? await ccallAsync(module, 'calc_recv_app', 'number', ['number', 'string', 'number', 'string'], [handle, entry.name, entry.type, '/downloads'], { timeoutMs: PROGRESS_IDLE_TIMEOUT_MS, useProgress: true, progressLabel })
+                : await ccallAsync(module, 'calc_recv_var', 'number', ['number', 'string', 'string', 'number', 'string'], [handle, entry.folder, entry.name, entry.type, '/downloads'], { timeoutMs: PROGRESS_IDLE_TIMEOUT_MS, useProgress: true, progressLabel });
             if (result === 0) {
                 await downloadLastReceived(module);
                 log(`Received ${entry.name}.`);
@@ -5491,14 +5505,14 @@ async function deleteSelected() {
         for (const entry of selections) {
             if (entry.isFolder) {
                 const folderPath = entry.folderPath || entry.name;
-                const result = await ccallAsync(module, 'calc_del_folder', 'number', ['number', 'string'], [handle, folderPath], { timeoutMs: PROGRESS_IDLE_TIMEOUT_MS, useProgress: true });
+                const result = await ccallAsync(module, 'calc_del_folder', 'number', ['number', 'string'], [handle, folderPath], { timeoutMs: PROGRESS_IDLE_TIMEOUT_MS, useProgress: true, progressLabel: `Deleting ${folderPath}` });
                 if (result === 0) {
                     log(`Deleted folder ${folderPath}.`);
                 } else {
                     log(`Failed to delete folder ${folderPath} (${formatErrorResult(module, result)}).`);
                 }
             } else {
-                const result = await ccallAsync(module, 'calc_del_var', 'number', ['number', 'string', 'string', 'number'], [handle, entry.folder, entry.name, entry.type], { timeoutMs: PROGRESS_IDLE_TIMEOUT_MS, useProgress: true });
+                const result = await ccallAsync(module, 'calc_del_var', 'number', ['number', 'string', 'string', 'number'], [handle, entry.folder, entry.name, entry.type], { timeoutMs: PROGRESS_IDLE_TIMEOUT_MS, useProgress: true, progressLabel: `Deleting ${entry.name}` });
                 if (result === 0) {
                     log(`Deleted ${entry.name}.`);
                 } else {
@@ -5549,7 +5563,7 @@ async function renameEntry(entry) {
             'number',
             ['number', 'string', 'string', 'number', 'string', 'string', 'number'],
             [handle, oldFolder, currentName, entry.type, newFolder, trimmed, entry.type],
-            { timeoutMs: PROGRESS_IDLE_TIMEOUT_MS, useProgress: true }
+            { timeoutMs: PROGRESS_IDLE_TIMEOUT_MS, useProgress: true, progressLabel: `Renaming ${currentName}` }
         );
         if (result !== 0) {
             log(`Rename failed (${formatErrorResult(module, result)}).`);
@@ -5575,14 +5589,14 @@ async function deleteEntry(entry) {
         const handle = await ensureHandle();
         if (entry.isFolder) {
             const folderPath = entry.folderPath || entry.name;
-            const result = await ccallAsync(module, 'calc_del_folder', 'number', ['number', 'string'], [handle, folderPath], { timeoutMs: PROGRESS_IDLE_TIMEOUT_MS, useProgress: true });
+            const result = await ccallAsync(module, 'calc_del_folder', 'number', ['number', 'string'], [handle, folderPath], { timeoutMs: PROGRESS_IDLE_TIMEOUT_MS, useProgress: true, progressLabel: `Deleting ${folderPath}` });
             if (result === 0) {
                 log(`Deleted folder ${folderPath}.`);
             } else {
                 log(`Failed to delete folder ${folderPath} (${formatErrorResult(module, result)}).`);
             }
         } else {
-            const result = await ccallAsync(module, 'calc_del_var', 'number', ['number', 'string', 'string', 'number'], [handle, entry.folder, entry.name, entry.type], { timeoutMs: PROGRESS_IDLE_TIMEOUT_MS, useProgress: true });
+            const result = await ccallAsync(module, 'calc_del_var', 'number', ['number', 'string', 'string', 'number'], [handle, entry.folder, entry.name, entry.type], { timeoutMs: PROGRESS_IDLE_TIMEOUT_MS, useProgress: true, progressLabel: `Deleting ${entry.name}` });
             if (result === 0) {
                 log(`Deleted ${entry.name}.`);
             } else {
@@ -5610,9 +5624,10 @@ async function downloadEntry(entry) {
         if (!module.FS.analyzePath('/downloads').exists) {
             module.FS.mkdir('/downloads');
         }
+        const progressLabel = `Receiving ${entry.name}`;
         const result = entry.kind === 'app'
-            ? await ccallAsync(module, 'calc_recv_app', 'number', ['number', 'string', 'number', 'string'], [handle, entry.name, entry.type, '/downloads'], { timeoutMs: PROGRESS_IDLE_TIMEOUT_MS, useProgress: true })
-            : await ccallAsync(module, 'calc_recv_var', 'number', ['number', 'string', 'string', 'number', 'string'], [handle, entry.folder, entry.name, entry.type, '/downloads'], { timeoutMs: PROGRESS_IDLE_TIMEOUT_MS, useProgress: true });
+            ? await ccallAsync(module, 'calc_recv_app', 'number', ['number', 'string', 'number', 'string'], [handle, entry.name, entry.type, '/downloads'], { timeoutMs: PROGRESS_IDLE_TIMEOUT_MS, useProgress: true, progressLabel })
+            : await ccallAsync(module, 'calc_recv_var', 'number', ['number', 'string', 'string', 'number', 'string'], [handle, entry.folder, entry.name, entry.type, '/downloads'], { timeoutMs: PROGRESS_IDLE_TIMEOUT_MS, useProgress: true, progressLabel });
         if (result === 0) {
             await downloadLastReceived(module);
             log(`Received ${entry.name}.`);
@@ -5654,7 +5669,7 @@ async function downloadFolderEntriesWithSession(module, handle, folderPath, conf
             'number',
             ['number', 'string', 'string', 'number', 'string'],
             [handle, entry.folder, entry.name, entry.type, '/downloads'],
-            { timeoutMs: PROGRESS_IDLE_TIMEOUT_MS, useProgress: true }
+            { timeoutMs: PROGRESS_IDLE_TIMEOUT_MS, useProgress: true, progressLabel: `Receiving ${entry.name}` }
         );
         if (result === 0) {
             await downloadLastReceived(module);
@@ -5695,7 +5710,7 @@ async function createNewFolder() {
         return;
     }
     const folderPath = parent ? `${parent}/${name}` : name;
-    setButtonLoading(els.btnCreateNewFolder, true, 'Creating folder...');
+    setButtonLoading(els.btnCreateNewFolder, true);
     try {
         await authorizeDevice();
         const module = await initModule();
@@ -5705,7 +5720,7 @@ async function createNewFolder() {
             log('Folder creation is not supported by this calculator.');
             return;
         }
-        const result = await ccallAsync(module, 'calc_new_folder', 'number', ['number', 'string'], [handle, folderPath], { timeoutMs: PROGRESS_IDLE_TIMEOUT_MS, useProgress: true });
+        const result = await ccallAsync(module, 'calc_new_folder', 'number', ['number', 'string'], [handle, folderPath], { timeoutMs: PROGRESS_IDLE_TIMEOUT_MS, useProgress: true, progressLabel: `Creating ${folderPath}` });
         if (result !== 0) {
             log(`Failed to create folder (${formatErrorResult(module, result)}).`);
             return;
@@ -5726,7 +5741,7 @@ async function takeScreenshot() {
         await authorizeDevice();
         const module = await initModule();
         const handle = await ensureHandle();
-        const result = await ccallAsync(module, 'calc_screenshot', 'number', ['number'], [handle], { timeoutMs: PROGRESS_IDLE_TIMEOUT_MS, useProgress: true });
+        const result = await ccallAsync(module, 'calc_screenshot', 'number', ['number'], [handle], { timeoutMs: PROGRESS_IDLE_TIMEOUT_MS, useProgress: true, progressLabel: 'Receiving screenshot' });
         if (result !== 0) {
             log(`Screenshot error (${formatErrorResult(module, result)}).`);
             return;
