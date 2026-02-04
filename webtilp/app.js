@@ -8,6 +8,7 @@ const state = {
     authorizedDevice: null,
     deviceModelName: '',
     deviceInfoProductName: '',
+    deviceInfoEntries: [],
     features: 0,
     dirlist: [],
     selectedFiles: [],
@@ -40,6 +41,7 @@ let stickyHideThreshold = null;
 let stickyVisible = false;
 let dropzoneActive = false;
 let stickyUpdateScheduled = false;
+let lastDropTs = 0;
 
 const FEATURE_FLAGS = {
     OPS_ISREADY : 1 << 0,
@@ -3089,6 +3091,7 @@ async function getDeviceInfo() {
             return;
         }
         const entries = parseInfoText(infoText);
+        state.deviceInfoEntries = entries;
         renderDeviceInfo(entries);
         const productName = entries.find(entry => entry.key.toLowerCase() === 'product name');
         if (productName) {
@@ -3395,6 +3398,8 @@ function clearDeviceData() {
     els.deviceInfoList.innerHTML = '';
     els.deviceModel.textContent = 'Unknown';
     state.deviceModelName = '';
+    state.deviceInfoProductName = '';
+    state.deviceInfoEntries = [];
     els.memoryInfo.textContent = '—';
     els.memoryInfo.title = '';
     const ctx = els.screenshotCanvas.getContext('2d');
@@ -4233,9 +4238,29 @@ async function sendDroppedFiles(files, dropFolder) {
 
         const hasFolder = (state.features & FEATURE_FLAGS.FTS_FOLDER) !== 0;
         const hasArchive = (state.features & FEATURE_FLAGS.OPS_CHATTR) !== 0 || (state.features & FEATURE_FLAGS.FTS_FLASH) !== 0;
+        const folders = hasFolder ? getDirlistFolders() : [];
         const effectiveFolder = hasFolder ? (dropFolder || '') : '';
         if (effectiveFolder) {
             log(`Target folder: ${effectiveFolder}`);
+        }
+        const bundleCandidates = files.filter(isCeBundleFile);
+        if (bundleCandidates.length > 0) {
+            if (bundleCandidates.length !== files.length) {
+                alert('Please transfer bundle files by themselves.');
+                return;
+            }
+            if (bundleCandidates.length > 1) {
+                alert('Please transfer one bundle file at a time.');
+                return;
+            }
+            const bundleResult = await handleCeBundleTransfer(bundleCandidates[0], module, { hasFolder, hasArchive, folders });
+            if (bundleResult) {
+                state.selectedFiles = [];
+                if (bundleResult.successCount > 0) {
+                    setSelectedFiles([]);
+                }
+            }
+            return;
         }
         const plan = await buildTransferPlan(files, module);
         const selections = plan.map(item => ({
@@ -4250,7 +4275,7 @@ async function sendDroppedFiles(files, dropFolder) {
                 // ignore
             }
         });
-        const hasOsTransfer = selections.some(item => item.isOs);
+        const hasOsTransfer = selections.some(item => item.fileClass === 'os');
         if (successCount > 0) {
             setSelectedFiles([]);
             if (!hasOsTransfer) {
@@ -4297,6 +4322,134 @@ function isVarFileClass(fileClass) {
     return ['single', 'group', 'regular', 'tigroup'].includes(fileClass);
 }
 
+const BUNDLE_EXT_RE = /\.b8[34]$/i;
+const BUNDLE_LANGUAGE_APPS = [
+    'Portuguese',
+    'French',
+    'Nederlands',
+    'Svenska',
+    'Espanol',
+    'Deutsch'
+];
+const BUNDLE_LANG_BY_ID = {
+    9: 'English',
+    22: 'Portuguese',
+    12: 'French',
+    19: 'Nederlands',
+    29: 'Svenska',
+    10: 'Espanol',
+    7: 'Deutsch'
+};
+
+function getDeviceInfoValue(label) {
+    if (!label) {
+        return '';
+    }
+    const target = String(label).trim().toLowerCase();
+    if (!state.deviceInfoEntries?.length) {
+        return '';
+    }
+    const entry = state.deviceInfoEntries.find(item => String(item.key || '').trim().toLowerCase() === target);
+    return entry?.value ?? '';
+}
+
+function getLanguageIdValue() {
+    const raw = getDeviceInfoValue('Language ID');
+    if (!raw) {
+        return null;
+    }
+    const match = String(raw).match(/\d+/);
+    if (!match) {
+        return null;
+    }
+    const value = Number(match[0]);
+    return Number.isFinite(value) ? value : null;
+}
+
+function isCeBundleFile(file) {
+    return Boolean(file && BUNDLE_EXT_RE.test(file.name || ''));
+}
+
+function isCEModelConnected() {
+    const name = (getActiveCalcModelString() || state.deviceInfoProductName || state.deviceModelName || state.authorizedDevice?.productName || '')
+        .toLowerCase()
+        .trim();
+    if (!name) {
+        return false;
+    }
+    return name.startsWith('ti-83 premium ce') || name.startsWith('ti-84 plus ce');
+}
+
+function is83PCEConnected() {
+    const name = (getActiveCalcModelString() || state.deviceInfoProductName || state.deviceModelName || state.authorizedDevice?.productName || '')
+        .toLowerCase()
+        .trim();
+    if (!name) {
+        return false;
+    }
+    return name.startsWith('ti-83 premium ce');
+}
+
+function getExistingLanguageApps() {
+    const langs = new Set();
+    const targets = BUNDLE_LANGUAGE_APPS.map(name => name.toLowerCase());
+    state.dirlist.forEach(entry => {
+        if (!entry || entry.is_folder === 1) {
+            return;
+        }
+        const base = String(entry.name || '').toLowerCase();
+        if (targets.includes(base)) {
+            langs.add(base);
+        }
+    });
+    return langs;
+}
+
+function applyBundleDefaults(plan) {
+    const pythonOnBoard = getDeviceInfoValue('Python on board') === 'Yes';
+    const is83PCE = is83PCEConnected();
+    const languageId = getLanguageIdValue();
+    const preferredLang = languageId != null ? (BUNDLE_LANG_BY_ID[languageId] || '') : '';
+    const preferredLangLower = preferredLang.toLowerCase();
+    const existingLangs = getExistingLanguageApps();
+    const languageTargets = new Set(BUNDLE_LANGUAGE_APPS.map(name => name.toLowerCase()));
+
+    plan.forEach(item => {
+        const base = String(item.file?.name || '')
+            .replace(/\.[^.]+$/, '')
+            .toLowerCase();
+        item.selected = true;
+
+        if (base === 'python') {
+            item.selected = pythonOnBoard;
+            return;
+        }
+        if (base === 'pyadaptr') {
+            item.selected = !pythonOnBoard && is83PCE;
+            return;
+        }
+        if (languageTargets.has(base)) {
+            if (existingLangs.has(base)) {
+                item.selected = true;
+            } else if (preferredLangLower && base === preferredLangLower) {
+                item.selected = true;
+            } else {
+                item.selected = false;
+            }
+        }
+    });
+}
+
+function isCEBundleOSFile(item) {
+    if (!item?.file?.name) {
+        return false;
+    }
+    if (item.fileClass === 'os') {
+        return true;
+    }
+    return /\.8[ep]u$/i.test(item.file.name);
+}
+
 async function buildTransferPlan(files, module) {
     const plan = [];
     if (!module.FS.analyzePath('/uploads').exists) {
@@ -4310,16 +4463,13 @@ async function buildTransferPlan(files, module) {
 
         let fileClass = 'unknown';
         let entries = [];
-        let isOs = false;
         try {
-        const infoText = await ccallAsync(module, 'file_get_entries_json', 'string', ['string'], [path], { timeoutMs: 8000 });
+            const infoText = await ccallAsync(module, 'file_get_entries_json', 'string', ['string'], [path], { timeoutMs: 8000 });
             if (infoText && typeof infoText === 'string') {
                 const parsed = JSON.parse(infoText);
                 fileClass = parsed.class || 'unknown';
                 entries = Array.isArray(parsed.entries) ? parsed.entries : [];
             }
-            const osResult = await ccallAsync(module, 'file_is_os', 'number', ['string'], [path], { timeoutMs: 3000 });
-            isOs = osResult === 1;
         } catch (err) {
             console.warn('[WebTILP] Failed to parse file info', err);
         }
@@ -4343,11 +4493,11 @@ async function buildTransferPlan(files, module) {
             file,
             path,
             fileClass,
-            isOs,
             entries,
             entryCount: entries.length,
             entryName: defaultName,
             entryType: entry.type ?? null,
+            entryTypeName: entry.type_name ?? '',
             entryFolder: defaultFolder,
             entryAttr: entry.attr ?? 0,
             defaultLocation,
@@ -4357,6 +4507,168 @@ async function buildTransferPlan(files, module) {
     }
 
     return plan;
+}
+
+async function buildTransferPlanFromFsEntries(entries, module) {
+    const plan = [];
+    for (const entry of entries) {
+        const path = entry.path;
+        const name = entry.name;
+        if (!path || !name) {
+            continue;
+        }
+        let size = 0;
+        try {
+            size = module.FS.stat(path).size;
+        } catch {
+            size = 0;
+        }
+        const file = { name, size };
+
+        const fileClass = entry.class || 'unknown';
+        const entriesInfo = Array.isArray(entry.entries) ? entry.entries : [];
+
+        const entryInfo = entriesInfo[0] || {};
+        const baseName = name.replace(/\.[^.]+$/, '');
+        const defaultName = entryInfo.name || baseName;
+        const defaultFolder = entryInfo.folder || '';
+        const defaultLocation = entryInfo.attr === 3 ? 'archive' : 'ram';
+        let locationMask = entriesInfo.length
+            ? entriesInfo.reduce((mask, item) => mask & (item.location_mask ?? 3), 3)
+            : 3;
+        if (fileClass === 'group') {
+            locationMask = 2;
+        }
+        const locationMode = locationMask === 1
+            ? 'ram'
+            : (locationMask === 2 ? 'archive' : (locationMask === 0 ? 'auto' : defaultLocation));
+
+        plan.push({
+            file,
+            path,
+            fileClass,
+            entries: entriesInfo,
+            entryCount: entriesInfo.length,
+            entryName: defaultName,
+            entryType: entryInfo.type ?? null,
+            entryTypeName: entryInfo.type_name ?? '',
+            entryFolder: defaultFolder,
+            entryAttr: entryInfo.attr ?? 0,
+            defaultLocation,
+            locationMask,
+            locationMode
+        });
+    }
+    return plan;
+}
+
+async function extractBundleFiles(bundleFile, module) {
+    if (!module.FS.analyzePath('/uploads').exists) {
+        module.FS.mkdir('/uploads');
+    }
+    const data = new Uint8Array(await bundleFile.arrayBuffer());
+    const bundlePath = `/uploads/${bundleFile.name}`;
+    module.FS.writeFile(bundlePath, data);
+
+    if (!module.FS.analyzePath('/tmp_bundle').exists) {
+        module.FS.mkdir('/tmp_bundle');
+    }
+    const bundleDir = `/tmp_bundle/${Date.now()}_${Math.random().toString(16).slice(2)}`;
+    module.FS.mkdir(bundleDir);
+
+    let parsed = null;
+    const infoText = await ccallAsync(
+        module,
+        'bundle_extract_json',
+        'string',
+        ['string', 'string'],
+        [bundlePath, bundleDir],
+        { timeoutMs: 15000 }
+    );
+    if (infoText && typeof infoText === 'string') {
+        try {
+            parsed = JSON.parse(infoText);
+        } catch (err) {
+            console.warn('[WebTILP] Failed to parse bundle JSON', err);
+        }
+    }
+    const files = Array.isArray(parsed?.files) ? parsed.files : [];
+    return { bundlePath, bundleDir, files };
+}
+
+async function handleCeBundleTransfer(bundleFile, module, options) {
+    if (!isCEModelConnected()) {
+        alert('This bundle can only be installed on TI-84 Plus CE / TI-83 Premium CE calculators.');
+        return null;
+    }
+
+    const cleanupPaths = [];
+    let bundleDir = '';
+    try {
+        const extracted = await extractBundleFiles(bundleFile, module);
+        bundleDir = extracted.bundleDir;
+        cleanupPaths.push(extracted.bundlePath);
+
+        if (!extracted.files.length) {
+            alert('Bundle archive contains no transferable files.');
+            return null;
+        }
+
+        const plan = await buildTransferPlanFromFsEntries(extracted.files, module);
+        extracted.files.forEach(item => {
+            if (item.path) {
+                cleanupPaths.push(item.path);
+            }
+        });
+        applyBundleDefaults(plan);
+
+        const selections = await openTransferModal(plan, {
+            hasFolder: options.hasFolder,
+            hasArchive: options.hasArchive,
+            folders: options.folders
+        });
+        if (!selections) {
+            return null;
+        }
+
+        const nonOs = selections.filter(item => !isCEBundleOSFile(item));
+        const osItems = selections.filter(item => isCEBundleOSFile(item));
+        const orderedSelections = nonOs.concat(osItems);
+
+        const { successCount } = await performTransfers(orderedSelections, module, {
+            hasFolder: options.hasFolder,
+            hasArchive: options.hasArchive
+        });
+
+        orderedSelections.forEach(item => {
+            try {
+                module.FS.unlink(item.path);
+            } catch {
+                // ignore
+            }
+        });
+
+        const hasOs = orderedSelections.some(item => isCEBundleOSFile(item));
+        if (successCount > 0 && !hasOs) {
+            await refreshDirlist();
+        }
+        return { successCount, hasOs };
+    } finally {
+        cleanupPaths.forEach(path => {
+            try {
+                module.FS.unlink(path);
+            } catch {
+                // ignore
+            }
+        });
+        if (bundleDir) {
+            try {
+                module.FS.rmdir(bundleDir);
+            } catch {
+                // ignore
+            }
+        }
+    }
 }
 
 function openTransferModal(plan, options) {
@@ -4369,6 +4681,12 @@ function openTransferModal(plan, options) {
     document.querySelectorAll('.transfer-folder').forEach(cell => {
         cell.classList.toggle('hidden', !options.hasFolder);
     });
+    document.querySelectorAll('.transfer-select').forEach(cell => {
+        cell.classList.toggle('hidden', false);
+    });
+    document.querySelectorAll('.transfer-type').forEach(cell => {
+        cell.classList.toggle('hidden', false);
+    });
 
     plan.forEach((item, index) => {
         const row = document.createElement('tr');
@@ -4376,9 +4694,14 @@ function openTransferModal(plan, options) {
         const entryLabel = item.entryCount > 1
             ? `${item.entryCount} entries`
             : (item.entryName || item.file.name);
+        const typeLabel = item.entryTypeName
+            || (!(["unknown","single","regular"].includes(item.fileClass)) ? item.fileClass : null)
+            || (item.entryType != null ? `(type ${item.entryType})` : '-');
         const isVar = isVarFileClass(item.fileClass);
         let locationCell = `<td class="transfer-location ${options.hasArchive ? '' : 'hidden'}">-</td>`;
-        if (options.hasArchive && isVar) {
+        if (item.fileClass === "application") {
+            locationCell = `<td class="transfer-location">Archive</td>`;
+        } else if (options.hasArchive && isVar) {
             const mask = item.locationMask ?? 3;
             const locationValue = item.locationMode || item.defaultLocation;
             const allowRam = (mask & 1) !== 0;
@@ -4407,9 +4730,13 @@ function openTransferModal(plan, options) {
         const folderCell = options.hasFolder && isVar
             ? `<td class="transfer-folder"><select class="form-input" data-field="folder">${folderOptions}</select></td>`
             : `<td class="transfer-folder ${options.hasFolder ? '' : 'hidden'}">-</td>`;
+        const selectedAttr = item.selected === false ? '' : 'checked';
+        const selectCell = `<td class="transfer-select"><input type="checkbox" data-field="select" ${selectedAttr}></td>`;
         row.innerHTML = `
+            ${selectCell}
             <td>${item.file.name}</td>
             <td>${entryLabel}</td>
+            <td class="transfer-type">${typeLabel}</td>
             ${locationCell}
             ${folderCell}
         `;
@@ -4437,10 +4764,18 @@ function openTransferModal(plan, options) {
             resolve(null);
         };
         const onConfirm = () => {
-            const selections = plan.map((item, index) => {
+            const selections = [];
+            let selectedCount = 0;
+            plan.forEach((item, index) => {
                 const row = els.transferTableBody.querySelector(`tr[data-index="${index}"]`);
                 if (!row) {
-                    return { ...item };
+                    selections.push({ ...item });
+                    selectedCount += 1;
+                    return;
+                }
+                const checkbox = row.querySelector('[data-field="select"]');
+                if (checkbox && !checkbox.checked) {
+                    return;
                 }
                 const locationSelect = row.querySelector('[data-field="location"]');
                 const location = options.hasArchive && locationSelect
@@ -4449,12 +4784,17 @@ function openTransferModal(plan, options) {
                 const folder = options.hasFolder
                     ? row.querySelector('[data-field="folder"]')?.value || ''
                     : item.entryFolder;
-                return {
+                selections.push({
                     ...item,
                     targetLocation: location,
                     targetFolder: folder
-                };
+                });
+                selectedCount += 1;
             });
+            if (selectedCount === 0) {
+                alert('Select at least one file to transfer.');
+                return;
+            }
             cleanup();
             els.transferModal.classList.add('hidden');
             resolve(selections);
@@ -4734,6 +5074,22 @@ async function sendSelectedFiles() {
         const hasFolder = (state.features & FEATURE_FLAGS.FTS_FOLDER) !== 0;
         const hasArchive = (state.features & FEATURE_FLAGS.OPS_CHATTR) !== 0 || (state.features & FEATURE_FLAGS.FTS_FLASH) !== 0;
         const folders = hasFolder ? getDirlistFolders() : [];
+        const bundleCandidates = files.filter(isCeBundleFile);
+        if (bundleCandidates.length > 0) {
+            if (bundleCandidates.length !== files.length) {
+                alert('Please transfer bundle files by themselves.');
+                return;
+            }
+            if (bundleCandidates.length > 1) {
+                alert('Please transfer one bundle file at a time.');
+                return;
+            }
+            const bundleResult = await handleCeBundleTransfer(bundleCandidates[0], module, { hasFolder, hasArchive, folders });
+            if (bundleResult?.successCount > 0) {
+                setSelectedFiles([]);
+            }
+            return;
+        }
         const plan = await buildTransferPlan(files, module);
         const selections = await openTransferModal(plan, { hasFolder, hasArchive, folders });
         if (!selections) {
@@ -4758,7 +5114,7 @@ async function sendSelectedFiles() {
         });
         state.selectedFiles = [];
 
-        const hasOsTransfer = selections.some(item => item.isOs);
+        const hasOsTransfer = selections.some(item => item.fileClass === 'os');
         if (successCount > 0) {
             setSelectedFiles([]);
             if (!hasOsTransfer) {
@@ -5617,6 +5973,12 @@ function bindEvents() {
     };
     const dropzoneDrop = (event) => {
         event.preventDefault();
+        event.stopPropagation();
+        const now = Date.now();
+        if (now - lastDropTs < 200) {
+            return;
+        }
+        lastDropTs = now;
         const files = getDroppedFiles(event);
         if (!files.length) {
             return;
