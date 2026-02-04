@@ -1054,11 +1054,35 @@ tr:focus-within .row-actions {
 .transfer-table th,
 .transfer-table td {
     vertical-align: middle;
+    padding: 6px 10px;
+}
+
+.transfer-select {
+    width: 40px;
+    text-align: center;
+}
+
+.transfer-type {
+    width: 120px;
+    white-space: nowrap;
+    text-transform: capitalize;
 }
 
 .transfer-table input,
 .transfer-table select {
     width: 100%;
+}
+
+.transfer-select input {
+    width: auto;
+}
+
+.transfer-table .form-input {
+    padding: 4px 8px;
+    min-height: 28px;
+    height: 28px;
+    font-size: 12px;
+    border-radius: 8px;
 }
 
 .settings-grid {

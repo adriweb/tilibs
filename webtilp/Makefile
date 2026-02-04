@@ -21,6 +21,7 @@ INCLUDES = \
 	-I$(LIBTIFILES_DIR)/src \
 	-I$(LIBTICONV_DIR)/src \
 	-I$(LIBUSB_DIR)/libusb \
+	-I$(LIBARCHIVE_DIR)/build-wasm/stage/include \
 	-I$(GLIB_DIR)/include/glib-2.0 \
 	-I$(GLIB_DIR)/lib/glib-2.0/include
 
