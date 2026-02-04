@@ -36,6 +36,8 @@ const state = {
     offlineUpdateShown: false
 };
 
+const MAX_LOG_LINES = 500;
+
 let currentDropTarget = null;
 let stickyHideThreshold = null;
 let stickyVisible = false;
@@ -79,8 +81,51 @@ const CREATE_HANDLE_RETRY_DELAY_MS = 300;
 const PROGRESS_IDLE_TIMEOUT_MS = 5000;
 const AUTO_QUERY_DELAY_MS = 500;
 
+const ERROR_CODE_FALLBACKS = new Map([
+    [257, 'Calculator not ready'],
+    [269, 'Device is busy'],
+    [3, 'Read error'],
+    [4, 'Read timeout'],
+    [5, 'Write error'],
+    [6, 'Write timeout']
+]);
+
 function sleep(ms) {
     return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+function isErrorMessage(message) {
+    if (!message) {
+        return false;
+    }
+    const text = String(message).toLowerCase();
+    if (text.startsWith('error:') || text.startsWith('failed')) {
+        return true;
+    }
+    return text.includes('(error') || text.includes('error ') || text.includes('failed');
+}
+
+function showToast(message, type = 'error') {
+    if (!els.toastContainer) {
+        return;
+    }
+    const toast = document.createElement('div');
+    toast.className = `toast ${type}`;
+    const title = type === 'error' ? 'Error' : 'Notice';
+    toast.innerHTML = `<div class="toast-title">${title}</div><div>${message}</div>`;
+    els.toastContainer.appendChild(toast);
+    requestAnimationFrame(() => {
+        toast.classList.add('show');
+    });
+    const timeout = type === 'error' ? 6000 : 4000;
+    setTimeout(() => {
+        toast.classList.remove('show');
+        setTimeout(() => toast.remove(), 250);
+    }, timeout);
+}
+
+function getFallbackErrorMessage(code) {
+    return ERROR_CODE_FALLBACKS.get(code) || '';
 }
 
 function getErrorMessage(module, code) {
@@ -100,7 +145,8 @@ function formatErrorResult(module, code) {
     const raw = module ? module._get_raw_protocol_code(code) : 0;
     const label = raw ? `0x${raw.toString(16).toUpperCase().padStart(4, '0')}` : `${code}`;
     if (!message) {
-        return `error ${label}`;
+        const fallback = getFallbackErrorMessage(code);
+        return fallback ? `error ${label}: ${fallback}` : `error ${label}`;
     }
     const firstLine = message.split('\n').map(line => line.trim()).find(Boolean) || message;
     const cleaned = firstLine.replace(/^Msg:\s*/i, '');
@@ -1849,7 +1895,8 @@ const els = {
     backupIncludeArchive: document.getElementById('backupIncludeArchive'),
     backupIncludeFlash: document.getElementById('backupIncludeFlash'),
     backupModalOverlay: document.getElementById('backupModalOverlay'),
-    backupModalOverlayText: document.getElementById('backupModalOverlayText')
+    backupModalOverlayText: document.getElementById('backupModalOverlayText'),
+    toastContainer: document.getElementById('toastContainer')
 };
 
 state.settings = loadSettings();
@@ -2424,8 +2471,34 @@ function saveSettingsFromModal() {
 function log(message) {
     const timestamp = new Date().toLocaleTimeString();
     state.logLines.push(`[${timestamp}] ${message}`);
-    els.log.textContent = `${state.logLines.join('\n')}\n`;
+    if (state.logLines.length > MAX_LOG_LINES) {
+        state.logLines.splice(0, state.logLines.length - MAX_LOG_LINES);
+    }
+    renderLog();
     els.log.scrollTop = els.log.scrollHeight;
+    if (isErrorMessage(message)) {
+        showToast(message, 'error');
+    }
+}
+
+function escapeHtml(text) {
+    return String(text)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
+function renderLog() {
+    if (!els.log) {
+        return;
+    }
+    const lines = state.logLines.map(line => {
+        const escaped = escapeHtml(line);
+        return isErrorMessage(line) ? `<span class="log-error">${escaped}</span>` : escaped;
+    });
+    els.log.innerHTML = `${lines.join('<br>')}<br>`;
 }
 
 function logError(err, context) {
@@ -2434,7 +2507,12 @@ function logError(err, context) {
     } else {
         console.error('[WebTILP]', err);
     }
-    log(`ERROR: ${err.message || err}`);
+    let message = err?.message || err;
+    if (typeof message === 'number' || (typeof message === 'string' && /^\d+$/.test(message))) {
+        const code = Number(message);
+        message = formatErrorResult(state.module, code);
+    }
+    log(`ERROR: ${message}`);
 }
 
 function clearActiveOperations(message) {
