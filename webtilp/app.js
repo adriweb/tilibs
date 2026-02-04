@@ -112,7 +112,13 @@ function showToast(message, type = 'error') {
     const toast = document.createElement('div');
     toast.className = `toast ${type}`;
     const title = type === 'error' ? 'Error' : 'Notice';
-    toast.innerHTML = `<div class="toast-title">${title}</div><div>${message}</div>`;
+    const titleEl = document.createElement('div');
+    titleEl.className = 'toast-title';
+    titleEl.textContent = title;
+    const messageEl = document.createElement('div');
+    messageEl.textContent = message;
+    toast.appendChild(titleEl);
+    toast.appendChild(messageEl);
     els.toastContainer.appendChild(toast);
     requestAnimationFrame(() => {
         toast.classList.add('show');
@@ -2318,7 +2324,9 @@ function updateDeviceModelDisplay(infoProductName) {
     }
     const resolved = resolveDeviceModelName(infoProductName);
     if (resolved.secondary && resolved.secondary !== resolved.primary) {
-        els.deviceModel.innerHTML = `${resolved.primary}<div class="device-model-secondary">(${resolved.secondary})</div>`;
+        const primary = escapeHtml(resolved.primary);
+        const secondary = escapeHtml(resolved.secondary);
+        els.deviceModel.innerHTML = `${primary}<div class="device-model-secondary">(${secondary})</div>`;
     } else {
         els.deviceModel.textContent = resolved.primary;
     }
@@ -2439,9 +2447,17 @@ function populateNewFolderParents() {
     const folders = isNspireActive()
         ? getDirlistFolders().sort((a, b) => a.localeCompare(b))
         : [];
-    const options = ['<option value="">(root)</option>']
-        .concat(folders.map(folder => `<option value="${folder}">${folder}</option>`));
-    els.newFolderParent.innerHTML = options.join('');
+    els.newFolderParent.innerHTML = '';
+    const rootOption = document.createElement('option');
+    rootOption.value = '';
+    rootOption.textContent = '(root)';
+    els.newFolderParent.appendChild(rootOption);
+    folders.forEach(folder => {
+        const option = document.createElement('option');
+        option.value = folder;
+        option.textContent = folder;
+        els.newFolderParent.appendChild(option);
+    });
 }
 
 function openNewFolderModal() {
@@ -3237,7 +3253,7 @@ async function getDeviceInfo() {
             const clockInfo = await getClockInfo(module, handle);
             const clockText = formatClockDisplay(clockInfo);
             const clockKey = buildClockRowKey();
-            appendDeviceInfoRow(clockKey, clockText ? clockText : 'Unknown');
+            appendDeviceInfoRowHtml(clockKey, clockText ? clockText : 'Unknown');
         }
         log('Device info retrieved.');
     } catch (err) {
@@ -3406,7 +3422,14 @@ function renderDeviceInfo(entries) {
         const row = document.createElement('div');
         row.className = 'info-row';
         const valueClass = / hash$/i.test(entry.key) ? 'value hash-value' : 'value';
-        row.innerHTML = `<div class="key">${entry.key}</div><div class="${valueClass}">${entry.value}</div>`;
+        const keyEl = document.createElement('div');
+        keyEl.className = 'key';
+        keyEl.textContent = entry.key;
+        const valueEl = document.createElement('div');
+        valueEl.className = valueClass;
+        valueEl.textContent = entry.value;
+        row.appendChild(keyEl);
+        row.appendChild(valueEl);
         els.deviceInfoList.appendChild(row);
     });
     updateMemoryFromDeviceInfo(entries);
@@ -3419,7 +3442,25 @@ function appendDeviceInfoRow(key, value) {
     const row = document.createElement('div');
     row.className = 'info-row';
     const valueClass = / hash$/i.test(key) ? 'value hash-value' : 'value';
-    row.innerHTML = `<div class="key">${key}</div><div class="${valueClass}">${value}</div>`;
+    const keyEl = document.createElement('div');
+    keyEl.className = 'key';
+    keyEl.textContent = key;
+    const valueEl = document.createElement('div');
+    valueEl.className = valueClass;
+    valueEl.textContent = value;
+    row.appendChild(keyEl);
+    row.appendChild(valueEl);
+    els.deviceInfoList.appendChild(row);
+}
+
+function appendDeviceInfoRowHtml(keyHtml, valueHtml) {
+    if (!els.deviceInfoList) {
+        return;
+    }
+    const row = document.createElement('div');
+    row.className = 'info-row';
+    const valueClass = / hash$/i.test(keyHtml) ? 'value hash-value' : 'value';
+    row.innerHTML = `<div class="key">${keyHtml}</div><div class="${valueClass}">${valueHtml}</div>`;
     els.deviceInfoList.appendChild(row);
 }
 
@@ -3668,8 +3709,15 @@ function renderTableView(entries, filter) {
             ? `<span class="indent-bars">${'<span class="indent-bar"></span>'.repeat(depth)}</span>`
             : '';
         const kindLabel = isFolder ? 'folder' : (entry.kind || '');
+        const safeTypeLabel = escapeHtml(typeLabel);
+        const safeLocation = escapeHtml(isFolder ? '-' : location);
+        const safeKindLabel = escapeHtml(kindLabel);
+        const safeFolderCell = escapeHtml(entry.folder || '-') || '-';
+        const sizeHtml = options.sizeLabel ? options.sizeLabel : escapeHtml(sizeLabel);
         const row = document.createElement('tr');
         const normalizedFolderPath = normalizeFolderPath(getEntryFolderPath(entry));
+        const safeName = escapeHtml(entry.name || '');
+        const safeFolderPath = escapeHtml(normalizedFolderPath);
         row.dataset.folderTarget = normalizedFolderPath;
         row.dataset.isFolder = isFolder ? '1' : '0';
         row.dataset.folderPath = normalizedFolderPath;
@@ -3683,26 +3731,33 @@ function renderTableView(entries, filter) {
                 ${canDelete ? '<button class="btn ghost btn-inline action-delete" title="Delete">🗑️</button>' : ''}
             </div>`;
         const toggleButton = isFolder
-            ? `<button class="folder-toggle" type="button" data-folder-path="${normalizedFolderPath}" aria-label="${options.expanded ? 'Collapse folder' : 'Expand folder'}">${options.expanded ? '▾' : '▸'}</button>`
+            ? `<button class="folder-toggle" type="button" data-folder-path="${safeFolderPath}" aria-label="${options.expanded ? 'Collapse folder' : 'Expand folder'}">${options.expanded ? '▾' : '▸'}</button>`
             : '';
         const displayName = isFolder
-            ? `<span class="folder-icon" data-folder-path="${normalizedFolderPath}">📂</span> ${entry.name}`
-            : entry.name;
+            ? `<span class="folder-icon" data-folder-path="${safeFolderPath}">📂</span> ${safeName}`
+            : safeName;
         const summaryText = options.summary ? `<em class="folder-summary">(${options.summary})</em>` : '';
         row.innerHTML = `
-            <td><input type="checkbox" data-name="${entry.name}" data-folder="${entry.folder}" data-folder-path="${normalizedFolderPath}" data-is-folder="${isFolder ? '1' : '0'}" data-type="${entry.type}" data-kind="${isFolder ? 'folder' : entry.kind}"></td>
+            <td><input type="checkbox" data-name="" data-folder="" data-folder-path="" data-is-folder="${isFolder ? '1' : '0'}" data-type="${entry.type}" data-kind=""></td>
             <td>
                 <div class="name-cell">
                     <div class="name-left">${indentBars}${toggleButton}<span class="name-label">${displayName}${summaryText}</span></div>
                     ${rowActions}
                 </div>
             </td>
-            <td>${typeLabel}</td>
-            <td title="${isFolder ? '' : `${sizeValue} bytes`}">${sizeLabel}</td>
-            <td>${isFolder ? '-' : location}</td>
-            <td>${entry.folder || '-'}</td>
-            <td>${kindLabel}</td>
+            <td>${safeTypeLabel}</td>
+            <td title="${isFolder ? '' : `${sizeValue} bytes`}">${sizeHtml}</td>
+            <td>${safeLocation}</td>
+            <td>${safeFolderCell}</td>
+            <td>${safeKindLabel}</td>
         `;
+        const checkbox = row.querySelector('input[type="checkbox"]');
+        if (checkbox) {
+            checkbox.dataset.name = entry.name || '';
+            checkbox.dataset.folder = entry.folder || '';
+            checkbox.dataset.folderPath = normalizedFolderPath;
+            checkbox.dataset.kind = isFolder ? 'folder' : (entry.kind || '');
+        }
         els.varTableBody.appendChild(row);
     };
 
@@ -4266,7 +4321,7 @@ function updateStickyFolderHeader() {
         return;
     }
     tbody.innerHTML = '';
-    const label = parts.length ? `📂 ${parts.join(' > ')}` : '📂';
+    const label = parts.length ? `📂 ${escapeHtml(parts.join(' > '))}` : '📂';
     const padCell = current.querySelector('td');
     const padWidth = padCell ? padCell.offsetWidth : 0;
     const tr = document.createElement('tr');
@@ -4827,8 +4882,8 @@ function openTransferModal(plan, options) {
                 const titleText = mask === 2
                     ? 'Archive-only variable type.'
                     : (mask === 1 ? 'RAM-only variable type.' : 'Mixed locations detected. Keeping file defaults.');
-                const titleAttr = titleText ? `title="${titleText}"` : '';
-                locationCell = `<td class="transfer-location" ${titleAttr}>${label}</td>`;
+                const titleAttr = titleText ? `title="${escapeHtml(titleText)}"` : '';
+                locationCell = `<td class="transfer-location" ${titleAttr}>${escapeHtml(label)}</td>`;
             } else {
                 let optionsHtml = '';
                 if (allowRam) {
@@ -4841,7 +4896,7 @@ function openTransferModal(plan, options) {
             }
         }
         const folderOptions = ['<option value="">(root)</option>']
-            .concat(folders.map(folder => `<option value="${folder}">${folder}</option>`))
+            .concat(folders.map(folder => `<option value="${escapeHtml(folder)}">${escapeHtml(folder)}</option>`))
             .join('');
         const folderCell = options.hasFolder && isVar
             ? `<td class="transfer-folder"><select class="form-input" data-field="folder">${folderOptions}</select></td>`
@@ -4850,9 +4905,9 @@ function openTransferModal(plan, options) {
         const selectCell = `<td class="transfer-select"><input type="checkbox" data-field="select" ${selectedAttr}></td>`;
         row.innerHTML = `
             ${selectCell}
-            <td>${item.file.name}</td>
-            <td>${entryLabel}</td>
-            <td class="transfer-type">${typeLabel}</td>
+            <td>${escapeHtml(item.file.name)}</td>
+            <td>${escapeHtml(entryLabel)}</td>
+            <td class="transfer-type">${escapeHtml(typeLabel)}</td>
             ${locationCell}
             ${folderCell}
         `;
