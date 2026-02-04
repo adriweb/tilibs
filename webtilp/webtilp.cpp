@@ -398,10 +398,22 @@ static void json_append_escaped(GString* out, const char* text)
     if (!text) {
         return;
     }
-    char* escaped = g_strescape(text, nullptr);
-    if (escaped) {
-        g_string_append(out, escaped);
-        g_free(escaped);
+    size_t len = safe_strnlen(text, 4096);
+    for (size_t i = 0; i < len; i++) {
+        unsigned char c = (unsigned char)text[i];
+        switch (c) {
+            case '\"': g_string_append(out, "\\\""); break;
+            case '\\': g_string_append(out, "\\\\"); break;
+            case '\n': g_string_append(out, "\\n"); break;
+            case '\r': g_string_append(out, "\\r"); break;
+            case '\t': g_string_append(out, "\\t"); break;
+            default:
+                if (c < 0x20) {
+                    g_string_append_printf(out, "\\u%04x", (unsigned int)c);
+                } else {
+                    g_string_append_c(out, (char)c);
+                }
+        }
     }
 }
 
