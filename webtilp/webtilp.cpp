@@ -1,28 +1,34 @@
-#include <stdio.h>
-#include <stdlib.h>
+#include <unistd.h>
 #include <emscripten.h>
 #include <libusb.h>
 #include <glib.h>
 #include <archive.h>
 #include <archive_entry.h>
-#include <stdint.h>
-#include <string.h>
-#include <unistd.h>
 
-#include "ticables.h"
-#include "ticalcs.h"
-#include "tifiles.h"
-#include "ticonv.h"
+#include <ticables.h>
+#include <ticalcs.h>
+#include <tifiles.h>
+#include <ticonv.h>
 #include <nsp_cmd.h>
+
+#ifndef __EMSCRIPTEN__
+#define gssize ssize_t
+#endif
 
 extern "C" {
 
 enum {
     TICALCS_ERR_NOT_READY = 257,
     TICALCS_ERR_BUSY = 269,
+    TICABLES_ERR_READ_ERROR = 3,
     TICABLES_ERR_READ_TIMEOUT = 4,
     TICABLES_ERR_WRITE_ERROR = 5,
     TICABLES_ERR_WRITE_TIMEOUT = 6
+};
+
+enum{
+    LOC_RAM = 1,
+    LOC_ARCHIVE = 2
 };
 
 static CableModel g_cable_model = CABLE_USB;
@@ -78,7 +84,7 @@ static void update_calc_model_from_infos(const CalcInfos* infos)
     g_model_update_pending = 1;
     g_calc_model = desired_model;
     if (g_cable_model == CABLE_USB && !ticonv_model_is_tinspire(desired_model)) {
-        int was_attached = g_calc_attached;
+        const int was_attached = g_calc_attached;
         reset_calc_handle_state();
         if (was_attached) {
             g_cable_reopen_needed = 1;
@@ -175,22 +181,20 @@ const char* get_progress_info_json(void)
     text[i] = '\0';
 
     snprintf(buf, sizeof(buf),
-             "{\"cnt\":%d,\"max\":%d,\"rate\":%.6f,\"text\":\"%s\"}",
+             R"({"cnt":%d,"max":%d,"rate":%.6f,"text":"%s"})",
              cnt, max, (double)up->rate, text);
     return buf;
 }
-static int found_port(int *ports)
+static int found_port(const int *ports)
 {
-    int i;
-
-    for(i = PORT_1; i <= PORT_4; i++)
+    for(int i = PORT_1; i <= PORT_4; i++)
         if(ports[i])
             return i;
 
     return 0;
 }
 
-static CablePort find_silverlink_port(void)
+static CablePort find_silverlink_port()
 {
     int *list = nullptr;
     int len = 0;
@@ -214,14 +218,13 @@ static CablePort find_silverlink_port(void)
 /* Scan for USB devices only (fast, returns the first device found) */
 int tilp_device_probe_usb(CalcModel* calc_model, int probe_calc)
 {
-    int err;
     int ret = -1;
     int **cables = nullptr;
     CableHandle* handle;
     CablePort port = (CablePort)0;
 
     printf("Searching for link cables...");
-    CablePort slv_port = find_silverlink_port();
+    const CablePort slv_port = find_silverlink_port();
     if (slv_port) {
         printf("Detected SilverLink on #%d\n", slv_port);
         g_cable_model = CABLE_SLV;
@@ -232,7 +235,7 @@ int tilp_device_probe_usb(CalcModel* calc_model, int probe_calc)
         return -1;
     }
 
-    err = ticables_probing_do(&cables, 5, (ProbingMethod)(PROBE_USB | PROBE_FIRST));
+    int err = ticables_probing_do(&cables, 5, (ProbingMethod)(PROBE_USB | PROBE_FIRST));
     if(err)
     {
         printf("error ticables_probing_do...\n");
@@ -296,8 +299,6 @@ step3:
 
 static int ensure_calc_handle_attached(CableHandle* cable_handle)
 {
-    int attach_result;
-
     if (!cable_handle) {
         printf("ERROR: NULL cable handle provided\n");
         return -1;
@@ -315,7 +316,7 @@ static int ensure_calc_handle_attached(CableHandle* cable_handle)
         }
         printf("Calculator model unknown, probing...\n");
         if (g_force_cable) {
-            int err = ticalcs_probe_usb_calc(cable_handle, &g_calc_model);
+            const int err = ticalcs_probe_usb_calc(cable_handle, &g_calc_model);
             if (err || g_calc_model == CALC_NONE) {
                 printf("ERROR: Failed to probe calculator model\n");
                 return -2;
@@ -340,7 +341,7 @@ static int ensure_calc_handle_attached(CableHandle* cable_handle)
 
     if (!g_calc_attached) {
         ticables_cable_close(cable_handle);
-        attach_result = ticalcs_cable_attach(g_calc_handle, cable_handle);
+        const int attach_result = ticalcs_cable_attach(g_calc_handle, cable_handle);
         if (attach_result != 0) {
             printf("ERROR: Failed to attach cable (error %d)\n", attach_result);
             return attach_result;
@@ -354,7 +355,7 @@ static int ensure_calc_handle_attached(CableHandle* cable_handle)
 
 static int ensure_calc_ready(CableHandle* cable_handle, int force)
 {
-    int attach_result = ensure_calc_handle_attached(cable_handle);
+    const int attach_result = ensure_calc_handle_attached(cable_handle);
     if (attach_result != 0) {
         return attach_result;
     }
@@ -401,9 +402,9 @@ static void json_append_escaped(GString* out, const char* text)
     if (!text) {
         return;
     }
-    size_t len = safe_strnlen(text, 4096);
+    const size_t len = safe_strnlen(text, 4096);
     for (size_t i = 0; i < len; i++) {
-        unsigned char c = (unsigned char)text[i];
+        const unsigned char c = (unsigned char)text[i];
         switch (c) {
             case '\"': g_string_append(out, "\\\""); break;
             case '\\': g_string_append(out, "\\\\"); break;
@@ -422,9 +423,9 @@ static void json_append_escaped(GString* out, const char* text)
 
 static void json_escape_bytes(FILE* fp, const char* text, size_t maxlen)
 {
-    size_t len = safe_strnlen(text, maxlen);
+    const size_t len = safe_strnlen(text, maxlen);
     for (size_t i = 0; i < len; i++) {
-        unsigned char c = (unsigned char)text[i];
+        const unsigned char c = (unsigned char)text[i];
         switch (c) {
             case '\"': fputs("\\\"", fp); break;
             case '\\': fputs("\\\\", fp); break;
@@ -447,8 +448,8 @@ static void write_var_entry_json(FILE* fp, const VarEntry* ve, const char* kind)
     char folder_buf[FLDNAME_MAX * 4];
     char raw_name[VARNAME_MAX + 1];
     char raw_folder[FLDNAME_MAX + 1];
-    size_t name_len = safe_strnlen(ve->name, sizeof(ve->name));
-    size_t folder_len = safe_strnlen(ve->folder, sizeof(ve->folder));
+    const size_t name_len = safe_strnlen(ve->name, sizeof(ve->name));
+    const size_t folder_len = safe_strnlen(ve->folder, sizeof(ve->folder));
 
     memcpy(raw_name, ve->name, name_len);
     raw_name[name_len] = '\0';
@@ -471,35 +472,35 @@ static void write_var_entry_json(FILE* fp, const VarEntry* ve, const char* kind)
     }
 
     const char* type_name = tifiles_vartype2type(g_calc_model, ve->type);
-    int folder_type = tifiles_folder_type(g_calc_model);
-    int is_folder = (folder_type != 0 && ve->type == folder_type);
+    const int folder_type = tifiles_folder_type(g_calc_model);
+    const int is_folder = (folder_type != 0 && ve->type == folder_type);
 
-    fprintf(fp, "{\"name\":\"");
+    fprintf(fp, R"({"name":")");
     json_escape_bytes(fp, name_buf, sizeof(name_buf));
-    fprintf(fp, "\",\"folder\":\"");
+    fprintf(fp, R"(","folder":")");
     json_escape_bytes(fp, folder_buf, sizeof(folder_buf));
-    fprintf(fp, "\",\"type\":%u,\"type_name\":\"", ve->type);
+    fprintf(fp, R"(","type":%u,"type_name":")", ve->type);
     if (type_name && *type_name) {
         json_escape_bytes(fp, type_name, strlen(type_name));
     }
-    fprintf(fp, "\",\"size\":%u,\"attr\":%u,\"kind\":\"%s\",\"is_folder\":%d}",
+    fprintf(fp, R"(","size":%u,"attr":%u,"kind":"%s","is_folder":%d})",
             (unsigned int)ve->size, ve->attr, kind, is_folder ? 1 : 0);
 }
 
-static void write_dirlist_json(FILE* fp, GNode* node, const char* kind, int* first)
+static void write_dirlist_json(FILE* fp, const GNode* node, const char* kind, int* first)
 {
     if (!node) {
         return;
     }
     if (node->parent == nullptr) {
-        GNode* child = node->children;
+        const GNode* child = node->children;
         while (child) {
             write_dirlist_json(fp, child, kind, first);
             child = child->next;
         }
         return;
     }
-    VarEntry* ve = (VarEntry*)node->data;
+    const VarEntry* ve = (VarEntry*)node->data;
     if (ve) {
         if (!ve->name[0]) {
             goto next_node;
@@ -511,7 +512,7 @@ static void write_dirlist_json(FILE* fp, GNode* node, const char* kind, int* fir
         write_var_entry_json(fp, ve, kind);
     }
     next_node:
-        GNode* child = node->children;
+        const GNode* child = node->children;
         while (child) {
             write_dirlist_json(fp, child, kind, first);
             child = child->next;
@@ -567,7 +568,7 @@ void set_calc_model(int model) {
 
 EMSCRIPTEN_KEEPALIVE
 const char* get_flash_os_ext(int model) {
-    CalcModel calc = model ? (CalcModel)model : g_calc_model;
+    const CalcModel calc = model ? (CalcModel)model : g_calc_model;
     if (calc == CALC_NONE) {
         return nullptr;
     }
@@ -581,7 +582,7 @@ const char* get_calc_model_string(void) {
 
 EMSCRIPTEN_KEEPALIVE
 int consume_cable_reopen_flag(void) {
-    int value = g_cable_reopen_needed;
+    const int value = g_cable_reopen_needed;
     g_cable_reopen_needed = 0;
     return value;
 }
@@ -594,7 +595,7 @@ const char* consume_model_update_info(void) {
     }
     g_model_update_pending = 0;
     snprintf(buf, sizeof(buf),
-             "{\"from\":%d,\"to\":%d,\"fromName\":\"%s\",\"toName\":\"%s\"}",
+             R"({"from":%d,"to":%d,"fromName":"%s","toName":"%s"})",
              g_last_model_from,
              g_last_model_to,
              ticalcs_model_to_string(g_last_model_from),
@@ -616,7 +617,7 @@ EMSCRIPTEN_KEEPALIVE
 const char* get_error_message(int code) {
     static char buf[256];
     char* message = nullptr;
-    int ret = ticalcs_error_get(code, &message);
+    const int ret = ticalcs_error_get(code, &message);
     if (ret != 0 || message == nullptr) {
         return "";
     }
@@ -662,8 +663,8 @@ void set_cable_delay(int delay) {
 EMSCRIPTEN_KEEPALIVE
 int check_webusb_support() {
     printf("cable support for CABLE_USB (WebUSB backend)...\n");
-    uint64_t supported = ticables_supported_cables();
-    int usb_supported = (supported & (1ULL << CABLE_USB)) != 0;
+    const uint64_t supported = ticables_supported_cables();
+    const int usb_supported = (supported & (1ULL << CABLE_USB)) != 0;
     printf("USB supported: %d\n", usb_supported);
     return usb_supported;
 }
@@ -705,12 +706,12 @@ int open_cable(CableHandle* handle) {
     printf("DEBUG: Enumerating libusb devices...\n");
     libusb_context *ctx = nullptr;
     libusb_device **devs;
-    ssize_t cnt = libusb_get_device_list(ctx, &devs);
+    const ssize_t cnt = libusb_get_device_list(ctx, &devs);
     printf("DEBUG: Found %d libusb devices\n", (int)cnt);
     if (cnt > 0) {
         for (int i = 0; i < cnt; i++) {
-            struct libusb_device_descriptor desc;
-            int r = libusb_get_device_descriptor(devs[i], &desc);
+            libusb_device_descriptor desc{};
+            const int r = libusb_get_device_descriptor(devs[i], &desc);
             if (r == 0) {
                 printf("DEBUG: Device %d: VID=%04x PID=%04x\n", i, desc.idVendor, desc.idProduct);
             }
@@ -718,7 +719,7 @@ int open_cable(CableHandle* handle) {
         libusb_free_device_list(devs, 1);
     }
 
-    int result = ticables_cable_open(handle);
+    const int result = ticables_cable_open(handle);
     printf("Open result: %d\n", result);
     return result;
 }
@@ -731,7 +732,7 @@ int check_cable(CableHandle* handle) {
     }
     printf("ticables_cable_check()...\n");
     CableStatus status;
-    int result = ticables_cable_check(handle, &status);
+    const int result = ticables_cable_check(handle, &status);
     printf("Check result: %d, status: %d\n", result, status);
     return result;
 }
@@ -745,7 +746,7 @@ int is_ready(CableHandle* cable_handle) {
 
     printf("=== Testing Calculator IsReady ===\n");
     printf("is_ready()...\n");
-    int ready_result = ensure_calc_ready(cable_handle, 1);
+    const int ready_result = ensure_calc_ready(cable_handle, 1);
     printf("Send result: %d\n", ready_result);
     return ready_result;
 }
@@ -758,7 +759,7 @@ int send_probe(CableHandle* handle) {
     }
     printf("ticables_cable_send()...\n");
     uint8_t probe_data[] = {0x08, 0x68, 0x00, 0x00};
-    int result = ticables_cable_send(handle, probe_data, sizeof(probe_data));
+    const int result = ticables_cable_send(handle, probe_data, sizeof(probe_data));
     printf("Send result: %d\n", result);
     return result;
 }
@@ -771,7 +772,7 @@ int receive_data(CableHandle* handle) {
     }
     printf("ticables_cable_recv()...\n");
     uint8_t buffer[256];
-    int result = ticables_cable_recv(handle, buffer, sizeof(buffer));
+    const int result = ticables_cable_recv(handle, buffer, sizeof(buffer));
     printf("Recv result: %d\n", result);
     if (result > 0) {
         printf("Received %d bytes\n", result);
@@ -791,7 +792,7 @@ int close_cable(CableHandle* handle) {
         g_calc_attached = 0;
         g_calc_ready = 0;
     }
-    int result = ticables_cable_close(handle);
+    const int result = ticables_cable_close(handle);
     printf("Close result: %d\n", result);
     return result;
 }
@@ -816,9 +817,9 @@ int cleanup() {
     g_cable_model = CABLE_USB;
     g_force_cable = 0;
     g_force_calc = 0;
-    int result_tifiles = tifiles_library_exit();
-    int result_ticalcs = ticalcs_library_exit();
-    int result_ticables = ticables_library_exit();
+    const int result_tifiles = tifiles_library_exit();
+    const int result_ticalcs = ticalcs_library_exit();
+    const int result_ticables = ticables_library_exit();
     printf("tifiles_library_exit: %d\n", result_tifiles);
     printf("ticalcs_library_exit: %d\n", result_ticalcs);
     printf("ticables_library_exit: %d\n", result_ticables);
@@ -839,7 +840,7 @@ int get_device_info(CableHandle* handle) {
     }
     printf("ticables_cable_get_device_info()...\n");
     CableDeviceInfo info;
-    int result = ticables_cable_get_device_info(handle, &info);
+    const int result = ticables_cable_get_device_info(handle, &info);
     if (result == 0) {
         printf("Device info: family=%d, variant=%d\n", info.family, info.variant);
     }
@@ -847,7 +848,7 @@ int get_device_info(CableHandle* handle) {
 }
 
 // Helper function to traverse and print directory tree
-static void print_dirlist_node(GNode* node, int depth) {
+static void print_dirlist_node(const GNode* node, int depth) {
     if (!node) return;
 
     VarEntry* ve = (VarEntry*)node->data;
@@ -858,7 +859,7 @@ static void print_dirlist_node(GNode* node, int depth) {
     }
 
     // Recursively print children
-    GNode* child = node->children;
+    const GNode* child = node->children;
     while (child) {
         print_dirlist_node(child, depth + 1);
         child = child->next;
@@ -873,7 +874,7 @@ int calc_screenshot(CableHandle* cable_handle) {
     }
 
     printf("=== Testing Calculator Screenshot ===\n");
-    int ready_result = ensure_calc_ready(cable_handle, 0);
+    const int ready_result = ensure_calc_ready(cable_handle, 0);
     if (ready_result != 0) {
         return ready_result;
     }
@@ -882,7 +883,7 @@ int calc_screenshot(CableHandle* cable_handle) {
     uint8_t* bitmap = nullptr;
 
     printf("Receiving screenshot from calculator...\n");
-    int result = ticalcs_calc_recv_screen_rgb888(g_calc_handle, &sc, &bitmap);
+    const int result = ticalcs_calc_recv_screen_rgb888(g_calc_handle, &sc, &bitmap);
 
     if (result == 0 && bitmap) {
         printf("Screenshot received successfully!\n");
@@ -895,7 +896,7 @@ int calc_screenshot(CableHandle* cable_handle) {
 
         unsigned int out_width = sc.width;
         unsigned int out_height = sc.height;
-        uint8_t* out_bitmap = bitmap;
+        const uint8_t* out_bitmap = bitmap;
 
         if (sc.clipped_width && sc.clipped_height &&
             (sc.clipped_width < sc.width || sc.clipped_height < sc.height)) {
@@ -947,7 +948,7 @@ uint32_t calc_features(CableHandle* cable_handle) {
         printf("ERROR: NULL cable handle provided\n");
         return 0;
     }
-    int attach_result = ensure_calc_handle_attached(cable_handle);
+    const int attach_result = ensure_calc_handle_attached(cable_handle);
     if (attach_result != 0) {
         return 0;
     }
@@ -960,7 +961,7 @@ int calc_send_key(CableHandle* cable_handle, uint32_t key) {
         printf("ERROR: NULL cable handle provided\n");
         return -1;
     }
-    int ready_result = ensure_calc_ready(cable_handle, 0);
+    const int ready_result = ensure_calc_ready(cable_handle, 0);
     if (ready_result != 0) {
         return ready_result;
     }
@@ -969,21 +970,20 @@ int calc_send_key(CableHandle* cable_handle, uint32_t key) {
 
 EMSCRIPTEN_KEEPALIVE
 const char* calc_get_info_string(CableHandle* cable_handle) {
-    static char info_buf[4096];
-    CalcInfos infos;
-
     if (!cable_handle) {
         printf("ERROR: NULL cable handle provided\n");
         return "";
     }
 
-    int ready_result = ensure_calc_ready(cable_handle, 0);
+    const int ready_result = ensure_calc_ready(cable_handle, 0);
     if (ready_result != 0) {
         return "";
     }
 
-    memset(&infos, 0, sizeof(infos));
-    int result = ticalcs_calc_get_version(g_calc_handle, &infos);
+    static char info_buf[4096];
+    CalcInfos infos{};
+
+    const int result = ticalcs_calc_get_version(g_calc_handle, &infos);
     if (result != 0) {
         printf("ERROR: Failed to get calc infos (error %d)\n", result);
         return "";
@@ -1022,9 +1022,6 @@ static int tilp_calc_check_version(const char *ti9x_ver)
 
 EMSCRIPTEN_KEEPALIVE
 const char* calc_get_clock_json(CableHandle* cable_handle) {
-    static char clock_buf[256];
-    CalcClock clock;
-
     if (!cable_handle) {
         printf("ERROR: NULL cable handle provided\n");
         return "";
@@ -1039,8 +1036,10 @@ const char* calc_get_clock_json(CableHandle* cable_handle) {
         return "";
     }
 
-    memset(&clock, 0, sizeof(clock));
-    int result = ticalcs_calc_get_clock(g_calc_handle, &clock);
+    static char clock_buf[256];
+    CalcClock clock{};
+
+    const int result = ticalcs_calc_get_clock(g_calc_handle, &clock);
     if (result != 0) {
         printf("ERROR: Failed to get clock (error %d)\n", result);
         return "";
@@ -1063,13 +1062,12 @@ int calc_set_clock(CableHandle* cable_handle, int year, int month, int day, int 
         return -1;
     }
 
-    int ready_result = ensure_calc_ready(cable_handle, 0);
+    const int ready_result = ensure_calc_ready(cable_handle, 0);
     if (ready_result != 0) {
         return ready_result;
     }
 
-    CalcClock clock;
-    memset(&clock, 0, sizeof(clock));
+    CalcClock clock{};
     clock.year = (uint16_t)year;
     clock.month = (uint8_t)month;
     clock.day = (uint8_t)day;
@@ -1091,14 +1089,14 @@ int calc_dirlist_json(CableHandle* cable_handle, const char* path) {
     }
 
     const char* out_path = (path && *path) ? path : "/dirlist.json";
-    int ready_result = ensure_calc_ready(cable_handle, 0);
+    const int ready_result = ensure_calc_ready(cable_handle, 0);
     if (ready_result != 0) {
         return ready_result;
     }
 
     GNode* vars = nullptr;
     GNode* apps = nullptr;
-    int result = ticalcs_calc_get_dirlist(g_calc_handle, &vars, &apps);
+    const int result = ticalcs_calc_get_dirlist(g_calc_handle, &vars, &apps);
     if (result != 0) {
         return result;
     }
@@ -1117,7 +1115,7 @@ int calc_dirlist_json(CableHandle* cable_handle, const char* path) {
         return -2;
     }
 
-    fprintf(fp, "{\"memory\":{\"ram_free\":%u,\"flash_free\":%u,\"ok\":%d},\"vars\":[",
+    fprintf(fp, R"({"memory":{"ram_free":%u,"flash_free":%u,"ok":%d},"vars":[)",
             (unsigned int)ram_free, (unsigned int)flash_free, mem_ok);
     int first = 1;
     write_dirlist_json(fp, vars, "var", &first);
@@ -1143,12 +1141,12 @@ int calc_recv_backup(CableHandle* cable_handle, const char* path) {
         printf("ERROR: No backup path provided\n");
         return -2;
     }
-    int ready_result = ensure_calc_ready(cable_handle, 0);
+    const int ready_result = ensure_calc_ready(cable_handle, 0);
     if (ready_result != 0) {
         return ready_result;
     }
 
-    int result = ticalcs_calc_recv_backup2(g_calc_handle, path);
+    const int result = ticalcs_calc_recv_backup2(g_calc_handle, path);
     if (result == 0) {
         write_last_path(path);
     }
@@ -1165,12 +1163,12 @@ int calc_recv_tigroup(CableHandle* cable_handle, const char* path, int mode) {
         printf("ERROR: No tigroup path provided\n");
         return -2;
     }
-    int ready_result = ensure_calc_ready(cable_handle, 0);
+    const int ready_result = ensure_calc_ready(cable_handle, 0);
     if (ready_result != 0) {
         return ready_result;
     }
 
-    int result = ticalcs_calc_recv_tigroup2(g_calc_handle, path, (TigMode)mode);
+    const int result = ticalcs_calc_recv_tigroup2(g_calc_handle, path, (TigMode)mode);
     if (result == 0) {
         write_last_path(path);
     }
@@ -1187,12 +1185,12 @@ int calc_recv_os(CableHandle* cable_handle, const char* path) {
         printf("ERROR: No OS output path provided\n");
         return -2;
     }
-    int ready_result = ensure_calc_ready(cable_handle, 0);
+    const int ready_result = ensure_calc_ready(cable_handle, 0);
     if (ready_result != 0) {
         return ready_result;
     }
 
-    int result = ticalcs_calc_recv_os2(g_calc_handle, path);
+    const int result = ticalcs_calc_recv_os2(g_calc_handle, path);
     if (result == 0) {
         write_last_path(path);
     }
@@ -1206,7 +1204,7 @@ int calc_dump_rom_1(CableHandle* cable_handle) {
         return -1;
     }
 
-    int ready_result = ensure_calc_ready(cable_handle, 0);
+    const int ready_result = ensure_calc_ready(cable_handle, 0);
     if (ready_result != 0) {
         return ready_result;
     }
@@ -1225,12 +1223,12 @@ int calc_dump_rom_2(CableHandle* cable_handle, int size, const char* path) {
         return -2;
     }
 
-    int ready_result = ensure_calc_ready(cable_handle, 0);
+    const int ready_result = ensure_calc_ready(cable_handle, 0);
     if (ready_result != 0) {
         return ready_result;
     }
 
-    int result = ticalcs_calc_dump_rom_2(g_calc_handle, (CalcDumpSize)size, path);
+    const int result = ticalcs_calc_dump_rom_2(g_calc_handle, (CalcDumpSize)size, path);
     if (result == 0) {
         write_last_path(path);
     }
@@ -1328,13 +1326,12 @@ int calc_recv_var(CableHandle* cable_handle, const char* folder, const char* nam
     }
     const char* dir = (out_dir && *out_dir) ? out_dir : "/downloads";
 
-    int ready_result = ensure_calc_ready(cable_handle, 0);
+    const int ready_result = ensure_calc_ready(cable_handle, 0);
     if (ready_result != 0) {
         return ready_result;
     }
 
-    VarEntry req;
-    memset(&req, 0, sizeof(req));
+    VarEntry req{};
     if (folder && *folder) {
         strncpy(req.folder, folder, sizeof(req.folder) - 1);
     }
@@ -1345,7 +1342,7 @@ int calc_recv_var(CableHandle* cable_handle, const char* folder, const char* nam
     if (!base) {
         return -3;
     }
-    size_t full_len = strlen(dir) + strlen(base) + 2;
+    const size_t full_len = strlen(dir) + strlen(base) + 2;
     char* full_path = (char*)malloc(full_len);
     if (!full_path) {
         g_free(base);
@@ -1354,7 +1351,7 @@ int calc_recv_var(CableHandle* cable_handle, const char* folder, const char* nam
     snprintf(full_path, full_len, "%s/%s", dir, base);
     g_free(base);
 
-    int result = ticalcs_calc_recv_var2(g_calc_handle, MODE_NORMAL, full_path, &req);
+    const int result = ticalcs_calc_recv_var2(g_calc_handle, MODE_NORMAL, full_path, &req);
     if (result == 0) {
         write_last_path(full_path);
     }
@@ -1374,13 +1371,12 @@ int calc_recv_app(CableHandle* cable_handle, const char* name, uint8_t type, con
     }
     const char* dir = (out_dir && *out_dir) ? out_dir : "/downloads";
 
-    int ready_result = ensure_calc_ready(cable_handle, 0);
+    const int ready_result = ensure_calc_ready(cable_handle, 0);
     if (ready_result != 0) {
         return ready_result;
     }
 
-    VarEntry req;
-    memset(&req, 0, sizeof(req));
+    VarEntry req{};
     strncpy(req.name, name, sizeof(req.name) - 1);
     req.type = type;
 
@@ -1388,7 +1384,7 @@ int calc_recv_app(CableHandle* cable_handle, const char* name, uint8_t type, con
     if (!base) {
         return -3;
     }
-    size_t full_len = strlen(dir) + strlen(base) + 2;
+    const size_t full_len = strlen(dir) + strlen(base) + 2;
     char* full_path = (char*)malloc(full_len);
     if (!full_path) {
         g_free(base);
@@ -1397,7 +1393,7 @@ int calc_recv_app(CableHandle* cable_handle, const char* name, uint8_t type, con
     snprintf(full_path, full_len, "%s/%s", dir, base);
     g_free(base);
 
-    int result = ticalcs_calc_recv_app2(g_calc_handle, full_path, &req);
+    const int result = ticalcs_calc_recv_app2(g_calc_handle, full_path, &req);
     if (result == 0) {
         write_last_path(full_path);
     }
@@ -1416,7 +1412,7 @@ int calc_del_var(CableHandle* cable_handle, const char* folder, const char* name
         return -2;
     }
 
-    int ready_result = ensure_calc_ready(cable_handle, 0);
+    const int ready_result = ensure_calc_ready(cable_handle, 0);
     if (ready_result != 0) {
         return ready_result;
     }
@@ -1425,8 +1421,7 @@ int calc_del_var(CableHandle* cable_handle, const char* folder, const char* name
         return -3;
     }
 
-    VarEntry req;
-    memset(&req, 0, sizeof(req));
+    VarEntry req{};
     if (folder && *folder) {
         strncpy(req.folder, folder, sizeof(req.folder) - 1);
     }
@@ -1447,7 +1442,7 @@ int calc_new_folder(CableHandle* cable_handle, const char* folder_path) {
         return -2;
     }
 
-    int ready_result = ensure_calc_ready(cable_handle, 0);
+    const int ready_result = ensure_calc_ready(cable_handle, 0);
     if (ready_result != 0) {
         return ready_result;
     }
@@ -1456,8 +1451,7 @@ int calc_new_folder(CableHandle* cable_handle, const char* folder_path) {
         return -3;
     }
 
-    VarEntry req;
-    memset(&req, 0, sizeof(req));
+    VarEntry req{};
     strncpy(req.folder, folder_path, sizeof(req.folder) - 1);
 
     return ticalcs_calc_new_fld(g_calc_handle, &req);
@@ -1474,7 +1468,7 @@ int calc_del_folder(CableHandle* cable_handle, const char* folder_path) {
         return -2;
     }
 
-    int ready_result = ensure_calc_ready(cable_handle, 0);
+    const int ready_result = ensure_calc_ready(cable_handle, 0);
     if (ready_result != 0) {
         return ready_result;
     }
@@ -1483,8 +1477,7 @@ int calc_del_folder(CableHandle* cable_handle, const char* folder_path) {
         return -3;
     }
 
-    VarEntry req;
-    memset(&req, 0, sizeof(req));
+    VarEntry req{};
     strncpy(req.folder, folder_path, sizeof(req.folder) - 1);
 
     return ticalcs_calc_del_fld(g_calc_handle, &req);
@@ -1507,7 +1500,7 @@ int calc_rename_var(CableHandle* cable_handle,
         return -2;
     }
 
-    int ready_result = ensure_calc_ready(cable_handle, 0);
+    const int ready_result = ensure_calc_ready(cable_handle, 0);
     if (ready_result != 0) {
         return ready_result;
     }
@@ -1516,16 +1509,14 @@ int calc_rename_var(CableHandle* cable_handle,
         return -3;
     }
 
-    VarEntry old_req;
-    memset(&old_req, 0, sizeof(old_req));
+    VarEntry old_req{};
     if (old_folder && *old_folder) {
         strncpy(old_req.folder, old_folder, sizeof(old_req.folder) - 1);
     }
     strncpy(old_req.name, old_name, sizeof(old_req.name) - 1);
     old_req.type = old_type;
 
-    VarEntry new_req;
-    memset(&new_req, 0, sizeof(new_req));
+    VarEntry new_req{};
     if (new_folder && *new_folder) {
         strncpy(new_req.folder, new_folder, sizeof(new_req.folder) - 1);
     }
@@ -1546,13 +1537,12 @@ int calc_change_attr(CableHandle* cable_handle, const char* folder, const char* 
         return -2;
     }
 
-    int ready_result = ensure_calc_ready(cable_handle, 0);
+    const int ready_result = ensure_calc_ready(cable_handle, 0);
     if (ready_result != 0) {
         return ready_result;
     }
 
-    VarEntry req;
-    memset(&req, 0, sizeof(req));
+    VarEntry req{};
     if (folder && *folder) {
         strncpy(req.folder, folder, sizeof(req.folder) - 1);
     }
@@ -1566,8 +1556,6 @@ EMSCRIPTEN_KEEPALIVE
 const char* file_get_entries_json(const char* filename) {
     static char* json_buf = nullptr;
     static size_t json_len = 0;
-    const unsigned int LOC_RAM = 1;
-    const unsigned int LOC_ARCHIVE = 2;
 
     if (!filename || !*filename) {
         return "[]";
@@ -1577,10 +1565,10 @@ const char* file_get_entries_json(const char* filename) {
         return "[]";
     }
 
-    FileClass fclass = tifiles_file_get_class(filename);
+    const FileClass fclass = tifiles_file_get_class(filename);
     const char* class_name = tifiles_class_to_string(fclass);
     FileContent* content = tifiles_content_create_regular(g_calc_model);
-    int ret = tifiles_file_read_regular(filename, content);
+    const int ret = tifiles_file_read_regular(filename, content);
 
     GString* json = g_string_new(nullptr);
     g_string_append(json, "{\"class\":\"");
@@ -1607,23 +1595,23 @@ const char* file_get_entries_json(const char* filename) {
     }
 
     for (unsigned int i = 0; i < content->num_entries; i++) {
-        VarEntry* ve = content->entries[i];
+        const VarEntry* ve = content->entries[i];
         if (!ve) {
             continue;
         }
-        unsigned int location_mask = LOC_RAM | LOC_ARCHIVE;
-        int flash_type = tifiles_flash_type(g_calc_model);
+        unsigned int location_mask = (LOC_RAM | LOC_ARCHIVE);
+        const int flash_type = tifiles_flash_type(g_calc_model);
         const char* type_name = tifiles_vartype2type(g_calc_model, ve->type);
-        if (flash_type >= 0 && ve->type == (uint8_t)flash_type) {
-            location_mask = LOC_ARCHIVE;
-        } else if (type_name && (g_ascii_strcasecmp(type_name, "CERT") == 0
-                   || g_ascii_strcasecmp(type_name, "PIC") == 0
-                   || g_ascii_strcasecmp(type_name, "IMAGE") == 0
-                   || g_ascii_strcasecmp(type_name, "GRP") == 0)) {
+        if ((flash_type >= 0 && ve->type == (uint8_t)flash_type)
+            || (type_name &&
+                (  g_ascii_strcasecmp(type_name, "CERT") == 0
+                || g_ascii_strcasecmp(type_name, "PIC") == 0
+                || g_ascii_strcasecmp(type_name, "IMAGE") == 0
+                || g_ascii_strcasecmp(type_name, "GRP") == 0))) {
             location_mask = LOC_ARCHIVE;
         }
-        char name_buf[128] = {0};
-        char folder_buf[128] = {0};
+        char name_buf[128] = {};
+        char folder_buf[128] = {};
         const char* raw_name = ve->name;
         const char* raw_folder = ve->folder;
         if (raw_name && *raw_name) {
@@ -1679,8 +1667,8 @@ EMSCRIPTEN_KEEPALIVE
 const char* bundle_extract_json(const char* filename, const char* out_dir) {
     static char* json_buf = nullptr;
     static size_t json_len = 0;
-    struct archive* archive = nullptr;
-    struct archive_entry* entry = nullptr;
+    archive* archive = nullptr;
+    archive_entry* entry = nullptr;
     FILE* fp = nullptr;
 
     if (!out_dir || !*out_dir) {
@@ -1689,7 +1677,7 @@ const char* bundle_extract_json(const char* filename, const char* out_dir) {
 
     g_mkdir_with_parents(out_dir, 0755);
 
-    GString* json = g_string_new("{\"dir\":\"");
+    GString* json = g_string_new(R"({"dir":")");
     json_append_escaped(json, out_dir);
     g_string_append(json, "\",\"files\":[");
 
@@ -1753,16 +1741,16 @@ const char* bundle_extract_json(const char* filename, const char* out_dir) {
             }
 
             char* out_path = g_build_filename(out_dir, base, nullptr);
-            FILE* fp = fopen(out_path, "wb");
-            if (!fp) {
+            FILE* fp_out = fopen(out_path, "wb");
+            if (!fp_out) {
                 g_free(out_path);
                 g_free(base);
                 archive_read_data_skip(archive);
                 continue;
             }
-            int fd = fileno(fp);
+            int fd = fileno(fp_out);
             la_ssize_t bytes = archive_read_data_into_fd(archive, fd);
-            fclose(fp);
+            fclose(fp_out);
             if (bytes < 0) {
                 unlink(out_path);
                 g_free(out_path);
@@ -1773,31 +1761,32 @@ const char* bundle_extract_json(const char* filename, const char* out_dir) {
             FileClass fclass = TIFILE_NONE;
             const char* class_name = "unknown";
             GString* entries_json = g_string_new("[");
-            unsigned int entry_count = 0;
             if (tifiles_file_is_ti(out_path)) {
                 fclass = tifiles_file_get_class(out_path);
                 class_name = tifiles_class_to_string(fclass);
                 FileContent* content = tifiles_content_create_regular(g_calc_model);
                 int read_ret = tifiles_file_read_regular(out_path, content);
-                if (read_ret == 0) {
+                if (read_ret == 0)
+                {
+                    unsigned int entry_count = 0;
                     for (unsigned int i = 0; i < content->num_entries; i++) {
                         VarEntry* ve = content->entries[i];
                         if (!ve) {
                             continue;
                         }
-                        unsigned int location_mask = (1u | 2u);
+                        unsigned int location_mask = (LOC_RAM | LOC_ARCHIVE);
                         int flash_type = tifiles_flash_type(g_calc_model);
                         const char* type_name = tifiles_vartype2type(g_calc_model, ve->type);
-                        if (flash_type >= 0 && ve->type == (uint8_t)flash_type) {
-                            location_mask = 2;
-                        } else if (type_name && (g_ascii_strcasecmp(type_name, "CERT") == 0
-                                   || g_ascii_strcasecmp(type_name, "PIC") == 0
-                                   || g_ascii_strcasecmp(type_name, "IMAGE") == 0
-                                   || g_ascii_strcasecmp(type_name, "GRP") == 0)) {
-                            location_mask = 2;
+                        if ((flash_type >= 0 && ve->type == (uint8_t)flash_type)
+                            || (type_name &&
+                                (  g_ascii_strcasecmp(type_name, "CERT") == 0
+                                || g_ascii_strcasecmp(type_name, "PIC") == 0
+                                || g_ascii_strcasecmp(type_name, "IMAGE") == 0
+                                || g_ascii_strcasecmp(type_name, "GRP") == 0))) {
+                            location_mask = LOC_ARCHIVE;
                         }
-                        char name_buf[128] = {0};
-                        char folder_buf[128] = {0};
+                        char name_buf[128] = {};
+                        char folder_buf[128] = {};
                         const char* raw_name = ve->name;
                         const char* raw_folder = ve->folder;
                         if (raw_name && *raw_name) {
@@ -1892,7 +1881,7 @@ int send_file_custom(CableHandle* cable_handle, const char* filename, const char
     }
 
     int result = 0;
-    FileClass fclass = tifiles_file_get_class(filename);
+    const FileClass fclass = tifiles_file_get_class(filename);
     int ready_result = 0;
 
     if (tifiles_file_is_os(filename)) {

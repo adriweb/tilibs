@@ -226,3 +226,19 @@ else()
             EXCLUDE_FROM_ALL
     )
 endif()
+
+# for Clion support... we don't actually build it here. see build_wasm.sh + webtilp/Makefile
+if (NOT EMSCRIPTEN)
+    add_executable(webtilp_cpp webtilp/webtilp.cpp)
+    add_dependencies(webtilp_cpp ticonv ticables2 tifiles2 ticalcs2)
+    target_include_directories(webtilp_cpp
+        PRIVATE "${PROJECT_SOURCE_DIR}/libticonv/trunk/src"
+        PRIVATE "${PROJECT_SOURCE_DIR}/libticables/trunk/src"
+        PRIVATE "${PROJECT_SOURCE_DIR}/libtifiles/trunk/src"
+        PRIVATE "${PROJECT_SOURCE_DIR}/libticalcs/trunk/src"
+        PRIVATE "${PROJECT_SOURCE_DIR}/glib-emscripten-built/include/glib-2.0"
+        PRIVATE "${PROJECT_SOURCE_DIR}/libarchive/build-wasm/stage/include"
+        PRIVATE "${PROJECT_SOURCE_DIR}/libusb/libusb/"
+        PRIVATE "~/emsdk/upstream/emscripten/cache/sysroot/include"
+    )
+endif()
