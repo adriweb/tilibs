@@ -13,6 +13,7 @@
 #include "ticalcs.h"
 #include "tifiles.h"
 #include "ticonv.h"
+#include <nsp_cmd.h>
 
 extern "C" {
 
@@ -1234,6 +1235,77 @@ int calc_dump_rom_2(CableHandle* cable_handle, int size, const char* path) {
         write_last_path(path);
     }
     return result;
+}
+
+EMSCRIPTEN_KEEPALIVE
+int calc_leave_exam_mode(CableHandle* cable_handle) {
+    if (!cable_handle) {
+        printf("ERROR: NULL cable handle provided\n");
+        return -1;
+    }
+    const int ready_result = ensure_calc_ready(cable_handle, 0);
+    if (ready_result != 0) {
+        return ready_result;
+    }
+
+    if (g_calc_model == CALC_TI84PCE_USB || g_calc_model == CALC_TI83PCE_USB || g_calc_model == CALC_TI84PT_USB || g_calc_model == CALC_TI82A_USB || g_calc_model == CALC_TI82AEP_USB) {
+        VarRequest vr{};
+        VarEntry ve{};
+
+        strncpy(vr.name, "RclWindw", sizeof(vr.name));
+        vr.type = TI84p_ZSTO;
+        strncpy(ve.name, vr.name, sizeof(ve.name));
+        ve.type = vr.type;
+
+        char* base = tifiles_build_filename(g_calc_model, &ve);
+        if (!base) {
+            return 512; // ERR_MALLOC
+        }
+        char* path = g_build_filename("/tmp", base, nullptr);
+        tifiles_filename_free(base);
+        if (!path) {
+            return 512; // ERR_MALLOC
+        }
+
+        int ret = ticalcs_calc_recv_var2(g_calc_handle, MODE_NORMAL, path, &vr);
+        if (!ret) {
+            ret = ticalcs_calc_send_var2(g_calc_handle, MODE_NORMAL, path);
+        }
+        remove(path);
+        g_free(path);
+        return ret;
+    }
+    if (ticonv_model_is_tinspire(g_calc_model)) {
+        int ret = 0;
+        if (!ret) {
+            // Leave PTT packet
+            const uint8_t data[9] = { 0x00, 0x00, 0x04, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00 };
+            ret = nsp_cmd_s_generic_data(g_calc_handle, sizeof(data) / sizeof(data[0]), data, NSP_SID_REMOTE_MGMT, 0x00);
+            if (!ret || ret == 266 /*ERR_INVALID_PACKET*/) {
+                ret = nsp_cmd_r_generic_data(g_calc_handle, nullptr, nullptr);
+            }
+        }
+        if (!ret) {
+            // Reset packet
+            const uint8_t data[9] = { 0x00, 0x00, 0x06, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00 };
+            ret = nsp_cmd_s_generic_data(g_calc_handle, sizeof(data) / sizeof(data[0]), data, NSP_SID_REMOTE_MGMT, 0x00);
+            if (!ret || ret == 266 /*ERR_INVALID_PACKET*/) {
+                (void)nsp_cmd_r_generic_data(g_calc_handle, nullptr, nullptr);
+            }
+        }
+        return ret;
+    }
+
+    printf("ERROR: Leave exam mode is only supported on TI-Nspire or CE models\n");
+    return -2;
+}
+
+EMSCRIPTEN_KEEPALIVE
+int calc_leave_exam_mode_supported(void) {
+    if (ticonv_model_is_tinspire(g_calc_model)) {
+        return 1;
+    }
+    return (g_calc_model == CALC_TI84PCE_USB || g_calc_model == CALC_TI83PCE_USB || g_calc_model == CALC_TI84PT_USB || g_calc_model == CALC_TI82A_USB || g_calc_model == CALC_TI82AEP_USB) ? 1 : 0;
 }
 
 EMSCRIPTEN_KEEPALIVE

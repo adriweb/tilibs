@@ -2209,19 +2209,51 @@ static int nsp_send_key(CalcHandle * h, int, char *)
 
 static int nsp_remote_mgmt(CalcHandle * h, int, char *)
 {
-	static uint8_t data[9] = { 0x00, 0x00, 0x02, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00 };
-
 	int ret = is_ready(h, 1, nullptr);
 	if (!ret)
 	{
-		printf("Packet 1\n");
+		printf("Packet 1: Clear\n");
+
+		static uint8_t data[9] = { 0x00, 0x00, 0x02, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00 };
 		ret = nsp_cmd_s_generic_data(h, sizeof(data) / sizeof(data[0]), data, NSP_SID_REMOTE_MGMT, 0x00);
 		// Packets returned by the calculator have weird data nowadays.
 		if (!ret || ret == ERR_INVALID_PACKET)
 		{
 			uint32_t size;
 			uint8_t * data2 = nullptr;
-			printf("Packet 2\n");
+			printf("Packet 2 (resp)\n");
+			ret = nsp_cmd_r_generic_data(h, &size, &data2);
+			g_free(data2);
+		}
+	}
+	if (!ret)
+	{
+		printf("Packet 3: Leave PTT\n");
+
+		static uint8_t data[9] = { 0x00, 0x00, 0x04, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00 };
+		ret = nsp_cmd_s_generic_data(h, sizeof(data) / sizeof(data[0]), data, NSP_SID_REMOTE_MGMT, 0x00);
+		// Packets returned by the calculator have weird data nowadays.
+		if (!ret || ret == ERR_INVALID_PACKET)
+		{
+			uint32_t size;
+			uint8_t * data2 = nullptr;
+			printf("Packet 4 (resp)\n");
+			ret = nsp_cmd_r_generic_data(h, &size, &data2);
+			g_free(data2);
+		}
+	}
+	if (!ret)
+	{
+		printf("Packet 5: Reset\n");
+
+		static uint8_t data[9] = { 0x00, 0x00, 0x06, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00 };
+		ret = nsp_cmd_s_generic_data(h, sizeof(data) / sizeof(data[0]), data, NSP_SID_REMOTE_MGMT, 0x00);
+		// Packets returned by the calculator have weird data nowadays.
+		if (!ret || ret == ERR_INVALID_PACKET)
+		{
+			uint32_t size;
+			uint8_t * data2 = nullptr;
+			printf("Packet 6 (resp)\n");
 			ret = nsp_cmd_r_generic_data(h, &size, &data2);
 			g_free(data2);
 		}

@@ -159,6 +159,15 @@ function formatErrorResult(module, code) {
     return `error ${label}: ${cleaned}`;
 }
 
+function isAcceptableLeaveExamModeDiscError(err) {
+    const text = String(err?.message || err || '').toLowerCase();
+    return text.includes('device was disconnected')
+        || text.includes('failed to execute')
+        || text.includes('transfer error')
+        || text.includes('memory access out of bounds')
+        || text.includes('runtimeerror');
+}
+
 /**
  * @template T
  * @param {Promise<T>} promise
@@ -1860,6 +1869,7 @@ const els = {
     btnReceiveOs: document.getElementById('btnReceiveOs'),
     btnDownloadOsPartial: document.getElementById('btnDownloadOsPartial'),
     btnDumpRom: document.getElementById('btnDumpRom'),
+    btnLeaveExam: document.getElementById('btnLeaveExam'),
     btnRecvSelected: document.getElementById('btnRecvSelected'),
     btnDeleteSelected: document.getElementById('btnDeleteSelected'),
     btnScreenshot: document.getElementById('btnScreenshot'),
@@ -3095,14 +3105,26 @@ async function updateCapabilities() {
         els.btnSyncClock.title = '';
     }
 
-    if (!hasRomDump) {
-        els.btnDumpRom.classList.add('disabled');
-        els.btnDumpRom.disabled = true;
-        els.btnDumpRom.title = 'ROM dumping not supported by this calculator';
+    if (isNspire) {
+        els.btnDumpRom.classList.add('hidden'); // for now
     } else {
-        els.btnDumpRom.classList.remove('disabled');
-        els.btnDumpRom.disabled = false;
-        els.btnDumpRom.title = '';
+        els.btnDumpRom.classList.remove('hidden');
+        if (!hasRomDump) {
+            els.btnDumpRom.classList.add('disabled');
+            els.btnDumpRom.disabled = true;
+            els.btnDumpRom.title = 'ROM dumping not supported by this calculator';
+        } else {
+            els.btnDumpRom.classList.remove('disabled');
+            els.btnDumpRom.disabled = false;
+            els.btnDumpRom.title = '';
+        }
+    }
+    if (els.btnLeaveExam) {
+        const canLeaveExam = state.module.ccall('calc_leave_exam_mode_supported', 'number', [], []) !== 0;
+        els.btnLeaveExam.classList.toggle('hidden', !canLeaveExam);
+        els.btnLeaveExam.disabled = !canLeaveExam;
+        els.btnLeaveExam.classList.toggle('disabled', !canLeaveExam);
+        els.btnLeaveExam.title = canLeaveExam ? '' : 'Leave exam mode is not supported by this calculator';
     }
 }
 
@@ -5480,6 +5502,55 @@ async function dumpRom() {
         setButtonLoading(els.btnDumpRom, false);
     }
 }
+
+async function leaveExamMode() {
+    setButtonLoading(els.btnLeaveExam, true);
+    try {
+        await authorizeDevice();
+        const module = await initModule();
+        const handle = await ensureHandle();
+        const canLeaveExam = module.ccall('calc_leave_exam_mode_supported', 'number', [], []) !== 0;
+        if (!canLeaveExam) {
+            log('Leave exam mode is not supported by this calculator.');
+            return;
+        }
+        const result = await ccallAsync(
+            module,
+            'calc_leave_exam_mode',
+            'number',
+            ['number'],
+            [handle],
+            { timeoutMs: PROGRESS_IDLE_TIMEOUT_MS, useProgress: true, progressLabel: 'Leaving exam mode' }
+        );
+        if (result === null || result === undefined || Number.isNaN(Number(result))) {
+            if (isNspireActive()) {
+                log('Leave exam mode command sent (calculator reset/disconnect is expected).');
+                return;
+            }
+            log('Leave exam mode failed (error (unknown)).');
+            return;
+        }
+        if (result !== 0) {
+            // On TI-Nspire, leaving exam mode can immediately reset/disconnect USB.
+            // Treat any non-zero result as acceptable for this operation.
+            if (isNspireActive()) {
+                log('Leave exam mode command sent (calculator reset/disconnect is expected).');
+                return;
+            }
+            log(`Leave exam mode failed (${formatErrorResult(module, result)}).`);
+            return;
+        }
+        log('Leave exam mode command sent.');
+    } catch (err) {
+        if (isNspireActive() && isAcceptableLeaveExamModeDiscError(err)) {
+            log('Leave exam mode command sent (calculator reset/disconnect is expected).');
+            return;
+        }
+        logError(err, 'Leave exam mode failed');
+    } finally {
+        setButtonLoading(els.btnLeaveExam, false);
+    }
+}
 async function receiveSelected() {
     const selections = getSelectedVarInputs().map(buildEntryFromCheckbox);
     if (!selections.length) {
@@ -6043,6 +6114,9 @@ function bindEvents() {
     els.btnReceiveOs.addEventListener('click', receiveOs);
     els.btnDownloadOsPartial.addEventListener('click', downloadPartialOs);
     els.btnDumpRom.addEventListener('click', dumpRom);
+    if (els.btnLeaveExam) {
+        els.btnLeaveExam.addEventListener('click', leaveExamMode);
+    }
     els.btnRecvSelected.addEventListener('click', receiveSelected);
     els.btnDeleteSelected.addEventListener('click', deleteSelected);
     els.btnScreenshot.addEventListener('click', takeScreenshot);
