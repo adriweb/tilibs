@@ -33,7 +33,9 @@ const state = {
     stickyTableWidth: 0,
     stickyHeaderWidths: [],
     dirlistPromptPromise: null,
-    offlineUpdateShown: false
+    offlineUpdateShown: false,
+    operationEpoch: 0,
+    uiLanguage: 'en'
 };
 
 const MAX_LOG_LINES = 500;
@@ -147,11 +149,23 @@ function getErrorMessage(module, code) {
 }
 
 function formatErrorResult(module, code) {
+    if (code === null || code === undefined || Number.isNaN(Number(code))) {
+        return 'error (unknown)';
+    }
+    const numericCode = Number(code);
     const message = getErrorMessage(module, code);
-    const raw = module ? module._get_raw_protocol_code(code) : 0;
-    const label = raw ? `0x${raw.toString(16).toUpperCase().padStart(4, '0')}` : `${code}`;
+    let raw = 0;
+    if (module) {
+        try {
+            raw = module._get_raw_protocol_code(numericCode);
+        } catch (err) {
+            console.warn('[WebTILP] Failed to resolve raw protocol code', err);
+            raw = 0;
+        }
+    }
+    const label = raw ? `0x${raw.toString(16).toUpperCase().padStart(4, '0')}` : `${numericCode}`;
     if (!message) {
-        const fallback = getFallbackErrorMessage(code);
+        const fallback = getFallbackErrorMessage(numericCode);
         return fallback ? `error ${label}: ${fallback}` : `error ${label}`;
     }
     const firstLine = message.split('\n').map(line => line.trim()).find(Boolean) || message;
@@ -166,6 +180,28 @@ function isAcceptableLeaveExamModeDiscError(err) {
         || text.includes('transfer error')
         || text.includes('memory access out of bounds')
         || text.includes('runtimeerror');
+}
+
+function isFatalWasmRuntimeError(err) {
+    const text = String(err?.message || err || '').toLowerCase();
+    return text.includes('memory access out of bounds')
+        || text.includes('cannot use deleted val')
+        || (text.includes('runtimeerror') && text.includes('wasm'));
+}
+
+function handleFatalWasmRuntimeError(err) {
+    console.error('[WebTILP] Fatal WASM runtime error', err);
+    clearActiveOperations();
+    // Do not call back into WASM after a fatal runtime error.
+    state.module = null;
+    state.handle = 0;
+    state.cableOpen = false;
+    state.handlePromise = null;
+    state.connectInProgress = false;
+    state.silentReconnectInProgress = false;
+    setConnected(false);
+    setStatus('Connection lost', false);
+    log('Connection lost due to calculator reset/disconnect. Please reconnect.');
 }
 
 /**
@@ -243,6 +279,14 @@ async function withProgressTimeout(promise, label, timeoutMs = CCALL_TIMEOUT_MS,
  * @returns {Promise<T>}
  */
 async function ccallAsync(module, name, returnType, argTypes, args, options = {}) {
+    const opEpoch = state.operationEpoch;
+    const throwIfCancelled = () => {
+        if (opEpoch !== state.operationEpoch) {
+            const err = new Error('Operation cancelled due to disconnect.');
+            err.silent = true;
+            throw err;
+        }
+    };
     const now = Date.now();
     const gap = state.lastCcallTs ? (now - state.lastCcallTs) : CCALL_MIN_GAP_MS;
     if (gap < CCALL_MIN_GAP_MS) {
@@ -255,13 +299,39 @@ async function ccallAsync(module, name, returnType, argTypes, args, options = {}
     const useProgress = options.useProgress ?? false;
     const progressLabel = options.progressLabel || name;
     state.lastProgressTs = Date.now();
-    const result = module.ccall(name, returnType, argTypes, args, { async: true });
+    let result;
+    try {
+        result = module.ccall(name, returnType, argTypes, args, { async: true });
+    } catch (err) {
+        if (isFatalWasmRuntimeError(err)) {
+            handleFatalWasmRuntimeError(err);
+        }
+        throw err;
+    }
     if (!useProgress) {
-        return withTimeout(result, name, timeoutMs);
+        try {
+            const value = await withTimeout(result, name, timeoutMs);
+            throwIfCancelled();
+            return value;
+        } catch (err) {
+            throwIfCancelled();
+            if (isFatalWasmRuntimeError(err)) {
+                handleFatalWasmRuntimeError(err);
+            }
+            throw err;
+        }
     }
     startProgress(progressLabel);
     try {
-        return await withProgressTimeout(result, progressLabel, timeoutMs);
+        const value = await withProgressTimeout(result, progressLabel, timeoutMs);
+        throwIfCancelled();
+        return value;
+    } catch (err) {
+        throwIfCancelled();
+        if (isFatalWasmRuntimeError(err)) {
+            handleFatalWasmRuntimeError(err);
+        }
+        throw err;
     } finally {
         stopProgress(progressLabel);
     }
@@ -2581,6 +2651,7 @@ function logError(err, context) {
 }
 
 function clearActiveOperations(message) {
+    state.operationEpoch += 1;
     document.querySelectorAll('.btn.loading').forEach(button => {
         setButtonLoading(button, false);
     });
@@ -3569,6 +3640,7 @@ function updateClockInfoRow(clockInfo, settings, fallbackDate) {
 
 function clearDeviceData() {
     state.dirlist = [];
+    setSelectedFiles([]);
     state.nspireOsReceiveStarted = false;
     updateNspireOsButtons(false, false);
     renderDirlist(state.dirlist);
@@ -5505,10 +5577,12 @@ async function dumpRom() {
 
 async function leaveExamMode() {
     setButtonLoading(els.btnLeaveExam, true);
+    let treatDisconnectAsSuccess = false;
     try {
         await authorizeDevice();
         const module = await initModule();
         const handle = await ensureHandle();
+        treatDisconnectAsSuccess = isNspireActive();
         const canLeaveExam = module.ccall('calc_leave_exam_mode_supported', 'number', [], []) !== 0;
         if (!canLeaveExam) {
             log('Leave exam mode is not supported by this calculator.');
@@ -5523,7 +5597,7 @@ async function leaveExamMode() {
             { timeoutMs: PROGRESS_IDLE_TIMEOUT_MS, useProgress: true, progressLabel: 'Leaving exam mode' }
         );
         if (result === null || result === undefined || Number.isNaN(Number(result))) {
-            if (isNspireActive()) {
+            if (treatDisconnectAsSuccess) {
                 log('Leave exam mode command sent (calculator reset/disconnect is expected).');
                 return;
             }
@@ -5533,7 +5607,7 @@ async function leaveExamMode() {
         if (result !== 0) {
             // On TI-Nspire, leaving exam mode can immediately reset/disconnect USB.
             // Treat any non-zero result as acceptable for this operation.
-            if (isNspireActive()) {
+            if (treatDisconnectAsSuccess) {
                 log('Leave exam mode command sent (calculator reset/disconnect is expected).');
                 return;
             }
@@ -5542,7 +5616,7 @@ async function leaveExamMode() {
         }
         log('Leave exam mode command sent.');
     } catch (err) {
-        if (isNspireActive() && isAcceptableLeaveExamModeDiscError(err)) {
+        if (treatDisconnectAsSuccess && isAcceptableLeaveExamModeDiscError(err)) {
             log('Leave exam mode command sent (calculator reset/disconnect is expected).');
             return;
         }
@@ -6450,24 +6524,16 @@ if ('serviceWorker' in navigator) {
 if (navigator.usb) {
     navigator.usb.addEventListener('disconnect', () => {
         const silent = state.silentReconnectInProgress;
-        if (!silent) {
-            clearActiveOperations('Active operation cancelled due to disconnect.');
-        }
-        if (state.module) {
-            try {
-                state.module._notify_usb_disconnect();
-            } catch (err) {
-                console.warn('[WebTILP] Failed to reset USB state', err);
-            }
-        }
+        clearActiveOperations(silent ? undefined : 'Active operation cancelled due to disconnect.');
         state.handle = 0;
         state.cableOpen = false;
         state.authorizedDevice = null;
         state.connectInProgress = false;
+        state.handlePromise = null;
         if (!silent) {
             state.module = null;
-            state.nspireOsReceiveStarted = false;
-            updateNspireOsButtons(false, false);
+            state.needsReauthorize = false;
+            clearDeviceData();
             setConnected(false);
             setStatus('Disconnected', false);
             log('Device disconnected.');
