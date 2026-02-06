@@ -134,5 +134,6 @@
   "confirm_download_items_from_target": "¿Descargar {count} elemento(s) de {target}?",
   "prompt_rename_entry": "Renombrar {kind}:",
   "kind_folder": "carpeta",
-  "kind_item": "elemento"
+  "kind_item": "elemento",
+  "transfer_overwrite_all": "Sobrescribir todos los elementos existentes (sin confirmación por archivo)"
 }
