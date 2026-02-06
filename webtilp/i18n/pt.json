@@ -134,5 +134,6 @@
   "confirm_download_items_from_target": "Transferir {count} item(ns) de {target}?",
   "prompt_rename_entry": "Renomear {kind}:",
   "kind_folder": "pasta",
-  "kind_item": "item"
+  "kind_item": "item",
+  "transfer_overwrite_all": "Substituir todos os itens existentes (sem confirmação por ficheiro)"
 }
