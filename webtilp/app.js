@@ -157,6 +157,7 @@ const I18N_EN = {
     "save_settings": "Save Settings",
     "transfer_options": "Transfer Options",
     "transfer_note": "Location/folder options depend on calculator capabilities. Existing variables are overwritten only if confirmed.",
+    "transfer_overwrite_all": "Overwrite all existing items (no per-file confirmation)",
     "file": "File",
     "variable": "Variable",
     "cancel": "Cancel",
@@ -2281,6 +2282,7 @@ const els = {
     settingLanguage: document.getElementById('settingLanguage'),
     transferModal: document.getElementById('transferModal'),
     transferTableBody: document.getElementById('transferTableBody'),
+    transferOverwriteAll: document.getElementById('transferOverwriteAll'),
     btnCloseTransfer: document.getElementById('btnCloseTransfer'),
     newFolderName: document.getElementById('newFolderName'),
     newFolderParent: document.getElementById('newFolderParent'),
@@ -2901,6 +2903,7 @@ async function applyTranslations() {
     setTextContent(document.getElementById('transferHeaderLocation'), t('location'));
     setTextContent(document.getElementById('transferHeaderFolder'), t('folder'));
     setTextContent(document.getElementById('transferNote'), t('transfer_note'));
+    setTextContent(document.getElementById('transferOverwriteAllLabel'), t('transfer_overwrite_all'));
     setTextContent(els.btnCancelTransfer, t('cancel'));
     setTextContent(els.btnConfirmTransfer, `🚀 ${t('start_transfer')}`);
 
@@ -5368,14 +5371,15 @@ async function handleCeBundleTransfer(bundleFile, module, options) {
         });
         applyBundleDefaults(plan);
 
-        const selections = await openTransferModal(plan, {
+        const modalResult = await openTransferModal(plan, {
             hasFolder: options.hasFolder,
             hasArchive: options.hasArchive,
             folders: options.folders
         });
-        if (!selections) {
+        if (!modalResult) {
             return null;
         }
+        const { selections, overwriteAll } = modalResult;
 
         const nonOs = selections.filter(item => !isCEBundleOSFile(item));
         const osItems = selections.filter(item => isCEBundleOSFile(item));
@@ -5383,7 +5387,8 @@ async function handleCeBundleTransfer(bundleFile, module, options) {
 
         const { successCount } = await performTransfers(orderedSelections, module, {
             hasFolder: options.hasFolder,
-            hasArchive: options.hasArchive
+            hasArchive: options.hasArchive,
+            overwriteAll
         });
 
         orderedSelections.forEach(item => {
@@ -5419,6 +5424,9 @@ async function handleCeBundleTransfer(bundleFile, module, options) {
 
 function openTransferModal(plan, options) {
     els.transferTableBody.innerHTML = '';
+    if (els.transferOverwriteAll) {
+        els.transferOverwriteAll.checked = false;
+    }
     const folders = options.folders || [];
 
     document.querySelectorAll('.transfer-location').forEach(cell => {
@@ -5543,7 +5551,10 @@ function openTransferModal(plan, options) {
             }
             cleanup();
             els.transferModal.classList.add('hidden');
-            resolve(selections);
+            resolve({
+                selections,
+                overwriteAll: Boolean(els.transferOverwriteAll?.checked)
+            });
         };
         els.btnConfirmTransfer.addEventListener('click', onConfirm);
         els.btnCancelTransfer.addEventListener('click', onCancel);
@@ -5709,7 +5720,9 @@ async function performTransfers(plan, module, options) {
         if (isVar && state.dirlist.length && targetName && item.entryType != null) {
             existing = findDirlistMatch(targetName, item.entryType, targetFolder, targetLocation);
             if (existing) {
-                const overwrite = confirm(tFormat('confirm_overwrite_existing', { name: targetName }));
+                const overwrite = options.overwriteAll
+                    ? true
+                    : confirm(tFormat('confirm_overwrite_existing', { name: targetName }));
                 if (!overwrite) {
                     log(`Skipped ${item.file.name}, because overwriting was declined.`);
                     continue;
@@ -5843,8 +5856,8 @@ async function sendSelectedFiles() {
             return;
         }
         const plan = await buildTransferPlan(files, module);
-        const selections = await openTransferModal(plan, { hasFolder, hasArchive, folders });
-        if (!selections) {
+        const modalResult = await openTransferModal(plan, { hasFolder, hasArchive, folders });
+        if (!modalResult) {
             plan.forEach(item => {
                 try {
                     module.FS.unlink(item.path);
@@ -5854,8 +5867,9 @@ async function sendSelectedFiles() {
             });
             return;
         }
+        const { selections, overwriteAll } = modalResult;
 
-        const { successCount } = await performTransfers(selections, module, { hasFolder, hasArchive });
+        const { successCount } = await performTransfers(selections, module, { hasFolder, hasArchive, overwriteAll });
 
         selections.forEach(item => {
             try {
