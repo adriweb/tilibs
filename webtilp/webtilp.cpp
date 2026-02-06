@@ -1552,6 +1552,104 @@ int calc_change_attr(CableHandle* cable_handle, const char* folder, const char* 
     return ticalcs_calc_change_attr(g_calc_handle, &req, (FileAttr)attr);
 }
 
+static unsigned int compute_location_mask_for_entry(const VarEntry* ve) {
+    if (!ve) {
+        return (LOC_RAM | LOC_ARCHIVE);
+    }
+    unsigned int location_mask = (LOC_RAM | LOC_ARCHIVE);
+    const int flash_type = tifiles_flash_type(g_calc_model);
+    const char* type_name = tifiles_vartype2type(g_calc_model, ve->type);
+    if ((flash_type >= 0 && ve->type == (uint8_t)flash_type)
+        || (type_name &&
+            (  g_ascii_strcasecmp(type_name, "CERT") == 0
+            || g_ascii_strcasecmp(type_name, "PIC") == 0
+            || g_ascii_strcasecmp(type_name, "IMAGE") == 0
+            || g_ascii_strcasecmp(type_name, "GRP") == 0))) {
+        location_mask = LOC_ARCHIVE;
+    }
+    return location_mask;
+}
+
+static void append_var_entry_json(GString* out, const VarEntry* ve) {
+    if (!out || !ve) {
+        return;
+    }
+    char name_buf[128] = {};
+    char folder_buf[128] = {};
+    const char* raw_name = ve->name;
+    const char* raw_folder = ve->folder;
+    if (raw_name && *raw_name) {
+        if (ticonv_varname_to_utf8_sn(g_calc_model, raw_name, name_buf, sizeof(name_buf), ve->type) == nullptr) {
+            strncpy(name_buf, raw_name, sizeof(name_buf) - 1);
+        }
+    }
+    if (raw_folder && *raw_folder) {
+        if (ticonv_varname_to_utf8_sn(g_calc_model, raw_folder, folder_buf, sizeof(folder_buf), ve->type) == nullptr) {
+            strncpy(folder_buf, raw_folder, sizeof(folder_buf) - 1);
+        }
+    }
+
+    const char* type_name = tifiles_vartype2type(g_calc_model, ve->type);
+    const unsigned int location_mask = compute_location_mask_for_entry(ve);
+
+    g_string_append(out, "{\"name\":\"");
+    json_append_escaped(out, name_buf);
+    g_string_append(out, "\",\"folder\":\"");
+    json_append_escaped(out, folder_buf);
+    g_string_append(out, "\",\"type\":");
+    g_string_append_printf(out, "%u", ve->type);
+    g_string_append(out, ",\"type_name\":\"");
+    json_append_escaped(out, type_name ? type_name : "");
+    g_string_append(out, "\"");
+    g_string_append(out, ",\"attr\":");
+    g_string_append_printf(out, "%u", ve->attr);
+    g_string_append(out, ",\"location_mask\":");
+    g_string_append_printf(out, "%u", location_mask);
+    g_string_append(out, "}");
+}
+
+static void get_file_metadata_json(const char* filename, const char** class_name_out, GString* entries_json_out) {
+    if (class_name_out) {
+        *class_name_out = "unknown";
+    }
+    if (!entries_json_out) {
+        return;
+    }
+    if (!filename || !*filename || !tifiles_file_is_ti(filename)) {
+        return;
+    }
+
+    const FileClass fclass = tifiles_file_get_class(filename);
+    const char* class_name = tifiles_class_to_string(fclass);
+    if (class_name_out) {
+        *class_name_out = class_name ? class_name : "unknown";
+    }
+
+    FileContent* content = tifiles_content_create_regular(g_calc_model);
+    if (!content) {
+        return;
+    }
+    const int ret = tifiles_file_read_regular(filename, content);
+    if (ret != 0) {
+        tifiles_content_delete_regular(content);
+        return;
+    }
+
+    bool first = true;
+    for (unsigned int i = 0; i < content->num_entries; i++) {
+        const VarEntry* ve = content->entries[i];
+        if (!ve) {
+            continue;
+        }
+        if (!first) {
+            g_string_append(entries_json_out, ",");
+        }
+        append_var_entry_json(entries_json_out, ve);
+        first = false;
+    }
+    tifiles_content_delete_regular(content);
+}
+
 EMSCRIPTEN_KEEPALIVE
 const char* file_get_entries_json(const char* filename) {
     static char* json_buf = nullptr;
@@ -1560,97 +1658,22 @@ const char* file_get_entries_json(const char* filename) {
     if (!filename || !*filename) {
         return "[]";
     }
-
-    if (!tifiles_file_is_ti(filename)) {
-        return "[]";
-    }
-
-    const FileClass fclass = tifiles_file_get_class(filename);
-    const char* class_name = tifiles_class_to_string(fclass);
-    FileContent* content = tifiles_content_create_regular(g_calc_model);
-    const int ret = tifiles_file_read_regular(filename, content);
+    const char* class_name = "unknown";
+    GString* entries_json = g_string_new(nullptr);
+    get_file_metadata_json(filename, &class_name, entries_json);
 
     GString* json = g_string_new(nullptr);
     g_string_append(json, "{\"class\":\"");
     json_append_escaped(json, class_name ? class_name : "unknown");
     g_string_append(json, "\",\"entries\":[");
-
-    if (ret != 0) {
-        g_string_append(json, "]}");
-
-        if (json_len < json->len + 1) {
-            char* new_buf = (char*)realloc(json_buf, json->len + 1);
-            if (!new_buf) {
-                g_string_free(json, TRUE);
-                tifiles_content_delete_regular(content);
-                return "[]";
-            }
-            json_buf = new_buf;
-            json_len = json->len + 1;
-        }
-        memcpy(json_buf, json->str, json->len + 1);
-        g_string_free(json, TRUE);
-        tifiles_content_delete_regular(content);
-        return json_buf;
-    }
-
-    for (unsigned int i = 0; i < content->num_entries; i++) {
-        const VarEntry* ve = content->entries[i];
-        if (!ve) {
-            continue;
-        }
-        unsigned int location_mask = (LOC_RAM | LOC_ARCHIVE);
-        const int flash_type = tifiles_flash_type(g_calc_model);
-        const char* type_name = tifiles_vartype2type(g_calc_model, ve->type);
-        if ((flash_type >= 0 && ve->type == (uint8_t)flash_type)
-            || (type_name &&
-                (  g_ascii_strcasecmp(type_name, "CERT") == 0
-                || g_ascii_strcasecmp(type_name, "PIC") == 0
-                || g_ascii_strcasecmp(type_name, "IMAGE") == 0
-                || g_ascii_strcasecmp(type_name, "GRP") == 0))) {
-            location_mask = LOC_ARCHIVE;
-        }
-        char name_buf[128] = {};
-        char folder_buf[128] = {};
-        const char* raw_name = ve->name;
-        const char* raw_folder = ve->folder;
-        if (raw_name && *raw_name) {
-            if (ticonv_varname_to_utf8_sn(g_calc_model, raw_name, name_buf, sizeof(name_buf), ve->type) == nullptr) {
-                strncpy(name_buf, raw_name, sizeof(name_buf) - 1);
-            }
-        }
-        if (raw_folder && *raw_folder) {
-            if (ticonv_varname_to_utf8_sn(g_calc_model, raw_folder, folder_buf, sizeof(folder_buf), ve->type) == nullptr) {
-                strncpy(folder_buf, raw_folder, sizeof(folder_buf) - 1);
-            }
-        }
-
-        if (i > 0) {
-            g_string_append(json, ",");
-        }
-        g_string_append(json, "{\"name\":\"");
-        json_append_escaped(json, name_buf);
-        g_string_append(json, "\",\"folder\":\"");
-        json_append_escaped(json, folder_buf);
-        g_string_append(json, "\",\"type\":");
-        g_string_append_printf(json, "%u", ve->type);
-        g_string_append(json, ",\"type_name\":\"");
-        json_append_escaped(json, type_name ? type_name : "");
-        g_string_append(json, "\"");
-        g_string_append(json, ",\"attr\":");
-        g_string_append_printf(json, "%u", ve->attr);
-        g_string_append(json, ",\"location_mask\":");
-        g_string_append_printf(json, "%u", location_mask);
-        g_string_append(json, "}");
-    }
-
+    g_string_append(json, entries_json->str);
     g_string_append(json, "]}");
+    g_string_free(entries_json, TRUE);
 
     if (json_len < json->len + 1) {
         char* new_buf = (char*)realloc(json_buf, json->len + 1);
         if (!new_buf) {
             g_string_free(json, TRUE);
-            tifiles_content_delete_regular(content);
             return "[]";
         }
         json_buf = new_buf;
@@ -1658,8 +1681,85 @@ const char* file_get_entries_json(const char* filename) {
     }
     memcpy(json_buf, json->str, json->len + 1);
     g_string_free(json, TRUE);
-    tifiles_content_delete_regular(content);
 
+    return json_buf;
+}
+
+EMSCRIPTEN_KEEPALIVE
+const char* files_get_entries_json(const char* paths_blob) {
+    static char* json_buf = nullptr;
+    static size_t json_len = 0;
+    gchar** paths = nullptr;
+    bool first_file = true;
+
+    GString* json = g_string_new(R"({"files":[)");
+
+    if (!paths_blob || !*paths_blob) {
+        g_string_append(json, "]}");
+        goto finish;
+    }
+
+    paths = g_strsplit(paths_blob, "\n", -1);
+    if (!paths) {
+        g_string_append(json, "]}");
+        goto finish;
+    }
+
+    for (gchar** it = paths; it && *it; ++it) {
+        const char* filename = *it;
+        if (!filename || !*filename) {
+            continue;
+        }
+
+        char* base = g_path_get_basename(filename);
+        if (!base || !*base) {
+            g_free(base);
+            continue;
+        }
+
+        const char* class_name = "unknown";
+        GString* entries_json = g_string_new(nullptr);
+        get_file_metadata_json(filename, &class_name, entries_json);
+
+        if (!first_file) {
+            g_string_append(json, ",");
+        }
+        g_string_append(json, "{\"name\":\"");
+        json_append_escaped(json, base);
+        g_string_append(json, "\",\"path\":\"");
+        json_append_escaped(json, filename);
+        g_string_append(json, "\",\"class\":\"");
+        json_append_escaped(json, class_name ? class_name : "unknown");
+        g_string_append(json, "\",\"entries\":[");
+        g_string_append(json, entries_json->str);
+        g_string_append(json, "]");
+        g_string_append(json, "}");
+        first_file = false;
+
+        g_string_free(entries_json, TRUE);
+        g_free(base);
+    }
+
+    g_strfreev(paths);
+    paths = nullptr;
+    g_string_append(json, "]}");
+
+finish:
+    if (paths) {
+        g_strfreev(paths);
+        paths = nullptr;
+    }
+    if (json_len < json->len + 1) {
+        char* new_buf = (char*)realloc(json_buf, json->len + 1);
+        if (!new_buf) {
+            g_string_free(json, TRUE);
+            return R"({"files":[]})";
+        }
+        json_buf = new_buf;
+        json_len = json->len + 1;
+    }
+    memcpy(json_buf, json->str, json->len + 1);
+    g_string_free(json, TRUE);
     return json_buf;
 }
 
@@ -1758,70 +1858,9 @@ const char* bundle_extract_json(const char* filename, const char* out_dir) {
                 continue;
             }
 
-            FileClass fclass = TIFILE_NONE;
             const char* class_name = "unknown";
-            GString* entries_json = g_string_new("[");
-            if (tifiles_file_is_ti(out_path)) {
-                fclass = tifiles_file_get_class(out_path);
-                class_name = tifiles_class_to_string(fclass);
-                FileContent* content = tifiles_content_create_regular(g_calc_model);
-                int read_ret = tifiles_file_read_regular(out_path, content);
-                if (read_ret == 0)
-                {
-                    unsigned int entry_count = 0;
-                    for (unsigned int i = 0; i < content->num_entries; i++) {
-                        VarEntry* ve = content->entries[i];
-                        if (!ve) {
-                            continue;
-                        }
-                        unsigned int location_mask = (LOC_RAM | LOC_ARCHIVE);
-                        int flash_type = tifiles_flash_type(g_calc_model);
-                        const char* type_name = tifiles_vartype2type(g_calc_model, ve->type);
-                        if ((flash_type >= 0 && ve->type == (uint8_t)flash_type)
-                            || (type_name &&
-                                (  g_ascii_strcasecmp(type_name, "CERT") == 0
-                                || g_ascii_strcasecmp(type_name, "PIC") == 0
-                                || g_ascii_strcasecmp(type_name, "IMAGE") == 0
-                                || g_ascii_strcasecmp(type_name, "GRP") == 0))) {
-                            location_mask = LOC_ARCHIVE;
-                        }
-                        char name_buf[128] = {};
-                        char folder_buf[128] = {};
-                        const char* raw_name = ve->name;
-                        const char* raw_folder = ve->folder;
-                        if (raw_name && *raw_name) {
-                            if (ticonv_varname_to_utf8_sn(g_calc_model, raw_name, name_buf, sizeof(name_buf), ve->type) == nullptr) {
-                                strncpy(name_buf, raw_name, sizeof(name_buf) - 1);
-                            }
-                        }
-                        if (raw_folder && *raw_folder) {
-                            if (ticonv_varname_to_utf8_sn(g_calc_model, raw_folder, folder_buf, sizeof(folder_buf), ve->type) == nullptr) {
-                                strncpy(folder_buf, raw_folder, sizeof(folder_buf) - 1);
-                            }
-                        }
-                        if (entry_count > 0) {
-                            g_string_append(entries_json, ",");
-                        }
-                        g_string_append(entries_json, "{\"name\":\"");
-                        json_append_escaped(entries_json, name_buf);
-                        g_string_append(entries_json, "\",\"folder\":\"");
-                        json_append_escaped(entries_json, folder_buf);
-                        g_string_append(entries_json, "\",\"type\":");
-                        g_string_append_printf(entries_json, "%u", ve->type);
-                        g_string_append(entries_json, ",\"type_name\":\"");
-                        json_append_escaped(entries_json, type_name ? type_name : "");
-                        g_string_append(entries_json, "\"");
-                        g_string_append(entries_json, ",\"attr\":");
-                        g_string_append_printf(entries_json, "%u", ve->attr);
-                        g_string_append(entries_json, ",\"location_mask\":");
-                        g_string_append_printf(entries_json, "%u", location_mask);
-                        g_string_append(entries_json, "}");
-                        entry_count += 1;
-                    }
-                }
-                tifiles_content_delete_regular(content);
-            }
-            g_string_append(entries_json, "]");
+            GString* entries_json = g_string_new(nullptr);
+            get_file_metadata_json(out_path, &class_name, entries_json);
             if (!first) {
                 g_string_append(json, ",");
             }
@@ -1831,8 +1870,9 @@ const char* bundle_extract_json(const char* filename, const char* out_dir) {
             json_append_escaped(json, out_path);
             g_string_append(json, "\",\"class\":\"");
             json_append_escaped(json, class_name ? class_name : "unknown");
-            g_string_append(json, "\",\"entries\":");
+            g_string_append(json, "\",\"entries\":[");
             g_string_append(json, entries_json->str);
+            g_string_append(json, "]");
             g_string_append(json, "}");
             first = false;
 
