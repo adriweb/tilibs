@@ -134,5 +134,6 @@
   "confirm_download_items_from_target": "{count} Eintrag/Einträge aus {target} herunterladen?",
   "prompt_rename_entry": "{kind} umbenennen:",
   "kind_folder": "Ordner",
-  "kind_item": "Eintrag"
+  "kind_item": "Eintrag",
+  "transfer_overwrite_all": "Alle vorhandenen Elemente überschreiben (ohne Bestätigung pro Datei)"
 }

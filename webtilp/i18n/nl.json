@@ -134,5 +134,6 @@
   "confirm_download_items_from_target": "{count} item(s) downloaden uit {target}?",
   "prompt_rename_entry": "{kind} hernoemen:",
   "kind_folder": "map",
-  "kind_item": "item"
+  "kind_item": "item",
+  "transfer_overwrite_all": "Alle bestaande items overschrijven (zonder bevestiging per bestand)"
 }

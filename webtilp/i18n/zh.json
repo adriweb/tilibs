@@ -134,5 +134,6 @@
   "confirm_download_items_from_target": "从 {target} 下载 {count} 个项目？",
   "prompt_rename_entry": "重命名{kind}：",
   "kind_folder": "文件夹",
-  "kind_item": "项目"
+  "kind_item": "项目",
+  "transfer_overwrite_all": "覆盖所有已存在项目（不再逐文件确认）"
 }
