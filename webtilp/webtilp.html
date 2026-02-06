@@ -21,7 +21,7 @@
             </div>
             <div>
                 <div class="brand-title">WebTILP</div>
-                <div class="brand-subtitle">Universal linking, right from your browser!</div>
+                <div class="brand-subtitle" id="brandSubtitle">Universal linking, right from your browser!</div>
             </div>
         </div>
         <div class="status">
@@ -49,11 +49,11 @@
 
     <section class="splash" id="splashScreen">
         <div class="splash-card">
-            <h1>Welcome to WebTILP!</h1>
-            <p>Plug in your TI graphing calculator, then click “Connect Calculator” to get started.</p>
+            <h1 id="splashTitle">Welcome to WebTILP!</h1>
+            <p id="splashText">Plug in your TI graphing calculator, then click “Connect Calculator” to get started.</p>
             <div class="splash-warning hidden" id="splashWebUsbWarning">
-                <p><strong>WebUSB is not available in this browser.</strong></p>
-                <p>Please use a WebUSB-compatible browser like Chrome, Edge, or Brave.</p>
+                <p><strong id="splashWebUsbWarningTitle">WebUSB is not available in this browser.</strong></p>
+                <p id="splashWebUsbWarningText">Please use a WebUSB-compatible browser like Chrome, Edge, or Brave.</p>
             </div>
             <button class="btn primary" id="btnSplashConnect" type="button">🔌 Connect Calculator</button>
         </div>
@@ -62,7 +62,7 @@
     <main class="layout hidden" id="mainContent">
         <section class="panel">
             <div class="panel-header">
-                <h2>Device</h2>
+                <h2 id="panelDeviceTitle">Device</h2>
                 <div class="panel-actions">
                     <button class="btn subtle" id="btnGetInfo">ℹ️ Refresh Device Info</button>
                     <button class="btn subtle" id="btnSyncClock">🕒 Sync Clock</button>
@@ -71,11 +71,11 @@
             <div class="panel-body">
                 <div class="info-grid">
                     <div class="info-card">
-                        <div class="label">Model</div>
+                        <div class="label" id="labelModel">Model</div>
                         <div class="value" id="deviceModel">Unknown</div>
                     </div>
                     <div class="info-card">
-                        <div class="label">Free Memory</div>
+                        <div class="label" id="labelFreeMemory">Free Memory</div>
                         <div class="value" id="memoryInfo">—</div>
                     </div>
                 </div>
@@ -86,7 +86,7 @@
 
         <section class="panel">
             <div class="panel-header">
-                <h2>Transfers</h2>
+                <h2 id="panelTransfersTitle">Transfers</h2>
                 <div class="panel-actions">
                     <button class="btn subtle" id="btnIsReady" style="visibility: hidden">✅ Is Ready</button>
                 </div>
@@ -96,8 +96,8 @@
                     <div class="dropzone" id="dropzone">
                         <input type="file" id="fileInput" multiple>
                         <div class="dropzone-text">
-                            <div class="title">Drop files to send</div>
-                            <div class="subtitle">Make sure to select appropriate TI files</div>
+                            <div class="title" id="dropzoneTitle">Drop files to send</div>
+                            <div class="subtitle" id="dropzoneSubtitle">Make sure to select appropriate TI files</div>
                         </div>
                         <button class="btn subtle send-idle" id="btnSendFiles" disabled>📤 Send Selected Files</button>
                     </div>
@@ -112,7 +112,7 @@
 
                 <section class="panel" id="keysPanel" style="margin-top: 15px">
                     <div class="panel-header">
-                        <h2>Remote Key/Action send</h2>
+                        <h2 id="panelKeysTitle">Remote Key/Action send</h2>
                         <div class="panel-actions"></div>
                     </div>
                     <div class="panel-body">
@@ -132,7 +132,7 @@
 
         <section class="panel wide">
             <div class="panel-header">
-                <h2>Calculator Variables</h2>
+                <h2 id="panelVarsTitle">Calculator Variables</h2>
                 <div class="panel-actions">
                     <input class="search" id="filterInput" type="search" placeholder="Filter name or type">
                     <button class="btn primary" id="btnRefreshDirlist">🔄 Refresh List</button>
@@ -148,12 +148,12 @@
                         <thead>
                             <tr>
                                 <th><input type="checkbox" id="selectAllVars" aria-label="Select all"></th>
-                                <th data-sort="name">Name</th>
-                                <th data-sort="type">Type</th>
-                                <th data-sort="size">Size</th>
-                                <th data-sort="location">Location</th>
-                                <th data-sort="folder">Folder</th>
-                                <th>Kind</th>
+                                <th data-sort="name" id="varsHeaderName">Name</th>
+                                <th data-sort="type" id="varsHeaderType">Type</th>
+                                <th data-sort="size" id="varsHeaderSize">Size</th>
+                                <th data-sort="location" id="varsHeaderLocation">Location</th>
+                                <th data-sort="folder" id="varsHeaderFolder">Folder</th>
+                                <th id="varsHeaderKind">Kind</th>
                             </tr>
                         </thead>
                         <tbody id="varTableBody"></tbody>
@@ -164,7 +164,7 @@
 
         <section class="panel">
             <div class="panel-header">
-                <h2>Screenshot</h2>
+                <h2 id="panelScreenshotTitle">Screenshot</h2>
                 <div class="panel-actions">
                     <button class="btn primary" id="btnScreenshot">📸 Take Screenshot</button>
                     <button class="btn subtle" id="btnDownloadScreenshot">⬇️ Download PNG</button>
@@ -177,7 +177,7 @@
 
         <section class="panel">
             <div class="panel-header">
-                <h2>Activity Log</h2>
+                <h2 id="panelLogTitle">Activity Log</h2>
                 <div class="panel-actions">
                     <button class="btn subtle" id="btnClearLog">🧹 Clear Log</button>
                 </div>
@@ -197,31 +197,35 @@
             <div class="modal-body">
                 <div class="settings-grid">
                     <div class="form-field">
-                        <label for="settingCableModel">Cable</label>
+                        <label for="settingCableModel" id="settingCableLabel">Cable</label>
                         <select id="settingCableModel" class="form-input"></select>
-                        <span class="form-hint">Force cable to skip probing.</span>
+                        <span class="form-hint" id="settingCableHint">Force cable to skip probing.</span>
                     </div>
                     <div class="form-field">
-                        <label for="settingCalcModel">Calculator model</label>
+                        <label for="settingCalcModel" id="settingCalcLabel">Calculator model</label>
                         <select id="settingCalcModel" class="form-input"></select>
                         <span class="form-hint" id="settingCalcHint">Auto uses probing to detect the model.</span>
                     </div>
                     <div class="form-field">
-                        <label for="settingTimeout">Cable timeout (1/10s)</label>
+                        <label for="settingTimeout" id="settingTimeoutLabel">Cable timeout (1/10s)</label>
                         <input type="number" id="settingTimeout" class="form-input" min="1" max="200" step="1">
                     </div>
                     <div class="form-field">
-                        <label for="settingDelay">Cable delay (µs)</label>
+                        <label for="settingDelay" id="settingDelayLabel">Cable delay (µs)</label>
                         <input type="number" id="settingDelay" class="form-input" min="0" max="1000" step="1">
                     </div>
+                    <div class="form-field">
+                        <label for="settingLanguage" id="settingLanguageLabel">Language</label>
+                        <select id="settingLanguage" class="form-input"></select>
+                    </div>
                 </div>
-                <div class="form-note">Changing settings resets the current handle. Reconnect for full effect.</div>
+                <div class="form-note" id="settingsNote">Changing settings resets the current handle. Reconnect for full effect.</div>
                 <div class="settings-offline hidden" id="offlineBanner">
                     <div class="settings-offline-row">
                         <span id="offlineBannerText">Offline ready.</span>
                         <div class="settings-offline-actions">
-                            <button class="btn subtle hidden" id="btnReloadOffline">↻ Reload for update</button>
-                            <button class="btn subtle" id="btnClearOfflineCache">Clear offline cache</button>
+                    <button class="btn subtle hidden" id="btnReloadOffline">↻ Reload for update</button>
+                    <button class="btn subtle" id="btnClearOfflineCache">Clear offline cache</button>
                         </div>
                     </div>
                 </div>
@@ -248,17 +252,17 @@
                         <thead>
                             <tr>
                                 <th class="transfer-select"></th>
-                                <th>File</th>
-                                <th>Variable</th>
-                                <th class="transfer-type">Type</th>
-                                <th class="transfer-location">Location</th>
-                                <th class="transfer-folder">Folder</th>
+                            <th id="transferHeaderFile">File</th>
+                            <th id="transferHeaderVariable">Variable</th>
+                            <th class="transfer-type" id="transferHeaderType">Type</th>
+                            <th class="transfer-location" id="transferHeaderLocation">Location</th>
+                            <th class="transfer-folder" id="transferHeaderFolder">Folder</th>
                             </tr>
                         </thead>
                         <tbody id="transferTableBody"></tbody>
                     </table>
                 </div>
-                <div class="form-note">Location/folder options depend on calculator capabilities. Existing variables are overwritten only if confirmed.</div>
+                <div class="form-note" id="transferNote">Location/folder options depend on calculator capabilities. Existing variables are overwritten only if confirmed.</div>
             </div>
             <div class="modal-footer">
                 <button class="btn ghost" id="btnCancelTransfer">Cancel</button>
@@ -276,15 +280,15 @@
             <div class="modal-body">
                 <div class="settings-grid">
                     <div class="form-field">
-                        <label for="newFolderName">Folder name</label>
+                        <label for="newFolderName" id="newFolderNameLabel">Folder name</label>
                         <input type="text" id="newFolderName" class="form-input" placeholder="New folder name">
                     </div>
                     <div class="form-field">
-                        <label for="newFolderParent">Parent folder</label>
+                        <label for="newFolderParent" id="newFolderParentLabel">Parent folder</label>
                         <select id="newFolderParent" class="form-input"></select>
                     </div>
                 </div>
-                <div class="form-note">Pick a parent folder or root to create a top-level folder.</div>
+                <div class="form-note" id="newFolderNote">Pick a parent folder or root to create a top-level folder.</div>
             </div>
             <div class="modal-footer">
                 <button class="btn ghost" id="btnCancelNewFolder">Cancel</button>
@@ -302,33 +306,33 @@
             <div class="modal-body">
                 <div class="settings-grid">
                     <div class="form-field">
-                        <label>Backup format</label>
+                        <label id="backupFormatLabel">Backup format</label>
                         <label class="form-option">
                             <input type="radio" name="backupFormat" id="backupFormatBackup" value="backup" checked>
-                            Standard backup file
+                            <span id="backupFormatBackupLabel">Standard backup file</span>
                         </label>
                         <label class="form-option">
                             <input type="radio" name="backupFormat" id="backupFormatTigroup" value="tigroup">
-                            TIGroup (.tig)
+                            <span id="backupFormatTigroupLabel">TIGroup (.tig)</span>
                         </label>
                     </div>
                     <div class="form-field" id="tigroupOptions">
-                        <label>Include in TIGroup</label>
+                        <label id="backupIncludeLabel">Include in TIGroup</label>
                         <label class="form-option">
                             <input type="checkbox" id="backupIncludeRam" checked>
-                            RAM
+                            <span id="backupIncludeRamLabel">RAM</span>
                         </label>
                         <label class="form-option">
                             <input type="checkbox" id="backupIncludeArchive" checked>
-                            Archive
+                            <span id="backupIncludeArchiveLabel">Archive</span>
                         </label>
                         <label class="form-option">
                             <input type="checkbox" id="backupIncludeFlash" checked>
-                            Flash apps
+                            <span id="backupIncludeFlashLabel">Flash apps</span>
                         </label>
                     </div>
                 </div>
-                <div class="form-note">Standard backups may fail on large memory contents. TIGroup is recommended for big backups.</div>
+                <div class="form-note" id="backupNote">Standard backups may fail on large memory contents. TIGroup is recommended for big backups.</div>
                 <div class="modal-overlay hidden" id="backupModalOverlay">
                     <div class="modal-overlay-card">
                         <div class="spinner"></div>
@@ -343,8 +347,8 @@
         </div>
     </div>
     <footer class="footer">
+        <span>WebTILP by <a href="https://github.com/adriweb/tilibs/tree/exp2-full-emscripten" target="_blank">Adriweb</a>.</span>
         <span>Powered by <a href="https://github.com/debrouxl/tilibs/" target="_blank">tilibs</a>.</span>
-        <span>WebUSB/WASM build by <a href="https://github.com/adriweb/tilibs/tree/exp2-full-emscripten" target="_blank">Adriweb</a>.</span>
         <span>Features inspired by <a href="https://github.com/debrouxl/tilp_and_gfm" target="_blank">TILP</a>, a free software released under the
             <a href="https://www.gnu.org/licenses/old-licenses/gpl-2.0.html" target="_blank">GNU GPLv2</a>.</span>
         <span>(Web)TILP is not affiliated with Texas Instruments (TI) — TI trademarks belong to Texas Instruments Incorporated.</span>
