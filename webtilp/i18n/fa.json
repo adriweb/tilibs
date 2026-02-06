@@ -134,5 +134,6 @@
   "confirm_download_items_from_target": "{count} مورد از {target} دانلود شود؟",
   "prompt_rename_entry": "تغییر نام {kind}:",
   "kind_folder": "پوشه",
-  "kind_item": "مورد"
+  "kind_item": "مورد",
+  "transfer_overwrite_all": "رونویسی همه موارد موجود (بدون تایید برای هر فایل)"
 }
