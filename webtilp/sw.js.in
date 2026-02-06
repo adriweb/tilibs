@@ -19,7 +19,15 @@ const PRECACHE_URLS = [
   'android-chrome-512x512.png',
   'webtilp.png',
   'webtilp_noshadow.png',
-  'webtilp_medium.png'
+  'webtilp_medium.png',
+  'i18n/fr.json',
+  'i18n/nl.json',
+  'i18n/it.json',
+  'i18n/de.json',
+  'i18n/es.json',
+  'i18n/pt.json',
+  'i18n/sv.json',
+  'i18n/zh.json'
 ];
 
 async function cacheResponse(cache, request, response) {
