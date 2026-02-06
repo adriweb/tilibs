@@ -77,6 +77,312 @@ const TIG_MODE = {
     FLASH: 1 << 2
 };
 
+const SUPPORTED_LANGUAGES = ['en', 'fr', 'nl', 'it', 'de', 'es', 'pt', 'sv', 'zh', 'ja', 'ar', 'fa', 'la'];
+const LANGUAGE_OPTIONS = [
+    { value: 'auto', label: 'Auto' },
+    { value: 'en', label: 'English' },
+    { value: 'fr', label: 'Français' },
+    { value: 'nl', label: 'Nederlands' },
+    { value: 'it', label: 'Italiano' },
+    { value: 'de', label: 'Deutsch' },
+    { value: 'es', label: 'Español' },
+    { value: 'pt', label: 'Português' },
+    { value: 'sv', label: 'Svenska' },
+    { value: 'zh', label: '简体中文' },
+    { value: 'ja', label: '日本語' },
+    { value: 'ar', label: 'العربية' },
+    { value: 'fa', label: 'فارسی' },
+    { value: 'la', label: 'Latina' }
+];
+
+const I18N_EN = {
+    "brand_subtitle": "Universal linking, right from your browser!",
+    "settings": "Settings",
+    "connect_calculator": "Connect Calculator",
+    "welcome_title": "Welcome to WebTILP!",
+    "welcome_text": "Plug in your TI graphing calculator, then click \"Connect Calculator\" to get started.",
+    "webusb_unavailable_title": "WebUSB is not available in this browser.",
+    "webusb_unavailable_text": "Please use a WebUSB-compatible browser like Chrome, Edge, or Brave.",
+    "device": "Device",
+    "model": "Model",
+    "free_memory": "Free Memory",
+    "refresh_device_info": "Refresh Device Info",
+    "sync_clock": "Sync Clock",
+    "transfers": "Transfers",
+    "is_ready": "Is Ready",
+    "dropzone_title": "Drop files to send",
+    "dropzone_subtitle": "Make sure to select appropriate TI files",
+    "send_selected_files": "Send Selected Files",
+    "make_backup": "Make Backup",
+    "receive_os": "Receive OS",
+    "download_os_so_far": "Download OS so far",
+    "dump_rom": "Dump ROM",
+    "leave_exam_mode": "Leave exam mode",
+    "remote_keys": "Remote Key/Action send",
+    "key_input_placeholder": "Key name or code (hex/dec)",
+    "send_key": "Send Key",
+    "calculator_variables": "Calculator Variables",
+    "filter_name_or_type": "Filter name or type",
+    "refresh_list": "Refresh List",
+    "new_folder": "New Folder",
+    "receive_selected": "Receive Selected",
+    "delete_selected": "Delete Selected",
+    "name": "Name",
+    "type": "Type",
+    "size": "Size",
+    "location": "Location",
+    "folder": "Folder",
+    "kind": "Kind",
+    "screenshot": "Screenshot",
+    "take_screenshot": "Take Screenshot",
+    "download_png": "Download PNG",
+    "activity_log": "Activity Log",
+    "clear_log": "Clear Log",
+    "settings_title": "Settings",
+    "cable": "Cable",
+    "force_cable_hint": "Force cable to skip probing.",
+    "calculator_model": "Calculator model",
+    "auto_probe_hint": "Auto uses probing to detect the model.",
+    "silverlink_hint": "SilverLink requires manual model selection.",
+    "cable_timeout": "Cable timeout (1/10s)",
+    "cable_delay": "Cable delay (us)",
+    "language": "Language",
+    "settings_note": "Changing settings resets the current handle. Reconnect for full effect.",
+    "offline_ready": "This app can now run without a network connection.",
+    "offline_update_available": "An update is available. Reload to use the latest version.",
+    "reload_for_update": "Reload for update",
+    "clear_offline_cache": "Clear offline cache",
+    "update_available": "Update available",
+    "reset_defaults": "Reset Defaults",
+    "save_settings": "Save Settings",
+    "transfer_options": "Transfer Options",
+    "transfer_note": "Location/folder options depend on calculator capabilities. Existing variables are overwritten only if confirmed.",
+    "file": "File",
+    "variable": "Variable",
+    "cancel": "Cancel",
+    "start_transfer": "Start Transfer",
+    "create_folder": "Create Folder",
+    "folder_name": "Folder name",
+    "parent_folder": "Parent folder",
+    "new_folder_placeholder": "New folder name",
+    "new_folder_note": "Pick a parent folder or root to create a top-level folder.",
+    "create": "Create",
+    "backup_options": "Backup Options",
+    "backup_format": "Backup format",
+    "standard_backup_file": "Standard backup file",
+    "tigroup": "TIGroup (.tig)",
+    "include_in_tigroup": "Include in TIGroup",
+    "ram": "RAM",
+    "archive": "Archive",
+    "flash_apps": "Flash apps",
+    "backup_note": "Standard backups may fail on large memory contents. TIGroup is recommended for big backups.",
+    "loading_dirlist": "Loading directory listing...",
+    "create_backup": "Create Backup",
+    "theme_prefix": "Theme",
+    "theme_dark_modern": "Dark Modern",
+    "theme_light_modern": "Light Modern",
+    "theme_retro": "Retro Terminal",
+    "auto": "Auto",
+    "directlink_usb": "DirectLink USB",
+    "silverlink_usb": "SilverLink (Graph Link USB)",
+    "idle": "Idle",
+    "error_title": "Error",
+    "notice_title": "Notice",
+    "status_loading_module": "Loading module...",
+    "status_module_ready": "WebTILP ready",
+    "status_connected": "Connected",
+    "status_connection_failed": "Connection failed",
+    "status_disconnected": "Disconnected",
+    "status_device_connected": "Device connected",
+    "status_webusb_unsupported": "WebUSB unsupported",
+    "status_insecure_context": "Insecure context",
+    "status_connection_lost": "Connection lost",
+    "status_select_device": "Select device to continue",
+    "unknown": "Unknown",
+    "root": "(root)",
+    "force_disconnect_reset": "Force disconnect and reset",
+    "alert_unknown_cable_param": "Unknown cable URL parameter: {value}",
+    "alert_unknown_calc_param": "Unknown calc URL parameter: {value}",
+    "alert_failed_resolve_calc_param": "Failed to resolve calc URL parameter: {value}",
+    "alert_invalid_timeout_param": "Invalid timeout URL parameter: {value}",
+    "alert_invalid_delay_param": "Invalid delay URL parameter: {value}",
+    "alert_unknown_theme_param": "Unknown theme URL parameter: {value}",
+    "alert_silverlink_model_required": "SilverLink detected. Please choose a calculator model in Settings before connecting.",
+    "alert_silverlink_choose_model": "SilverLink requires choosing a calculator model.",
+    "alert_bundle_only_files": "Please transfer bundle files by themselves.",
+    "alert_bundle_one_at_a_time": "Please transfer one bundle file at a time.",
+    "alert_bundle_ce_only": "This bundle can only be installed on TI-84 Plus CE / TI-83 Premium CE calculators.",
+    "alert_bundle_no_transferable_files": "Bundle archive contains no transferable files.",
+    "alert_select_file_to_transfer": "Select at least one file to transfer.",
+    "alert_cannot_overwrite_locked": "Cannot overwrite {name} because it is locked/archived. Unarchive/unlock it on the calculator and retry.",
+    "alert_failed_clear_attributes": "Failed to clear attributes for {name} ({error}).",
+    "alert_failed_delete_existing": "Failed to delete existing {name} ({error}).",
+    "confirm_switch_to_silverlink": "A SilverLink cable is connected but Settings force DirectLink. Switch to SilverLink and choose a model?",
+    "confirm_switch_to_directlink": "A DirectLink calculator is connected but Settings force SilverLink. Switch to DirectLink?",
+    "confirm_replug_after_device_info": "You will have to physically unplug and replug the cable after that. Continue?",
+    "confirm_load_dirlist_before_transfer": "Directory listing has not been loaded yet. It is highly recommended before transfers. Load it now?",
+    "confirm_overwrite_existing": "{name} already exists there. Overwrite?",
+    "confirm_large_backup_continue_standard": "Backup data may exceed 65535 bytes and fail. TIGroup is recommended for large backups. Continue with standard backup anyway?",
+    "confirm_receive_os_notice": "This will receive the TI-Nspire OS from the calculator. It should take a few minutes.\nYou will then be prompted to save the OS file on your computer.\nTo begin the process, on your Nspire, press [on] then [2] then [menu] then [A] (\"Send OS\").\nOnce done, confirm here / press OK to continue.",
+    "confirm_dump_rom_notice": "ROM contents are copyrighted by Texas Instruments.\nYou are not allowed to copy and/or distribute ROM images.\nProceed only if you understand the legal restrictions.\n\nThis will send a dumper program to the calculator and then read back the ROM.\nContinue?",
+    "confirm_download_items_from_folders": "Download {items} item(s) from {folders} folder(s)?",
+    "confirm_delete_items": "Delete {count} item(s) from the calculator?",
+    "confirm_delete_entry": "Delete {kind} {name}?",
+    "confirm_download_items_from_target": "Download {count} item(s) from {target}?",
+    "prompt_rename_entry": "Rename {kind}:",
+    "kind_folder": "folder",
+    "kind_item": "item"
+};
+
+const LOCALE_CACHE = new Map([['en', I18N_EN]]);
+const LOCALE_BASE_PATH = 'i18n';
+
+async function loadLocaleDictionary(language) {
+    const lang = normalizeLanguageCode(language) || 'en';
+    if (LOCALE_CACHE.has(lang)) {
+        return LOCALE_CACHE.get(lang);
+    }
+    try {
+        const response = await fetch(`${LOCALE_BASE_PATH}/${lang}.json`, { cache: 'no-store' });
+        if (!response.ok) {
+            throw new Error(`HTTP \${response.status}`);
+        }
+        const data = await response.json();
+        LOCALE_CACHE.set(lang, data || {});
+        return data || {};
+    } catch (err) {
+        console.warn('[WebTILP] Failed to load locale', lang, err);
+        LOCALE_CACHE.set(lang, {});
+        return {};
+    }
+}
+
+
+const STATUS_TRANSLATION_KEYS = {
+    'Loading module...': 'status_loading_module',
+    'WebTILP ready': 'status_module_ready',
+    'Module ready': 'status_module_ready',
+    Connected: 'status_connected',
+    'Connection failed': 'status_connection_failed',
+    Disconnected: 'status_disconnected',
+    'Device connected': 'status_device_connected',
+    'WebUSB unsupported': 'status_webusb_unsupported',
+    'Insecure context': 'status_insecure_context',
+    'Connection lost': 'status_connection_lost',
+    'Select device to continue': 'status_select_device',
+    Idle: 'idle'
+};
+
+function normalizeLanguageCode(code) {
+    const raw = String(code || '').trim().toLowerCase();
+    if (!raw) {
+        return null;
+    }
+    if (raw === 'zh' || raw.startsWith('zh-') || raw.startsWith('zh_')) {
+        return 'zh';
+    }
+    const base = raw.split(/[-_]/)[0];
+    if (SUPPORTED_LANGUAGES.includes(raw)) {
+        return raw;
+    }
+    if (SUPPORTED_LANGUAGES.includes(base)) {
+        return base;
+    }
+    return null;
+}
+
+function detectBrowserLanguage() {
+    const candidates = [];
+    if (Array.isArray(navigator.languages)) {
+        candidates.push(...navigator.languages);
+    }
+    if (navigator.language) {
+        candidates.push(navigator.language);
+    }
+    for (const candidate of candidates) {
+        const normalized = normalizeLanguageCode(candidate);
+        if (normalized) {
+            return normalized;
+        }
+    }
+    return 'en';
+}
+
+function resolveUiLanguage(configuredLanguage) {
+    const normalizedConfigured = normalizeLanguageCode(configuredLanguage);
+    if (normalizedConfigured && normalizedConfigured !== 'auto') {
+        return normalizedConfigured;
+    }
+    return detectBrowserLanguage();
+}
+
+function t(key) {
+    const language = state.uiLanguage || 'en';
+    const locale = LOCALE_CACHE.get(language);
+    if (locale && Object.prototype.hasOwnProperty.call(locale, key)) {
+        return locale[key];
+    }
+    if (Object.prototype.hasOwnProperty.call(I18N_EN, key)) {
+        return I18N_EN[key];
+    }
+    return key;
+}
+
+function tFormat(key, vars = {}) {
+    let text = String(t(key));
+    for (const [name, value] of Object.entries(vars)) {
+        text = text.replaceAll(`{${name}}`, String(value));
+    }
+    return text;
+}
+
+function getOptionLabel(option) {
+    if (option.labelKey) {
+        return t(option.labelKey);
+    }
+    return option.label;
+}
+
+function getOptionLabels(option) {
+    const labels = [];
+    if (option.label) {
+        labels.push(String(option.label));
+    }
+    if (option.labelKey) {
+        labels.push(String(t(option.labelKey)));
+        const englishLabel = I18N_EN?.[option.labelKey];
+        if (englishLabel) {
+            labels.push(String(englishLabel));
+        }
+    }
+    return labels;
+}
+
+function setTextContent(element, value) {
+    if (element) {
+        element.textContent = value;
+    }
+}
+
+function setButtonText(element, text) {
+    if (!element) {
+        return;
+    }
+    const dot = element.querySelector('.settings-update-dot');
+    element.textContent = text;
+    if (dot) {
+        element.appendChild(dot);
+    }
+}
+
+function applyStatusTranslation(text) {
+    const key = STATUS_TRANSLATION_KEYS[text];
+    if (!key) {
+        return text;
+    }
+    return t(key);
+}
+
 const CCALL_TIMEOUT_MS = 12000;
 const CCALL_MIN_GAP_MS = 100;
 const CREATE_HANDLE_RETRY_DELAY_MS = 300;
@@ -113,7 +419,7 @@ function showToast(message, type = 'error') {
     }
     const toast = document.createElement('div');
     toast.className = `toast ${type}`;
-    const title = type === 'error' ? 'Error' : 'Notice';
+    const title = type === 'error' ? t('error_title') : t('notice_title');
     const titleEl = document.createElement('div');
     titleEl.className = 'toast-title';
     titleEl.textContent = title;
@@ -341,7 +647,8 @@ const SETTINGS_DEFAULTS = {
     cableModel: 'auto',
     calcModel: 'auto',
     cableTimeout: 50,
-    cableDelay: 10
+    cableDelay: 10,
+    language: 'auto'
 };
 
 const CABLE_OPTIONS = [
@@ -1896,9 +2203,9 @@ function clearKeyMapDataList() {
 
 const THEME_STORAGE_KEY = 'webtilp.theme';
 const THEMES = [
-    { id: 'dark-modern', label: 'Dark Modern' },
-    { id: 'light-modern', label: 'Light Modern' },
-    { id: 'retro', label: 'Retro Terminal' }
+    { id: 'dark-modern', labelKey: 'theme_dark_modern' },
+    { id: 'light-modern', labelKey: 'theme_light_modern' },
+    { id: 'retro', labelKey: 'theme_retro' }
 ];
 
 function getCalcModelLabel(value) {
@@ -1970,6 +2277,7 @@ const els = {
     settingCalcHint: document.getElementById('settingCalcHint'),
     settingTimeout: document.getElementById('settingTimeout'),
     settingDelay: document.getElementById('settingDelay'),
+    settingLanguage: document.getElementById('settingLanguage'),
     transferModal: document.getElementById('transferModal'),
     transferTableBody: document.getElementById('transferTableBody'),
     btnCloseTransfer: document.getElementById('btnCloseTransfer'),
@@ -2010,7 +2318,7 @@ function updateThemeButton() {
     }
     const current = document.body.dataset.theme || THEMES[0].id;
     const theme = THEMES.find(entry => entry.id === current) || THEMES[0];
-    els.btnThemeToggle.textContent = `Theme: ${theme.label}`;
+    els.btnThemeToggle.textContent = `${t('theme_prefix')}: ${getOptionLabel(theme)}`;
 }
 
 function cycleTheme() {
@@ -2032,7 +2340,7 @@ function showOfflineUpdateBanner() {
         return;
     }
     if (els.offlineBannerText) {
-        els.offlineBannerText.textContent = 'An update is available. Reload to use the latest version.';
+        els.offlineBannerText.textContent = t('offline_update_available');
     }
     els.btnReloadOffline.classList.remove('hidden');
     els.offlineBanner.classList.remove('hidden');
@@ -2040,7 +2348,7 @@ function showOfflineUpdateBanner() {
         els.settingsUpdateDot.classList.remove('hidden');
     }
     if (els.btnSettings) {
-        els.btnSettings.title = 'Update available';
+        els.btnSettings.title = t('update_available');
     }
     state.offlineUpdateShown = true;
 }
@@ -2050,13 +2358,13 @@ function hideOfflineUpdateBanner() {
         return;
     }
     if (els.offlineBannerText) {
-        els.offlineBannerText.textContent = 'This app can now run without a network connection.';
+        els.offlineBannerText.textContent = t('offline_ready');
     }
     els.btnReloadOffline.classList.add('hidden');
     if (els.settingsUpdateDot) {
         els.settingsUpdateDot.classList.add('hidden');
     }
-    if (els.btnSettings && els.btnSettings.title === 'Update available') {
+    if (els.btnSettings) {
         els.btnSettings.removeAttribute('title');
     }
     if (!state.offlineUpdateShown) {
@@ -2136,7 +2444,8 @@ function loadSettings() {
             cableModel: String(parsed.cableModel ?? SETTINGS_DEFAULTS.cableModel),
             calcModel: String(parsed.calcModel ?? SETTINGS_DEFAULTS.calcModel),
             cableTimeout: Number(parsed.cableTimeout ?? SETTINGS_DEFAULTS.cableTimeout),
-            cableDelay: Number(parsed.cableDelay ?? SETTINGS_DEFAULTS.cableDelay)
+            cableDelay: Number(parsed.cableDelay ?? SETTINGS_DEFAULTS.cableDelay),
+            language: normalizeLanguageCode(parsed.language) || 'auto'
         };
     } catch (err) {
         console.warn('[WebTILP] Failed to load settings', err);
@@ -2160,7 +2469,7 @@ function resolveOptionValue(options, rawValue) {
     if (byValue) {
         return String(byValue.value);
     }
-    const byLabel = options.find(option => normalizeOptionValue(option.label) === normalized);
+    const byLabel = options.find(option => getOptionLabels(option).some(label => normalizeOptionValue(label) === normalized));
     if (byLabel) {
         return String(byLabel.value);
     }
@@ -2210,7 +2519,7 @@ function applyUrlOverrides() {
     if (cableValue != null) {
         nextSettings.cableModel = cableValue;
     } else if (params.get('cable')) {
-        alert(`Unknown cable URL parameter: ${params.get('cable')}`);
+        alert(tFormat('alert_unknown_cable_param', { value: params.get('cable') }));
     }
     const calcParam = params.get('calc');
     const calcValue = resolveCalcParam(calcParam);
@@ -2234,11 +2543,11 @@ function applyUrlOverrides() {
                         openSettingsModal();
                     }
                 } else {
-                    alert(`Unknown calc URL parameter: ${calcParam}`);
+                    alert(tFormat('alert_unknown_calc_param', { value: calcParam }));
                 }
             } catch (err) {
                 console.warn('[WebTILP] Failed to resolve calc URL param', err);
-                alert(`Failed to resolve calc URL parameter: ${calcParam}`);
+                alert(tFormat('alert_failed_resolve_calc_param', { value: calcParam }));
             }
         })();
     }
@@ -2246,13 +2555,13 @@ function applyUrlOverrides() {
     if (Number.isFinite(timeout) && timeout > 0) {
         nextSettings.cableTimeout = timeout;
     } else if (params.get('timeout')) {
-        alert(`Invalid timeout URL parameter: ${params.get('timeout')}`);
+        alert(tFormat('alert_invalid_timeout_param', { value: params.get('timeout') }));
     }
     const delay = Number(params.get('delay'));
     if (Number.isFinite(delay) && delay >= 0) {
         nextSettings.cableDelay = delay;
     } else if (params.get('delay')) {
-        alert(`Invalid delay URL parameter: ${params.get('delay')}`);
+        alert(tFormat('alert_invalid_delay_param', { value: params.get('delay') }));
     }
     state.settings = nextSettings;
 
@@ -2267,11 +2576,12 @@ function applyUrlOverrides() {
     const themeParam = params.get('theme');
     if (themeParam) {
         const normalized = normalizeOptionValue(themeParam);
-        const target = THEMES.find(theme => normalizeOptionValue(theme.id) === normalized || normalizeOptionValue(theme.label) === normalized);
+        const target = THEMES.find(theme => normalizeOptionValue(theme.id) === normalized
+            || getOptionLabels(theme).some(label => normalizeOptionValue(label) === normalized));
         if (target) {
             applyTheme(target.id);
         } else {
-            alert(`Unknown theme URL parameter: ${themeParam}`);
+            alert(tFormat('alert_unknown_theme_param', { value: themeParam }));
         }
     }
 
@@ -2424,7 +2734,7 @@ function promptCableMismatchResolution() {
     const forcedDirectlink = forcedCable === '5';
 
     if (isSilverlinkDevice && forcedDirectlink) {
-        const confirmSwitch = confirm('A SilverLink cable is connected but Settings force DirectLink. Switch to SilverLink and choose a model?');
+        const confirmSwitch = confirm(t('confirm_switch_to_silverlink'));
         if (confirmSwitch) {
             state.settings.cableModel = '4';
             state.settings.calcModel = 'auto';
@@ -2435,7 +2745,7 @@ function promptCableMismatchResolution() {
     }
 
     if (isDirectlinkDevice && forcedSilverlink) {
-        const confirmSwitch = confirm('A DirectLink calculator is connected but Settings force SilverLink. Switch to DirectLink?');
+        const confirmSwitch = confirm(t('confirm_switch_to_directlink'));
         if (confirmSwitch) {
             state.settings.cableModel = '5';
             state.settings.calcModel = 'auto';
@@ -2456,7 +2766,7 @@ function ensureSilverlinkModelSelected() {
     if (calcModel !== 'auto') {
         return true;
     }
-    alert('SilverLink detected. Please choose a calculator model in Settings before connecting.');
+    alert(t('alert_silverlink_model_required'));
     openSettingsModal();
     return false;
 }
@@ -2466,7 +2776,7 @@ function populateSelect(select, options) {
     options.forEach(option => {
         const item = document.createElement('option');
         item.value = String(option.value);
-        item.textContent = option.label;
+        item.textContent = getOptionLabel(option);
         select.appendChild(item);
     });
 }
@@ -2494,10 +2804,129 @@ function updateCalcHint(cableModel) {
         return;
     }
     if (String(cableModel) === '4') {
-        els.settingCalcHint.textContent = 'SilverLink requires manual model selection.';
+        els.settingCalcHint.textContent = t('silverlink_hint');
         return;
     }
-    els.settingCalcHint.textContent = 'Auto uses probing to detect the model.';
+    els.settingCalcHint.textContent = t('auto_probe_hint');
+}
+
+async function applyTranslations() {
+    state.uiLanguage = resolveUiLanguage(state.settings?.language || 'auto');
+    await loadLocaleDictionary(state.uiLanguage);
+    document.documentElement.lang = state.uiLanguage === 'zh' ? 'zh-CN' : state.uiLanguage;
+    document.documentElement.dir = state.uiLanguage === 'fa' ? 'rtl' : 'ltr';
+
+    setTextContent(document.getElementById('brandSubtitle'), t('brand_subtitle'));
+    setButtonText(els.btnSettings, `⚙️ ${t('settings')}`);
+    setTextContent(els.btnConnect, `🔌 ${t('connect_calculator')}`);
+    setTextContent(document.getElementById('splashTitle'), t('welcome_title'));
+    setTextContent(document.getElementById('splashText'), t('welcome_text'));
+    setTextContent(document.getElementById('splashWebUsbWarningTitle'), t('webusb_unavailable_title'));
+    setTextContent(document.getElementById('splashWebUsbWarningText'), t('webusb_unavailable_text'));
+    setTextContent(els.btnSplashConnect, `🔌 ${t('connect_calculator')}`);
+
+    setTextContent(document.getElementById('panelDeviceTitle'), t('device'));
+    setTextContent(document.getElementById('labelModel'), t('model'));
+    setTextContent(document.getElementById('labelFreeMemory'), t('free_memory'));
+    setTextContent(els.btnGetInfo, `ℹ️ ${t('refresh_device_info')}`);
+    setTextContent(els.btnSyncClock, `🕒 ${t('sync_clock')}`);
+
+    setTextContent(document.getElementById('panelTransfersTitle'), t('transfers'));
+    setTextContent(els.btnIsReady, `✅ ${t('is_ready')}`);
+    setTextContent(document.getElementById('dropzoneTitle'), t('dropzone_title'));
+    setTextContent(document.getElementById('dropzoneSubtitle'), t('dropzone_subtitle'));
+    setTextContent(els.btnSendFiles, `📤 ${t('send_selected_files')}`);
+    setTextContent(els.btnReceiveBackup, `📥  ${t('make_backup')}`);
+    setTextContent(els.btnReceiveOs, `📥  ${t('receive_os')}`);
+    setTextContent(els.btnDownloadOsPartial, `⬇️  ${t('download_os_so_far')}`);
+    setTextContent(els.btnDumpRom, `🧠  ${t('dump_rom')}`);
+    setTextContent(els.btnLeaveExam, `👨‍🎓  ${t('leave_exam_mode')}`);
+
+    setTextContent(document.getElementById('panelKeysTitle'), t('remote_keys'));
+    if (els.keyCodeInput) {
+        els.keyCodeInput.placeholder = t('key_input_placeholder');
+    }
+    setTextContent(els.btnSendKey, `🎯 ${t('send_key')}`);
+
+    setTextContent(document.getElementById('panelVarsTitle'), t('calculator_variables'));
+    if (els.filterInput) {
+        els.filterInput.placeholder = t('filter_name_or_type');
+    }
+    setTextContent(els.btnRefreshDirlist, `🔄 ${t('refresh_list')}`);
+    setTextContent(els.btnNewFolder, `📁 ${t('new_folder')}`);
+    setTextContent(els.btnRecvSelected, `⬇️ ${t('receive_selected')}`);
+    setTextContent(els.btnDeleteSelected, `🗑️ ${t('delete_selected')}`);
+    setTextContent(document.getElementById('varsHeaderName'), t('name'));
+    setTextContent(document.getElementById('varsHeaderType'), t('type'));
+    setTextContent(document.getElementById('varsHeaderSize'), t('size'));
+    setTextContent(document.getElementById('varsHeaderLocation'), t('location'));
+    setTextContent(document.getElementById('varsHeaderFolder'), t('folder'));
+    setTextContent(document.getElementById('varsHeaderKind'), t('kind'));
+
+    setTextContent(document.getElementById('panelScreenshotTitle'), t('screenshot'));
+    setTextContent(els.btnScreenshot, `📸 ${t('take_screenshot')}`);
+    setTextContent(els.btnDownloadScreenshot, `⬇️ ${t('download_png')}`);
+    setTextContent(document.getElementById('panelLogTitle'), t('activity_log'));
+    setTextContent(els.btnClearLog, `🧹 ${t('clear_log')}`);
+
+    setTextContent(document.getElementById('settingsTitle'), t('settings_title'));
+    setTextContent(document.getElementById('settingCableLabel'), t('cable'));
+    setTextContent(document.getElementById('settingCableHint'), t('force_cable_hint'));
+    setTextContent(document.getElementById('settingCalcLabel'), t('calculator_model'));
+    setTextContent(document.getElementById('settingTimeoutLabel'), t('cable_timeout'));
+    setTextContent(document.getElementById('settingDelayLabel'), t('cable_delay'));
+    setTextContent(document.getElementById('settingLanguageLabel'), t('language'));
+    setTextContent(document.getElementById('settingsNote'), t('settings_note'));
+    setTextContent(document.getElementById('offlineBannerText'), state.offlineUpdateShown ? t('offline_update_available') : t('offline_ready'));
+    setTextContent(els.btnReloadOffline, `↻ ${t('reload_for_update')}`);
+    setTextContent(els.btnClearOfflineCache, t('clear_offline_cache'));
+    setTextContent(els.btnResetSettings, `↩️ ${t('reset_defaults')}`);
+    setTextContent(els.btnSaveSettings, `💾 ${t('save_settings')}`);
+
+    setTextContent(document.getElementById('transferTitle'), t('transfer_options'));
+    setTextContent(document.getElementById('transferHeaderFile'), t('file'));
+    setTextContent(document.getElementById('transferHeaderVariable'), t('variable'));
+    setTextContent(document.getElementById('transferHeaderType'), t('type'));
+    setTextContent(document.getElementById('transferHeaderLocation'), t('location'));
+    setTextContent(document.getElementById('transferHeaderFolder'), t('folder'));
+    setTextContent(document.getElementById('transferNote'), t('transfer_note'));
+    setTextContent(els.btnCancelTransfer, t('cancel'));
+    setTextContent(els.btnConfirmTransfer, `🚀 ${t('start_transfer')}`);
+
+    setTextContent(document.getElementById('newFolderTitle'), t('create_folder'));
+    setTextContent(document.getElementById('newFolderNameLabel'), t('folder_name'));
+    setTextContent(document.getElementById('newFolderParentLabel'), t('parent_folder'));
+    if (els.newFolderName) {
+        els.newFolderName.placeholder = t('new_folder_placeholder');
+    }
+    setTextContent(document.getElementById('newFolderNote'), t('new_folder_note'));
+    setTextContent(els.btnCancelNewFolder, t('cancel'));
+    setTextContent(els.btnCreateNewFolder, t('create'));
+
+    setTextContent(document.getElementById('backupTitle'), t('backup_options'));
+    setTextContent(document.getElementById('backupFormatLabel'), t('backup_format'));
+    setTextContent(document.getElementById('backupFormatBackupLabel'), t('standard_backup_file'));
+    setTextContent(document.getElementById('backupFormatTigroupLabel'), t('tigroup'));
+    setTextContent(document.getElementById('backupIncludeLabel'), t('include_in_tigroup'));
+    setTextContent(document.getElementById('backupIncludeRamLabel'), t('ram'));
+    setTextContent(document.getElementById('backupIncludeArchiveLabel'), t('archive'));
+    setTextContent(document.getElementById('backupIncludeFlashLabel'), t('flash_apps'));
+    setTextContent(document.getElementById('backupNote'), t('backup_note'));
+    setTextContent(document.getElementById('backupModalOverlayText'), t('loading_dirlist'));
+    setTextContent(els.btnCancelBackup, t('cancel'));
+    setTextContent(els.btnConfirmBackup, `📥 ${t('create_backup')}`);
+
+    if (els.btnNuke) {
+        els.btnNuke.title = t('force_disconnect_reset');
+    }
+    if (els.btnSettings && state.offlineUpdateShown) {
+        els.btnSettings.title = t('update_available');
+    }
+    if (els.statusText) {
+        els.statusText.textContent = applyStatusTranslation(els.statusText.textContent.trim());
+    }
+    updateThemeButton();
+    updateCalcHint(els.settingCableModel?.value || state.settings?.cableModel || 'auto');
 }
 
 function seedSettingsForm() {
@@ -2507,6 +2936,8 @@ function seedSettingsForm() {
     els.settingCalcModel.value = state.settings.calcModel;
     els.settingTimeout.value = state.settings.cableTimeout;
     els.settingDelay.value = state.settings.cableDelay;
+    populateSelect(els.settingLanguage, LANGUAGE_OPTIONS);
+    els.settingLanguage.value = state.settings.language || 'auto';
     updateCalcHint(els.settingCableModel.value);
 }
 
@@ -2530,7 +2961,7 @@ function populateNewFolderParents() {
     els.newFolderParent.innerHTML = '';
     const rootOption = document.createElement('option');
     rootOption.value = '';
-    rootOption.textContent = '(root)';
+    rootOption.textContent = t('root');
     els.newFolderParent.appendChild(rootOption);
     folders.forEach(folder => {
         const option = document.createElement('option');
@@ -2575,24 +3006,43 @@ function resetSettings() {
     window.location.reload();
 }
 
-function saveSettingsFromModal() {
+async function saveSettingsFromModal() {
     if (els.settingCableModel.value === '4' && els.settingCalcModel.value === 'auto') {
-        alert('SilverLink requires choosing a calculator model.');
+        alert(t('alert_silverlink_choose_model'));
         return;
     }
     const nextSettings = {
         cableModel: els.settingCableModel.value,
         calcModel: els.settingCalcModel.value,
         cableTimeout: Number(els.settingTimeout.value || SETTINGS_DEFAULTS.cableTimeout),
-        cableDelay: Number(els.settingDelay.value || SETTINGS_DEFAULTS.cableDelay)
+        cableDelay: Number(els.settingDelay.value || SETTINGS_DEFAULTS.cableDelay),
+        language: normalizeLanguageCode(els.settingLanguage.value) || 'auto'
     };
     if (JSON.stringify(state.settings) === JSON.stringify(nextSettings)) {
         closeSettingsModal();
         log('Settings unchanged.');
         return;
     }
+    const languageOnlyChange = state.settings
+        && state.settings.cableModel === nextSettings.cableModel
+        && state.settings.calcModel === nextSettings.calcModel
+        && Number(state.settings.cableTimeout) === Number(nextSettings.cableTimeout)
+        && Number(state.settings.cableDelay) === Number(nextSettings.cableDelay)
+        && state.settings.language !== nextSettings.language;
     state.settings = nextSettings;
     saveSettings();
+    if (languageOnlyChange) {
+        try {
+            await applyTranslations();
+            seedSettingsForm();
+            closeSettingsModal();
+            log('Language updated.');
+            return;
+        } catch (err) {
+            console.warn('[WebTILP] Failed to apply language without reload, falling back to page reload.', err);
+            // fallthrough
+        }
+    }
     log('Settings saved. Reloading...');
     window.location.reload();
 }
@@ -2834,7 +3284,7 @@ function formatMemoryValue(value) {
 }
 
 function setStatus(text, active) {
-    els.statusText.textContent = text;
+    els.statusText.textContent = applyStatusTranslation(text);
     els.statusDot.style.background = active ? '#4fd3b4' : '#586178';
     els.statusDot.style.boxShadow = active ? '0 0 0 4px rgba(79, 211, 180, 0.2)' : '0 0 0 4px rgba(88, 97, 120, 0.2)';
 }
@@ -2949,7 +3399,7 @@ async function initModule() {
     await state.module.ccall('init', 'number', [], [], { async: true });
     applySettingsToModule();
     log('WASM module initialized.');
-    setStatus('Module ready', true);
+    setStatus('WebTILP ready', true);
     return state.module;
 }
 
@@ -3293,7 +3743,7 @@ async function getDeviceInfo() {
     setButtonLoading(els.btnGetInfo, true);
     try {
         if (isTi92Selected()) {
-            const proceed = confirm('You will have to physically unplug and replug the cable after that. Continue?');
+            const proceed = confirm(t('confirm_replug_after_device_info'));
             if (!proceed) {
                 log('Device info refresh cancelled.');
                 return;
@@ -4474,7 +4924,7 @@ async function ensureDirlistLoadedWithPrompt() {
         return;
     }
     state.dirlistPromptPromise = (async () => {
-        const confirmDirlist = confirm('Directory listing has not been loaded yet. It is highly recommended before transfers. Load it now?');
+        const confirmDirlist = confirm(t('confirm_load_dirlist_before_transfer'));
         if (confirmDirlist) {
             await refreshDirlist();
         }
@@ -4515,11 +4965,11 @@ async function sendDroppedFiles(files, dropFolder) {
         const bundleCandidates = files.filter(isCeBundleFile);
         if (bundleCandidates.length > 0) {
             if (bundleCandidates.length !== files.length) {
-                alert('Please transfer bundle files by themselves.');
+                alert(t('alert_bundle_only_files'));
                 return;
             }
             if (bundleCandidates.length > 1) {
-                alert('Please transfer one bundle file at a time.');
+                alert(t('alert_bundle_one_at_a_time'));
                 return;
             }
             const bundleResult = await handleCeBundleTransfer(bundleCandidates[0], module, { hasFolder, hasArchive, folders });
@@ -4883,7 +5333,7 @@ async function extractBundleFiles(bundleFile, module) {
 
 async function handleCeBundleTransfer(bundleFile, module, options) {
     if (!isCEModelConnected()) {
-        alert('This bundle can only be installed on TI-84 Plus CE / TI-83 Premium CE calculators.');
+        alert(t('alert_bundle_ce_only'));
         return null;
     }
 
@@ -4895,7 +5345,7 @@ async function handleCeBundleTransfer(bundleFile, module, options) {
         cleanupPaths.push(extracted.bundlePath);
 
         if (!extracted.files.length) {
-            alert('Bundle archive contains no transferable files.');
+            alert(t('alert_bundle_no_transferable_files'));
             return null;
         }
 
@@ -5077,7 +5527,7 @@ function openTransferModal(plan, options) {
                 selectedCount += 1;
             });
             if (selectedCount === 0) {
-                alert('Select at least one file to transfer.');
+                alert(t('alert_select_file_to_transfer'));
                 return;
             }
             cleanup();
@@ -5248,13 +5698,13 @@ async function performTransfers(plan, module, options) {
         if (isVar && state.dirlist.length && targetName && item.entryType != null) {
             existing = findDirlistMatch(targetName, item.entryType, targetFolder, targetLocation);
             if (existing) {
-                const overwrite = confirm(`${targetName} already exists there. Overwrite?`);
+                const overwrite = confirm(tFormat('confirm_overwrite_existing', { name: targetName }));
                 if (!overwrite) {
                     log(`Skipped ${item.file.name}, because overwriting was declined.`);
                     continue;
                 }
                 if (existing.attr !== 0 && hasSilverlinkConnected()) {
-                    const msg = `Cannot overwrite ${targetName} because it is locked/archived. Unarchive/unlock it on the calculator and retry.`;
+                    const msg = tFormat('alert_cannot_overwrite_locked', { name: targetName });
                     log(msg);
                     alert(msg);
                     continue;
@@ -5271,7 +5721,10 @@ async function performTransfers(plan, module, options) {
                             { timeoutMs: PROGRESS_IDLE_TIMEOUT_MS, useProgress: true, progressLabel: `Updating ${targetName}` }
                         );
                         if (clearAttrResult !== 0) {
-                            const msg = `Failed to clear attributes for ${targetName} (${formatErrorResult(module, clearAttrResult)}).`;
+                            const msg = tFormat('alert_failed_clear_attributes', {
+                                name: targetName,
+                                error: formatErrorResult(module, clearAttrResult)
+                            });
                             log(msg);
                             alert(msg);
                             continue;
@@ -5289,9 +5742,12 @@ async function performTransfers(plan, module, options) {
                         const deleteRaw = module ? module._get_raw_protocol_code(deleteResult) : 0;
                         let msg = '';
                         if (deleteRaw === 0x0021) {
-                            msg = `Cannot overwrite ${targetName} because it is locked/archived. Unarchive/unlock it on the calculator and retry.`;
+                            msg = tFormat('alert_cannot_overwrite_locked', { name: targetName });
                         } else {
-                            msg = `Failed to delete existing ${targetName} (${formatErrorResult(module, deleteResult)}).`;
+                            msg = tFormat('alert_failed_delete_existing', {
+                                name: targetName,
+                                error: formatErrorResult(module, deleteResult)
+                            });
                         }
                         log(msg);
                         alert(msg);
@@ -5362,11 +5818,11 @@ async function sendSelectedFiles() {
         const bundleCandidates = files.filter(isCeBundleFile);
         if (bundleCandidates.length > 0) {
             if (bundleCandidates.length !== files.length) {
-                alert('Please transfer bundle files by themselves.');
+                alert(t('alert_bundle_only_files'));
                 return;
             }
             if (bundleCandidates.length > 1) {
-                alert('Please transfer one bundle file at a time.');
+                alert(t('alert_bundle_one_at_a_time'));
                 return;
             }
             const bundleResult = await handleCeBundleTransfer(bundleCandidates[0], module, { hasFolder, hasArchive, folders });
@@ -5454,7 +5910,7 @@ async function receiveBackup() {
             if (backupChoice.format === 'backup') {
                 const estimatedSize = estimateBackupSize();
                 if (estimatedSize > 65535) {
-                    const proceed = confirm('Backup data may exceed 65535 bytes and fail. TIGroup is recommended for large backups. Continue with standard backup anyway?');
+                    const proceed = confirm(t('confirm_large_backup_continue_standard'));
                     if (!proceed) {
                         if (allowTigroup) {
                             defaultFormat = 'tigroup';
@@ -5499,12 +5955,7 @@ async function receiveOs() {
         if (!module.FS.analyzePath('/downloads').exists) {
             module.FS.mkdir('/downloads');
         }
-        const notice = [
-            'This will receive the TI-Nspire OS from the calculator. It should take a few minutes.',
-            'You will then be prompted to save the OS file on your computer.',
-            'To begin the process, on your Nspire, press [on] then [2] then [menu] then [A] ("Send OS").',
-            'Once done, confirm here / press OK to continue.'
-        ].join('\n');
+        const notice = t('confirm_receive_os_notice');
         if (!confirm(notice)) {
             return;
         }
@@ -5551,14 +6002,7 @@ async function downloadPartialOs() {
 
 async function dumpRom() {
     setButtonLoading(els.btnDumpRom, true);
-    const notice = [
-        'ROM contents are copyrighted by Texas Instruments.',
-        'You are not allowed to copy and/or distribute ROM images.',
-        'Proceed only if you understand the legal restrictions.',
-        '',
-        'This will send a dumper program to the calculator and then read back the ROM.',
-        'Continue?'
-    ].join('\n');
+    const notice = t('confirm_dump_rom_notice');
     if (!confirm(notice)) {
         setButtonLoading(els.btnDumpRom, false);
         return;
@@ -5697,7 +6141,7 @@ async function receiveSelected() {
                 }
                 return keptFolders.some(parent => entryFolder === parent || entryFolder.startsWith(`${parent}/`));
             }).length;
-            if (!confirm(`Download ${totalItems} item(s) from ${keptFolders.length} folder(s)?`)) {
+            if (!confirm(tFormat('confirm_download_items_from_folders', { items: totalItems, folders: keptFolders.length }))) {
                 return;
             }
         }
@@ -5739,7 +6183,7 @@ async function deleteSelected() {
         log('No variables selected.');
         return;
     }
-    if (!confirm(`Delete ${selections.length} item(s) from the calculator?`)) {
+    if (!confirm(tFormat('confirm_delete_items', { count: selections.length }))) {
         return;
     }
     setButtonLoading(els.btnDeleteSelected, true);
@@ -5780,7 +6224,7 @@ async function renameEntry(entry) {
     }
     const label = entry.isFolder ? 'folder' : 'item';
     const currentName = entry.name || '';
-    const newName = prompt(`Rename ${label}:`, currentName);
+    const newName = prompt(tFormat('prompt_rename_entry', { kind: label }), currentName);
     if (!newName) {
         log('Rename cancelled.');
         return;
@@ -5824,7 +6268,10 @@ async function renameEntry(entry) {
 }
 
 async function deleteEntry(entry) {
-    if (!confirm(`Delete ${entry.isFolder ? 'folder' : 'item'} ${entry.name}?`)) {
+    if (!confirm(tFormat('confirm_delete_entry', {
+        kind: t(entry.isFolder ? 'kind_folder' : 'kind_item'),
+        name: entry.name
+    }))) {
         return;
     }
     setButtonLoading(els.btnDeleteSelected, true);
@@ -5903,7 +6350,10 @@ async function downloadFolderEntriesWithSession(module, handle, folderPath, conf
         return false;
     }
     if (confirmDownload) {
-        if (!confirm(`Download ${entries.length} item(s) from ${target || 'root'}?`)) {
+        if (!confirm(tFormat('confirm_download_items_from_target', {
+            count: entries.length,
+            target: target || t('root')
+        }))) {
             return false;
         }
     }
@@ -6505,17 +6955,30 @@ function bindEvents() {
     });
 }
 
-initTheme();
-applyUrlOverrides();
-bindEvents();
-loadBuildInfo();
-seedSettingsForm();
-updateSendFilesButtonState();
-updateSelectionActionButtons();
-updateKeyControlsState(false);
-updateWebUsbSplashState();
-autoConnectIfAuthorized();
-window.addEventListener('resize', updateScreenshotCanvasScale);
+async function bootstrap() {
+    initTheme();
+    applyUrlOverrides();
+    try {
+        await applyTranslations();
+    } catch (err) {
+        console.warn('[WebTILP] Translation setup failed, continuing with English fallback.', err);
+        state.uiLanguage = 'en';
+        document.documentElement.lang = 'en';
+    }
+    bindEvents();
+    loadBuildInfo();
+    seedSettingsForm();
+    updateSendFilesButtonState();
+    updateSelectionActionButtons();
+    updateKeyControlsState(false);
+    updateWebUsbSplashState();
+    autoConnectIfAuthorized();
+    window.addEventListener('resize', updateScreenshotCanvasScale);
+}
+
+bootstrap().catch(err => {
+    console.error('[WebTILP] Bootstrap failed', err);
+});
 
 if ('serviceWorker' in navigator) {
     window.addEventListener('load', () => {
