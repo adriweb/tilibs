@@ -134,5 +134,6 @@
   "confirm_download_items_from_target": "Télécharger {count} élément(s) depuis {target} ?",
   "prompt_rename_entry": "Renommer {kind} :",
   "kind_folder": "dossier",
-  "kind_item": "élément"
+  "kind_item": "élément",
+  "transfer_overwrite_all": "Écraser tous les éléments existants (sans confirmation par fichier)"
 }
