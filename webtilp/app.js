@@ -4944,69 +4944,12 @@ async function sendDroppedFiles(files, dropFolder) {
         return;
     }
     log(`Dropped ${files.length} file(s) for transfer.`);
-    try {
-        await authorizeDevice();
-        if (promptCableMismatchResolution()) {
-            return;
-        }
-        if (!ensureSilverlinkModelSelected()) {
-            return;
-        }
-        const module = await initModule();
-        await ensureCableOpen();
-        await updateCapabilities();
-
-        await ensureDirlistLoadedWithPrompt();
-
-        const hasFolder = (state.features & FEATURE_FLAGS.FTS_FOLDER) !== 0;
-        const hasArchive = (state.features & FEATURE_FLAGS.OPS_CHATTR) !== 0 || (state.features & FEATURE_FLAGS.FTS_FLASH) !== 0;
-        const folders = hasFolder ? getDirlistFolders() : [];
-        const effectiveFolder = hasFolder ? (dropFolder || '') : '';
-        if (effectiveFolder) {
-            log(`Target folder: ${effectiveFolder}`);
-        }
-        const bundleCandidates = files.filter(isCeBundleFile);
-        if (bundleCandidates.length > 0) {
-            if (bundleCandidates.length !== files.length) {
-                alert(t('alert_bundle_only_files'));
-                return;
-            }
-            if (bundleCandidates.length > 1) {
-                alert(t('alert_bundle_one_at_a_time'));
-                return;
-            }
-            const bundleResult = await handleCeBundleTransfer(bundleCandidates[0], module, { hasFolder, hasArchive, folders });
-            if (bundleResult) {
-                state.selectedFiles = [];
-                if (bundleResult.successCount > 0) {
-                    setSelectedFiles([]);
-                }
-            }
-            return;
-        }
-        const plan = await buildTransferPlan(files, module);
-        const selections = plan.map(item => ({
-            ...item,
-            targetFolder: effectiveFolder
-        }));
-        const { successCount } = await performTransfers(selections, module, { hasFolder, hasArchive });
-        selections.forEach(item => {
-            try {
-                module.FS.unlink(item.path);
-            } catch {
-                // ignore
-            }
-        });
-        const hasOsTransfer = selections.some(item => item.fileClass === 'os');
-        if (successCount > 0) {
-            setSelectedFiles([]);
-            if (!hasOsTransfer) {
-                await refreshDirlist();
-            }
-        }
-    } catch (err) {
-        logError(err, 'Dropped transfer failed');
-    }
+    await processIncomingTransfers(files, {
+        dropFolder,
+        checkCableMismatch: true,
+        useModal: false,
+        errorContext: 'Dropped transfer failed'
+    });
 }
 
 function getDirlistFolders() {
@@ -5189,62 +5132,51 @@ function isCEBundleOSFile(item) {
 }
 
 async function buildTransferPlan(files, module) {
-    const plan = [];
     if (!module.FS.analyzePath('/uploads').exists) {
         module.FS.mkdir('/uploads');
     }
 
+    const uploadPaths = [];
     for (const file of files) {
         const data = new Uint8Array(await file.arrayBuffer());
         const path = `/uploads/${file.name}`;
         module.FS.writeFile(path, data);
-
-        let fileClass = 'unknown';
-        let entries = [];
-        try {
-            const infoText = await ccallAsync(module, 'file_get_entries_json', 'string', ['string'], [path], { timeoutMs: 8000 });
-            if (infoText && typeof infoText === 'string') {
-                const parsed = JSON.parse(infoText);
-                fileClass = parsed.class || 'unknown';
-                entries = Array.isArray(parsed.entries) ? parsed.entries : [];
-            }
-        } catch (err) {
-            console.warn('[WebTILP] Failed to parse file info', err);
-        }
-
-        const entry = entries[0] || {};
-        const baseName = file.name.replace(/\.[^.]+$/, '');
-        const defaultName = entry.name || baseName;
-        const defaultFolder = entry.folder || '';
-        const defaultLocation = entry.attr === 3 ? 'archive' : 'ram';
-        let locationMask = entries.length
-            ? entries.reduce((mask, item) => mask & (item.location_mask ?? 3), 3)
-            : 3;
-        if (fileClass === 'group') {
-            locationMask = 2;
-        }
-        const locationMode = locationMask === 1
-            ? 'ram'
-            : (locationMask === 2 ? 'archive' : (locationMask === 0 ? 'auto' : defaultLocation));
-
-        plan.push({
-            file,
-            path,
-            fileClass,
-            entries,
-            entryCount: entries.length,
-            entryName: defaultName,
-            entryType: entry.type ?? null,
-            entryTypeName: entry.type_name ?? '',
-            entryFolder: defaultFolder,
-            entryAttr: entry.attr ?? 0,
-            defaultLocation,
-            locationMask,
-            locationMode
-        });
+        uploadPaths.push(path);
     }
 
-    return plan;
+    if (!uploadPaths.length) {
+        return [];
+    }
+
+    let entries = [];
+    try {
+        const infoText = await ccallAsync(
+            module,
+            'files_get_entries_json',
+            'string',
+            ['string'],
+            [uploadPaths.join('\n')],
+            { timeoutMs: 12000 }
+        );
+        if (infoText && typeof infoText === 'string') {
+            const parsed = JSON.parse(infoText);
+            entries = Array.isArray(parsed?.files) ? parsed.files : [];
+        }
+    } catch (err) {
+        console.warn('[WebTILP] Failed to parse batch file info', err);
+    }
+
+    // Keep modal fast and robust: complete missing metadata entries locally.
+    const byPath = new Map(entries.map(item => [item.path, item]));
+    const normalizedEntries = uploadPaths.map(path => {
+        const existing = byPath.get(path);
+        if (existing) {
+            return existing;
+        }
+        const name = path.split('/').pop() || path;
+        return { name, path, class: 'unknown', entries: [] };
+    });
+    return buildTransferPlanFromFsEntries(normalizedEntries, module);
 }
 
 async function buildTransferPlanFromFsEntries(entries, module) {
@@ -5815,19 +5747,50 @@ async function sendSelectedFiles() {
     }
     setButtonLoading(els.btnSendFiles, true);
     try {
+        await processIncomingTransfers(files, {
+            checkCableMismatch: false,
+            useModal: true,
+            errorContext: 'Send files failed'
+        });
+    } finally {
+        setButtonLoading(els.btnSendFiles, false);
+    }
+}
+
+async function processIncomingTransfers(files, options = {}) {
+    const {
+        dropFolder = '',
+        useModal = true,
+        checkCableMismatch = false,
+        errorContext = 'Send files failed'
+    } = options;
+
+    if (!files.length) {
+        return;
+    }
+
+    try {
         await authorizeDevice();
+        if (checkCableMismatch && promptCableMismatchResolution()) {
+            return;
+        }
         if (!ensureSilverlinkModelSelected()) {
             return;
         }
         const module = await initModule();
         await ensureCableOpen();
         await updateCapabilities();
-
         await ensureDirlistLoadedWithPrompt();
 
         const hasFolder = (state.features & FEATURE_FLAGS.FTS_FOLDER) !== 0;
         const hasArchive = (state.features & FEATURE_FLAGS.OPS_CHATTR) !== 0 || (state.features & FEATURE_FLAGS.FTS_FLASH) !== 0;
         const folders = hasFolder ? getDirlistFolders() : [];
+        const effectiveFolder = hasFolder ? (dropFolder || '') : '';
+
+        if (!useModal && effectiveFolder) {
+            log(`Target folder: ${effectiveFolder}`);
+        }
+
         const bundleCandidates = files.filter(isCeBundleFile);
         if (bundleCandidates.length > 0) {
             if (bundleCandidates.length !== files.length) {
@@ -5844,22 +5807,32 @@ async function sendSelectedFiles() {
             }
             return;
         }
+
         const plan = await buildTransferPlan(files, module);
-        const modalResult = await openTransferModal(plan, { hasFolder, hasArchive, folders });
-        if (!modalResult) {
-            plan.forEach(item => {
-                try {
-                    module.FS.unlink(item.path);
-                } catch {
-                    // ignore
-                }
-            });
-            return;
+        let selections = [];
+        let overwriteAll = false;
+        if (useModal) {
+            const modalResult = await openTransferModal(plan, { hasFolder, hasArchive, folders });
+            if (!modalResult) {
+                plan.forEach(item => {
+                    try {
+                        module.FS.unlink(item.path);
+                    } catch {
+                        // ignore
+                    }
+                });
+                return;
+            }
+            selections = modalResult.selections;
+            overwriteAll = modalResult.overwriteAll;
+        } else {
+            selections = plan.map(item => ({
+                ...item,
+                targetFolder: effectiveFolder
+            }));
         }
-        const { selections, overwriteAll } = modalResult;
 
         const { successCount } = await performTransfers(selections, module, { hasFolder, hasArchive, overwriteAll });
-
         selections.forEach(item => {
             try {
                 module.FS.unlink(item.path);
@@ -5867,7 +5840,6 @@ async function sendSelectedFiles() {
                 // ignore
             }
         });
-        state.selectedFiles = [];
 
         const hasOsTransfer = selections.some(item => item.fileClass === 'os');
         if (successCount > 0) {
@@ -5877,9 +5849,7 @@ async function sendSelectedFiles() {
             }
         }
     } catch (err) {
-        logError(err, 'Send files failed');
-    } finally {
-        setButtonLoading(els.btnSendFiles, false);
+        logError(err, errorContext);
     }
 }
 
