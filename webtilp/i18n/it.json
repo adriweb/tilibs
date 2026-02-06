@@ -134,5 +134,6 @@
   "confirm_download_items_from_target": "Scaricare {count} elemento/i da {target}?",
   "prompt_rename_entry": "Rinomina {kind}:",
   "kind_folder": "cartella",
-  "kind_item": "elemento"
+  "kind_item": "elemento",
+  "transfer_overwrite_all": "Sovrascrivi tutti gli elementi esistenti (senza conferma per file)"
 }
