@@ -3520,7 +3520,11 @@ function renderDeviceInfo(entries) {
         keyEl.textContent = entry.key;
         const valueEl = document.createElement('div');
         valueEl.className = valueClass;
-        valueEl.textContent = entry.value;
+        if (String(entry.key || '').trim().toLowerCase() === 'language id') {
+            valueEl.innerHTML = formatLanguageIdHtml(entry.value);
+        } else {
+            valueEl.textContent = entry.value;
+        }
         row.appendChild(keyEl);
         row.appendChild(valueEl);
         els.deviceInfoList.appendChild(row);
@@ -4596,7 +4600,7 @@ const BUNDLE_LANGUAGE_APPS = [
     'Espanol',
     'Deutsch'
 ];
-const BUNDLE_LANG_BY_ID = {
+const TI_LANG_CODES = {
     9: 'English',
     22: 'Portuguese',
     12: 'French',
@@ -4605,6 +4609,30 @@ const BUNDLE_LANG_BY_ID = {
     10: 'Espanol',
     7: 'Deutsch'
 };
+
+function parseLanguageId(rawValue) {
+    if (!rawValue) {
+        return null;
+    }
+    const match = String(rawValue).match(/\d+/);
+    if (!match) {
+        return null;
+    }
+    const value = Number(match[0]);
+    return Number.isFinite(value) ? value : null;
+}
+
+function formatLanguageIdHtml(rawValue) {
+    const code = parseLanguageId(rawValue);
+    if (code == null) {
+        return escapeHtml(String(rawValue || ''));
+    }
+    const name = TI_LANG_CODES[code];
+    if (name) {
+        return `<abbr title="${code}">${name}</abbr>`;
+    }
+    return escapeHtml(String(code));
+}
 
 function getDeviceInfoValue(label) {
     if (!label) {
@@ -4620,15 +4648,7 @@ function getDeviceInfoValue(label) {
 
 function getLanguageIdValue() {
     const raw = getDeviceInfoValue('Language ID');
-    if (!raw) {
-        return null;
-    }
-    const match = String(raw).match(/\d+/);
-    if (!match) {
-        return null;
-    }
-    const value = Number(match[0]);
-    return Number.isFinite(value) ? value : null;
+    return parseLanguageId(raw);
 }
 
 function isCeBundleFile(file) {
@@ -4674,7 +4694,7 @@ function applyBundleDefaults(plan) {
     const pythonOnBoard = getDeviceInfoValue('Python on board') === 'Yes';
     const is83PCE = is83PCEConnected();
     const languageId = getLanguageIdValue();
-    const preferredLang = languageId != null ? (BUNDLE_LANG_BY_ID[languageId] || '') : '';
+    const preferredLang = languageId != null ? (TI_LANG_CODES[languageId] || '') : '';
     const preferredLangLower = preferredLang.toLowerCase();
     const existingLangs = getExistingLanguageApps();
     const languageTargets = new Set(BUNDLE_LANGUAGE_APPS.map(name => name.toLowerCase()));
