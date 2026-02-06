@@ -134,5 +134,6 @@
   "confirm_download_items_from_target": "Ladda ner {count} objekt från {target}?",
   "prompt_rename_entry": "Byt namn på {kind}:",
   "kind_folder": "mapp",
-  "kind_item": "objekt"
+  "kind_item": "objekt",
+  "transfer_overwrite_all": "Skriv över alla befintliga objekt (utan bekräftelse per fil)"
 }
