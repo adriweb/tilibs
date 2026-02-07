@@ -617,13 +617,60 @@ EMSCRIPTEN_KEEPALIVE
 const char* get_error_message(int code) {
     static char buf[256];
     char* message = nullptr;
-    const int ret = ticalcs_error_get(code, &message);
+    enum class ErrorSource {
+        NONE,
+        TICALCS,
+        TICABLES,
+        TIFILES
+    } source = ErrorSource::NONE;
+
+    int ret = ticalcs_error_get(code, &message);
+    if (ret == 0 && message != nullptr) {
+        source = ErrorSource::TICALCS;
+    }
     if (ret != 0 || message == nullptr) {
-        return "";
+        message = nullptr;
+        ret = ticables_error_get(code, &message);
+        if (ret == 0 && message != nullptr) {
+            source = ErrorSource::TICABLES;
+        }
+    }
+    if (ret != 0 || message == nullptr) {
+        message = nullptr;
+        ret = tifiles_error_get(code, &message);
+        if (ret == 0 && message != nullptr) {
+            source = ErrorSource::TIFILES;
+        }
+    }
+    if (ret != 0 || message == nullptr) {
+        switch (code) {
+            case -1:
+                return "invalid or missing argument";
+            case -2:
+                return "not a recognized TI file (or unsupported operation context)";
+            case -3:
+                return "invalid entry selection/index";
+            case -4:
+                return "out of memory";
+            default:
+                return "";
+        }
     }
     strncpy(buf, message, sizeof(buf) - 1);
     buf[sizeof(buf) - 1] = '\0';
-    ticalcs_error_free(message);
+    switch (source) {
+        case ErrorSource::TICALCS:
+            ticalcs_error_free(message);
+            break;
+        case ErrorSource::TICABLES:
+            ticables_error_free(message);
+            break;
+        case ErrorSource::TIFILES:
+            tifiles_error_free(message);
+            break;
+        default:
+            break;
+    }
     return buf;
 }
 
