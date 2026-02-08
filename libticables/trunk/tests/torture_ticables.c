@@ -32,6 +32,7 @@ int main(int argc, char **argv)
     PRINTF(ticables_handle_del, INT, NULL);
     PRINTF(ticables_options_set_timeout, INT, NULL, -1);
     PRINTF(ticables_options_set_delay, INT, NULL, -1);
+    PRINTF(ticables_cable_set_options, INT, NULL, NULL);
 
     PRINTF(ticables_get_model, INT, NULL);
     PRINTF(ticables_get_port, INT, NULL);
