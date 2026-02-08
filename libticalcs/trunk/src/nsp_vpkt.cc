@@ -418,36 +418,39 @@ int TICALL nsp_recv_ack(CalcHandle *handle)
 			continue;
 		}
 
-		if (pkt.src_port != NSP_PORT_PKT_ACK2)
+		const bool ack2 = (pkt.src_port == NSP_PORT_PKT_ACK2);
+		const bool service_ack = (pkt.src_port == handle->priv.nsp_dst_port);
+		if (!ack2 && !service_ack)
 		{
-			ticalcs_info("XXX weird src_port\n");
-			return ERR_INVALID_PACKET;
+			ticalcs_debug("  ignoring unexpected ACK src_port=%04x while waiting for ack", pkt.src_port);
+			continue;
 		}
 		if (pkt.dst_port != handle->priv.nsp_src_port)
 		{
-			ticalcs_info("XXX weird .dst_port\n");
-			return ERR_INVALID_PACKET;
+			ticalcs_debug("  ignoring unexpected ACK dst_port=%04x while waiting for ack", pkt.dst_port);
+			continue;
 		}
 
 		if (pkt.data_size >= 2)
 		{
 			const uint16_t addr = (((uint16_t)pkt.data[0]) << 8) | pkt.data[1];
-			if (addr != handle->priv.nsp_dst_port)
+			const uint16_t expected_addr = ack2 ? handle->priv.nsp_dst_port : handle->priv.nsp_src_port;
+			if (addr != expected_addr)
 			{
-				ticalcs_info("XXX weird addr\n");
-				return ERR_INVALID_PACKET;
+				ticalcs_debug("  ignoring unexpected ACK addr=%04x expected=%04x while waiting for ack", addr, expected_addr);
+				continue;
 			}
 		}
 		else
 		{
-			ticalcs_info("XXX weird addr\n");
-			return ERR_INVALID_PACKET;
+			ticalcs_debug("  ignoring short ACK packet while waiting for ack");
+			continue;
 		}
 
 		if (pkt.ack != 0x0A)
 		{
-			ticalcs_info("XXX weird .ack\n");
-			return ERR_INVALID_PACKET;
+			ticalcs_debug("  ignoring ACK with unexpected ack flag=%02x while waiting for ack", pkt.ack);
+			continue;
 		}
 
 		return 0;
