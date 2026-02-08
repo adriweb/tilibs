@@ -1698,18 +1698,29 @@ static void append_flash_entry_json(GString* out, const FlashContent* content, c
     }
 
     const bool is_os = (flash_class == TIFILE_OS);
-    const uint8_t type_id = is_os ? TI83p_AMS : TI83p_APPL;
+    const CalcModel model_for_type = (content->model != CALC_NONE) ? content->model : g_calc_model;
+    const uint8_t app_type_id = tifiles_flash_type(model_for_type);
+    const uint8_t type_id = (content->data_type != 0)
+        ? content->data_type
+        : (is_os ? TI83p_AMS : app_type_id);
 
     char name_buf[128] = {};
     const char* raw_name = content->name;
     if (raw_name && *raw_name) {
-        if (ticonv_varname_to_utf8_sn(g_calc_model, raw_name, name_buf, sizeof(name_buf), type_id) == nullptr) {
-            strncpy(name_buf, raw_name, sizeof(name_buf) - 1);
+        strncpy(name_buf, raw_name, sizeof(name_buf) - 1);
+        name_buf[sizeof(name_buf) - 1] = '\0';
+        if (!is_os && model_for_type != CALC_NONE && type_id != 0) {
+            if (ticonv_varname_to_utf8_sn(model_for_type, raw_name, name_buf, sizeof(name_buf), type_id) == nullptr) {
+                strncpy(name_buf, raw_name, sizeof(name_buf) - 1);
+                name_buf[sizeof(name_buf) - 1] = '\0';
+            }
         }
     }
 
     // Keep type_name empty for OS so JS falls back to the already-detected file class ("os").
-    const char* type_name = is_os ? "" : tifiles_vartype2type(g_calc_model, TI83p_APPL);
+    const char* type_name = (!is_os && model_for_type != CALC_NONE && type_id != 0)
+        ? tifiles_vartype2type(model_for_type, type_id)
+        : "";
 
     g_string_append(out, "{\"name\":\"");
     json_append_escaped(out, name_buf);
@@ -1717,7 +1728,7 @@ static void append_flash_entry_json(GString* out, const FlashContent* content, c
     g_string_append(out, ",\"type\":");
     g_string_append_printf(out, "%u", (unsigned int)type_id);
     g_string_append(out, ",\"type_name\":\"");
-    json_append_escaped(out, type_name ? type_name : "App");
+    json_append_escaped(out, type_name ? type_name : "");
     g_string_append(out, "\"");
     g_string_append(out, ",\"attr\":");
     g_string_append_printf(out, "%u", (unsigned int)ATTRB_ARCHIVED);
