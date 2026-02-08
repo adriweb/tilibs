@@ -1747,13 +1747,17 @@ static void get_file_metadata_json(const char* filename, const char** class_name
     }
 
     const FileClass fclass = tifiles_file_get_class(filename);
+    CalcModel parse_model = tifiles_file_get_model(filename);
+    if (parse_model == CALC_NONE) {
+        parse_model = g_calc_model;
+    }
     const char* class_name = tifiles_class_to_string(fclass);
     if (class_name_out) {
         *class_name_out = class_name ? class_name : "unknown";
     }
 
     if (fclass == TIFILE_TIGROUP) {
-        TigContent* content = tifiles_content_create_tigroup(g_calc_model, 0);
+        TigContent* content = tifiles_content_create_tigroup(parse_model, 0);
         if (!content) {
             return;
         }
@@ -1792,11 +1796,7 @@ static void get_file_metadata_json(const char* filename, const char** class_name
     }
 
     if (fclass == TIFILE_FLASH || fclass == TIFILE_APP || fclass == TIFILE_OS) {
-        CalcModel model = tifiles_file_get_model(filename);
-        if (model == CALC_NONE) {
-            model = g_calc_model;
-        }
-        FlashContent* content = tifiles_content_create_flash(model);
+        FlashContent* content = tifiles_content_create_flash(parse_model);
         if (!content) {
             return;
         }
@@ -1808,7 +1808,7 @@ static void get_file_metadata_json(const char* filename, const char** class_name
         return;
     }
 
-    FileContent* content = tifiles_content_create_regular(g_calc_model);
+    FileContent* content = tifiles_content_create_regular(parse_model);
     if (!content) {
         return;
     }
