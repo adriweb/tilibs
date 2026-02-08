@@ -1861,6 +1861,39 @@ static void apply_var_entry_overrides(VarEntry* ve, const char* folder, int loca
     }
 }
 
+static FileContent* create_single_entry_content(const FileContent* source, VarEntry* source_entry) {
+    if (!source || !source_entry) {
+        return nullptr;
+    }
+
+    FileContent* single = tifiles_content_create_regular(source->model);
+    if (!single) {
+        return nullptr;
+    }
+
+    single->model = source->model;
+    single->model_dst = source->model_dst;
+    single->checksum = source->checksum;
+    single->stored_checksum = source->stored_checksum;
+    strncpy(single->default_folder, source->default_folder, sizeof(single->default_folder) - 1);
+    single->default_folder[sizeof(single->default_folder) - 1] = '\0';
+    strncpy(single->comment, source->comment, sizeof(single->comment) - 1);
+    single->comment[sizeof(single->comment) - 1] = '\0';
+    single->num_entries = 1;
+    single->entries = tifiles_ve_create_array(1);
+    if (!single->entries) {
+        tifiles_content_delete_regular(single);
+        return nullptr;
+    }
+    single->entries[0] = tifiles_ve_dup(source_entry);
+    if (!single->entries[0]) {
+        tifiles_content_delete_regular(single);
+        return nullptr;
+    }
+
+    return single;
+}
+
 EMSCRIPTEN_KEEPALIVE
 const char* file_get_entries_json(const char* filename) {
     static char* json_buf = nullptr;
@@ -2231,8 +2264,14 @@ int send_file_entry_custom(CableHandle* cable_handle, const char* filename, int 
                 tifiles_content_delete_tigroup(content);
                 return -3;
             }
-            apply_var_entry_overrides(regular->entries[0], folder, location);
-            result = ticalcs_calc_send_var(g_calc_handle, MODE_NORMAL, regular);
+            FileContent* single = create_single_entry_content(regular, regular->entries[0]);
+            if (!single) {
+                tifiles_content_delete_tigroup(content);
+                return -4;
+            }
+            apply_var_entry_overrides(single->entries[0], folder, location);
+            result = ticalcs_calc_send_var(g_calc_handle, MODE_NORMAL, single);
+            tifiles_content_delete_regular(single);
         }
 
         tifiles_content_delete_tigroup(content);
@@ -2251,30 +2290,8 @@ int send_file_entry_custom(CableHandle* cable_handle, const char* filename, int 
             return -3;
         }
 
-        FileContent* single = tifiles_content_create_regular(g_calc_model);
+        FileContent* single = create_single_entry_content(content, content->entries[entry_index]);
         if (!single) {
-            tifiles_content_delete_regular(content);
-            return -4;
-        }
-
-        single->model = content->model;
-        single->model_dst = content->model_dst;
-        single->checksum = content->checksum;
-        single->stored_checksum = content->stored_checksum;
-        strncpy(single->default_folder, content->default_folder, sizeof(single->default_folder) - 1);
-        single->default_folder[sizeof(single->default_folder) - 1] = '\0';
-        strncpy(single->comment, content->comment, sizeof(single->comment) - 1);
-        single->comment[sizeof(single->comment) - 1] = '\0';
-        single->num_entries = 1;
-        single->entries = tifiles_ve_create_array(1);
-        if (!single->entries) {
-            tifiles_content_delete_regular(single);
-            tifiles_content_delete_regular(content);
-            return -4;
-        }
-        single->entries[0] = tifiles_ve_dup(content->entries[entry_index]);
-        if (!single->entries[0]) {
-            tifiles_content_delete_regular(single);
             tifiles_content_delete_regular(content);
             return -4;
         }
