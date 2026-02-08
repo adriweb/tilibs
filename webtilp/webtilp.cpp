@@ -2290,6 +2290,6 @@ int send_file_entry_custom(CableHandle* cable_handle, const char* filename, int 
 } // extern "C"
 
 int main() {
-    g_setenv("G_MESSAGES_DEBUG", "all", TRUE);
+    //g_setenv("G_MESSAGES_DEBUG", "all", TRUE);
     return 0;
 }

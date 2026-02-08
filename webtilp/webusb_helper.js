@@ -118,7 +118,7 @@ if (typeof Module !== 'undefined' && typeof importScripts === 'undefined') {
     Module.isSecureContext = isSecureContext;
 
     Module.preRun = () => {
-        ENV.G_MESSAGES_DEBUG = 'all';
+        //ENV.G_MESSAGES_DEBUG = 'all';
     };
 
     // Export cable type constant for convenience
