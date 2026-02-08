@@ -33,7 +33,7 @@
 #include "linux/link_tcpc.cc"
 
 #elif defined(__WIN32__)
-/* Not ported yet */
+#include "linux/link_tcpc.cc"
 
 #elif defined(__MACOSX__)
 #include "linux/link_tcpc.cc"

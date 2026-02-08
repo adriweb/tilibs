@@ -5,8 +5,9 @@ project(libticables2-tests
 
 add_executable(torture_ticables torture_ticables.c)
 add_executable(test_ticables_2 test_ticables_2.cc)
+add_executable(test_ticables_tcp test_ticables_tcp.cc)
 
-foreach(tar torture_ticables test_ticables_2)
+foreach(tar torture_ticables test_ticables_2 test_ticables_tcp)
     if(WIN32)
         find_library(LIBUSB0 NAMES libusb0.lib usb0 REQUIRED)
         target_link_libraries(${tar} PRIVATE ${LIBUSB0})
@@ -21,7 +22,8 @@ endforeach()
 
 add_custom_target(ticables2_check
     COMMAND "$<TARGET_FILE:torture_ticables>"
-    DEPENDS torture_ticables
+    COMMAND "$<TARGET_FILE:test_ticables_tcp>"
+    DEPENDS torture_ticables test_ticables_tcp
     COMMENT "Run the ticables2 torture tests"
     EXCLUDE_FROM_ALL
 )

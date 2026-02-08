@@ -332,6 +332,38 @@ int TICALL ticables_error_get(int number, char **message)
 			NULL);
 		break;
 
+		case ERR_TCPC_CONNECT:
+		*message = g_strconcat(
+			_("Msg: unable to connect to TCP server for virtual linking."),
+			"\n",
+			_("Cause: check server address/port and that the server is listening."),
+			NULL);
+		break;
+
+		case ERR_TCPS_BIND:
+		*message = g_strconcat(
+			_("Msg: unable to bind TCP server socket for virtual linking."),
+			"\n",
+			_("Cause: check bind address/port and that no other process is using it."),
+			NULL);
+		break;
+
+		case ERR_TCPS_LISTEN:
+		*message = g_strconcat(
+			_("Msg: unable to listen on TCP server socket for virtual linking."),
+			"\n",
+			_("Cause: check socket permissions and server socket state."),
+			NULL);
+		break;
+
+		case ERR_TCPS_ACCEPT:
+		*message = g_strconcat(
+			_("Msg: unable to accept TCP client connection for virtual linking."),
+			"\n",
+			_("Cause: no matching client connected before timeout, or client rejected by server rules."),
+			NULL);
+		break;
+
 		default:
 		// propagate error code
 		return number;

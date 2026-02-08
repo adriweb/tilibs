@@ -28,6 +28,8 @@
 #include <string.h>
 #include <errno.h>
 #if defined(__WIN32__)
+#include <winsock2.h>
+#include <ws2tcpip.h>
 #include <windows.h>
 #endif
 #include <locale.h>
@@ -81,10 +83,10 @@ static CableFncts const *const cables[] =
 #endif
 	&cable_ilp,
 	&cable_nul, // Dead cable
-#if !defined(NO_CABLE_TCPC) && !defined(__WIN32__)
+#if !defined(NO_CABLE_TCPC)
 	&cable_tcpc,
 #endif
-#if !defined(NO_CABLE_TCPS) && !defined(__WIN32__)
+#if !defined(NO_CABLE_TCPS)
 	&cable_tcps,
 #endif
 	nullptr
@@ -115,10 +117,10 @@ static const uint64_t supported_cables =
 #endif
 	| (UINT64_C(1) << CABLE_ILP)
 	// | (1U << CABLE_DEV) Dead cable
-#if !defined(NO_CABLE_TCPC) && !defined(__WIN32__)
+#if !defined(NO_CABLE_TCPC)
 	| (UINT64_C(1) << CABLE_TCPC)
 #endif
-#if !defined(NO_CABLE_TCPS) && !defined(__WIN32__)
+#if !defined(NO_CABLE_TCPS)
 	| (UINT64_C(1) << CABLE_TCPS)
 #endif
 ;
@@ -132,6 +134,103 @@ int ticables_instance = 0;	// counts # of instances
 #ifdef HAVE_LIBUSB_1_0
 int libusb_working = -1;
 #endif
+#ifdef __WIN32__
+static int winsock_ready = 0;
+#endif
+
+static void ticables_free_cable_options(CableOptions *options)
+{
+	if (options == nullptr)
+	{
+		return;
+	}
+
+	if (options->model == CABLE_TCPC)
+	{
+		free((void *)options->parameters.tcpc.connect_address);
+		options->parameters.tcpc.connect_address = nullptr;
+	}
+	else if (options->model == CABLE_TCPS)
+	{
+		free((void *)options->parameters.tcps.server_address);
+		options->parameters.tcps.server_address = nullptr;
+		free((void *)options->parameters.tcps.advertised_address);
+		options->parameters.tcps.advertised_address = nullptr;
+		free((void *)options->parameters.tcps.bind_address);
+		options->parameters.tcps.bind_address = nullptr;
+	}
+
+	free(options);
+}
+
+static int ticables_copy_cable_options(CableOptions *dst, const CableOptions *src)
+{
+	const char *str = nullptr;
+
+	memset(dst, 0, sizeof(*dst));
+	dst->model = src->model;
+	dst->port = src->port;
+	dst->timeout = src->timeout;
+	dst->delay = src->delay;
+	dst->version = src->version;
+	dst->has_parameters = src->has_parameters;
+	dst->calc = src->calc;
+
+	if (!src->has_parameters)
+	{
+		return 0;
+	}
+
+	if (src->model == CABLE_TCPC)
+	{
+		str = src->parameters.tcpc.connect_address;
+		if (str != nullptr)
+		{
+			dst->parameters.tcpc.connect_address = strdup(str);
+			if (dst->parameters.tcpc.connect_address == nullptr)
+			{
+				return ERR_ILLEGAL_ARG;
+			}
+		}
+		dst->parameters.tcpc.port = src->parameters.tcpc.port;
+	}
+	else if (src->model == CABLE_TCPS)
+	{
+		str = src->parameters.tcps.server_address;
+		if (str != nullptr)
+		{
+			dst->parameters.tcps.server_address = strdup(str);
+			if (dst->parameters.tcps.server_address == nullptr)
+			{
+				return ERR_ILLEGAL_ARG;
+			}
+		}
+
+		str = src->parameters.tcps.advertised_address;
+		if (str != nullptr)
+		{
+			dst->parameters.tcps.advertised_address = strdup(str);
+			if (dst->parameters.tcps.advertised_address == nullptr)
+			{
+				return ERR_ILLEGAL_ARG;
+			}
+		}
+
+		str = src->parameters.tcps.bind_address;
+		if (str != nullptr)
+		{
+			dst->parameters.tcps.bind_address = strdup(str);
+			if (dst->parameters.tcps.bind_address == nullptr)
+			{
+				return ERR_ILLEGAL_ARG;
+			}
+		}
+
+		dst->parameters.tcps.port = src->parameters.tcps.port;
+	}
+
+	return 0;
+}
 
 /**
  * ticables_library_init:
@@ -175,6 +274,20 @@ int TICALL ticables_library_init(void)
 	}
 	ticables_info(_("ticables library version %s"), libticables2_VERSION);
 	errno = 0;
+#ifdef __WIN32__
+	{
+		WSADATA wsa_data;
+		if (WSAStartup(MAKEWORD(2, 2), &wsa_data) == 0)
+		{
+			winsock_ready = 1;
+		}
+		else
+		{
+			winsock_ready = 0;
+			ticables_warning("WSAStartup failed, TCP cables may be unavailable.");
+		}
+	}
+#endif
 
 #if defined(ENABLE_NLS)
 	ticables_info("setlocale: %s", setlocale(LC_ALL, ""));
@@ -220,6 +333,13 @@ int TICALL ticables_library_exit(void)
 	// Must not call libusb_exit() if libusb_init() failed, or call it multiple times.
 	if (ticables_instance == 1 && libusb_working == LIBUSB_SUCCESS) {
 		libusb_exit(nullptr);
+	}
+#endif
+#ifdef __WIN32__
+	if (ticables_instance == 1 && winsock_ready)
+	{
+		WSACleanup();
+		winsock_ready = 0;
 	}
 #endif
 	return (--ticables_instance);
@@ -373,6 +493,9 @@ int TICALL ticables_handle_del(CableHandle* handle)
 {
 	VALIDATE_HANDLE(handle);
 
+	ticables_free_cable_options(handle->options);
+	handle->options = nullptr;
+
 	free(handle->priv2);
 	handle->priv2 = nullptr;
 
@@ -381,6 +504,34 @@ int TICALL ticables_handle_del(CableHandle* handle)
 
 	memset((void *)handle, 0, sizeof(*handle));
 	free(handle);
+
+	return 0;
+}
+
+int TICALL ticables_cable_set_options(CableHandle *handle, const CableOptions *options)
+{
+	CableOptions *new_options = nullptr;
+	int ret = 0;
+
+	VALIDATE_HANDLE(handle);
+	VALIDATE_NONNULL(options);
+	RETURN_IF_HANDLE_OPEN(handle);
+
+	new_options = (CableOptions *)calloc(1, sizeof(CableOptions));
+	if (new_options == nullptr)
+	{
+		return ERR_ILLEGAL_ARG;
+	}
+
+	ret = ticables_copy_cable_options(new_options, options);
+	if (ret)
+	{
+		ticables_free_cable_options(new_options);
+		return ret;
+	}
+
+	ticables_free_cable_options(handle->options);
+	handle->options = new_options;
 
 	return 0;
 }

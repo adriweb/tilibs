@@ -404,24 +404,45 @@ struct _CableHandle
 	ticables_event_hook_type event_hook;
 	void * user_pointer;
 	uint32_t event_count;
+	struct _CableOptions * options;
 };
 
 /**
  * CableOptions:
- * @cable_model: model
- * @cable_port: port
- * @cable_timeout: timeout in tenth of seconds
- * @cable_delay: inter-bit delay in us
- * @calc_model: calculator model
+ * @model: cable model
+ * @port: cable port
+ * @timeout: timeout in tenth of seconds
+ * @delay: inter-bit delay in us
+ * @version: structure version
+ * @has_parameters: whether cable-specific parameters are set
+ * @parameters: cable-specific options
  *
  * A convenient structure free of use by the user.
  **/
-typedef struct
+typedef struct _CableOptions
 {
 	CableModel      model;
 	CablePort       port;
 	unsigned int    timeout;
 	unsigned int    delay;
+
+	unsigned int    version;
+	unsigned int    has_parameters;
+	union
+	{
+		struct
+		{
+			const char * connect_address;
+			uint16_t     port;
+		} tcpc;
+		struct
+		{
+			const char * server_address;
+			const char * advertised_address;
+			const char * bind_address;
+			uint16_t     port;
+		} tcps;
+	} parameters;
 
 	int             calc; // unused
 } CableOptions;
@@ -450,6 +471,7 @@ typedef struct
 
 	TIEXPORT1 unsigned int TICALL ticables_options_set_timeout(CableHandle *handle, unsigned int timeout);
 	TIEXPORT1 unsigned int TICALL ticables_options_set_delay(CableHandle *handle, unsigned int delay);
+	TIEXPORT1 int          TICALL ticables_cable_set_options(CableHandle *handle, const CableOptions *options);
 
 	TIEXPORT1 CableModel TICALL ticables_get_model(CableHandle *handle);
 	TIEXPORT1 CablePort TICALL ticables_get_port(CableHandle *handle);

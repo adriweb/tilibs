@@ -63,7 +63,7 @@ endif()
 # external deps lookup
 if(WIN32)
     find_library(LIBUSB0 NAMES libusb0.lib usb0 REQUIRED)
-    target_link_libraries(ticables2 PRIVATE ${LIBUSB0})
+    target_link_libraries(ticables2 PRIVATE ${LIBUSB0} ws2_32)
 else()
     pkg_check_modules(libusb REQUIRED IMPORTED_TARGET libusb-1.0>=1.0.16)
     target_link_libraries(ticables2 PRIVATE PkgConfig::libusb)
