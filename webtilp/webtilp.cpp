@@ -2096,6 +2096,27 @@ const char* bundle_extract_json(const char* filename, const char* out_dir) {
             }
 
             char* out_path = g_build_filename(out_dir, base, nullptr);
+            if (g_file_test(out_path, G_FILE_TEST_EXISTS)) {
+                const char* dot = strrchr(base, '.');
+                char* stem = nullptr;
+                const char* ext = "";
+                if (dot && dot != base) {
+                    stem = g_strndup(base, (gsize)(dot - base));
+                    ext = dot;
+                } else {
+                    stem = g_strdup(base);
+                }
+
+                unsigned int suffix = 1;
+                while (g_file_test(out_path, G_FILE_TEST_EXISTS)) {
+                    g_free(out_path);
+                    char* suffixed = g_strdup_printf("%s_%u%s", stem, suffix, ext);
+                    out_path = g_build_filename(out_dir, suffixed, nullptr);
+                    g_free(suffixed);
+                    suffix++;
+                }
+                g_free(stem);
+            }
             FILE* fp_out = fopen(out_path, "wb");
             if (!fp_out) {
                 g_free(out_path);
@@ -2116,11 +2137,12 @@ const char* bundle_extract_json(const char* filename, const char* out_dir) {
             const char* class_name = "unknown";
             GString* entries_json = g_string_new(nullptr);
             get_file_metadata_json(out_path, &class_name, entries_json);
+            char* out_base = g_path_get_basename(out_path);
             if (!first) {
                 g_string_append(json, ",");
             }
             g_string_append(json, "{\"name\":\"");
-            json_append_escaped(json, base);
+            json_append_escaped(json, out_base ? out_base : base);
             g_string_append(json, "\",\"path\":\"");
             json_append_escaped(json, out_path);
             g_string_append(json, "\",\"class\":\"");
@@ -2132,6 +2154,7 @@ const char* bundle_extract_json(const char* filename, const char* out_dir) {
             first = false;
 
             g_string_free(entries_json, TRUE);
+            g_free(out_base);
             g_free(out_path);
             g_free(base);
         }
