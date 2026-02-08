@@ -2888,6 +2888,7 @@ async function applyTranslations() {
     setTextContent(document.getElementById('transferTitle'), t('transfer_options'));
     setTextContent(document.getElementById('transferHeaderFile'), t('file'));
     setTextContent(document.getElementById('transferHeaderVariable'), t('variable'));
+    setTextContent(document.getElementById('transferHeaderSize'), t('size'));
     setTextContent(document.getElementById('transferHeaderType'), t('type'));
     setTextContent(document.getElementById('transferHeaderLocation'), t('location'));
     setTextContent(document.getElementById('transferHeaderFolder'), t('folder'));
@@ -5197,36 +5198,68 @@ async function buildTransferPlanFromFsEntries(entries, module) {
 
         const fileClass = entry.class || 'unknown';
         const entriesInfo = Array.isArray(entry.entries) ? entry.entries : [];
-
-        const entryInfo = entriesInfo[0] || {};
         const baseName = name.replace(/\.[^.]+$/, '');
-        const defaultName = entryInfo.name || baseName;
-        const defaultFolder = entryInfo.folder || '';
-        const defaultLocation = entryInfo.attr === 3 ? 'archive' : 'ram';
-        let locationMask = entriesInfo.length
-            ? entriesInfo.reduce((mask, item) => mask & (item.location_mask ?? 3), 3)
-            : 3;
-        if (fileClass === 'group') {
-            locationMask = 2;
-        }
-        const locationMode = locationMask === 1
-            ? 'ram'
-            : (locationMask === 2 ? 'archive' : (locationMask === 0 ? 'auto' : defaultLocation));
 
-        plan.push({
-            file,
-            path,
-            fileClass,
-            entries: entriesInfo,
-            entryCount: entriesInfo.length,
-            entryName: defaultName,
-            entryType: entryInfo.type ?? null,
-            entryTypeName: entryInfo.type_name ?? '',
-            entryFolder: defaultFolder,
-            entryAttr: entryInfo.attr ?? 0,
-            defaultLocation,
-            locationMask,
-            locationMode
+        if (!entriesInfo.length) {
+            plan.push({
+                file,
+                path,
+                fileClass,
+                sourceFileClass: fileClass,
+                entries: [],
+                entryCount: 0,
+                entryName: baseName,
+                entryType: null,
+                entryTypeName: '',
+                entryFolder: '',
+                entryAttr: 0,
+                entrySize: null,
+                defaultLocation: 'ram',
+                locationMask: 3,
+                locationMode: 'ram',
+                sendByEntry: false,
+                entryIndex: null,
+                containerKind: 0
+            });
+            continue;
+        }
+
+        entriesInfo.forEach((entryInfo, idx) => {
+            const containerType = entryInfo.container_type || '';
+            const containerKind = containerType === 'app' ? 2 : (containerType === 'var' ? 1 : 0);
+            const entryIndex = Number.isInteger(entryInfo.container_index) ? entryInfo.container_index : idx;
+            const effectiveClass = containerType === 'app'
+                ? 'application'
+                : (fileClass === 'group' || fileClass === 'tigroup' ? 'single' : fileClass);
+            const defaultName = entryInfo.name || baseName;
+            const defaultFolder = entryInfo.folder || '';
+            const entrySize = Number.isFinite(Number(entryInfo.size)) ? Number(entryInfo.size) : null;
+            const locationMask = entryInfo.location_mask ?? (effectiveClass === 'application' ? 2 : 3);
+            const defaultLocation = (entryInfo.attr === 3 || locationMask === 2) ? 'archive' : 'ram';
+            const locationMode = locationMask === 1
+                ? 'ram'
+                : (locationMask === 2 ? 'archive' : (locationMask === 0 ? 'auto' : defaultLocation));
+
+            plan.push({
+                file,
+                path,
+                fileClass: effectiveClass,
+                sourceFileClass: fileClass,
+                entries: [entryInfo],
+                entryCount: 1,
+                entryName: defaultName,
+                entryType: entryInfo.type ?? null,
+                entryTypeName: entryInfo.type_name ?? '',
+                entryFolder: defaultFolder,
+                entryAttr: entryInfo.attr ?? 0,
+                entrySize,
+                defaultLocation,
+                locationMask,
+                locationMode,
+                sendByEntry: entriesInfo.length > 1 || fileClass === 'group' || fileClass === 'tigroup',
+                entryIndex,
+                containerKind
+            });
         });
     }
     return plan;
@@ -5362,6 +5395,9 @@ function openTransferModal(plan, options) {
     document.querySelectorAll('.transfer-type').forEach(cell => {
         cell.classList.toggle('hidden', false);
     });
+    document.querySelectorAll('.transfer-size').forEach(cell => {
+        cell.classList.toggle('hidden', false);
+    });
 
     plan.forEach((item, index) => {
         const row = document.createElement('tr');
@@ -5372,6 +5408,9 @@ function openTransferModal(plan, options) {
         const typeLabel = item.entryTypeName
             || (!(["unknown","single","regular"].includes(item.fileClass)) ? item.fileClass : null)
             || (item.entryType != null ? `(type ${item.entryType})` : '-');
+        const hasParsedSize = item.entrySize !== null && item.entrySize !== undefined && item.entrySize !== '';
+        const parsedSize = hasParsedSize ? Number(item.entrySize) : NaN;
+        const sizeLabel = Number.isFinite(parsedSize) && parsedSize >= 0 ? formatBytes(parsedSize) : '-';
         const isVar = isVarFileClass(item.fileClass);
         let locationCell = `<td class="transfer-location ${options.hasArchive ? '' : 'hidden'}">-</td>`;
         if (item.fileClass === "application") {
@@ -5411,10 +5450,22 @@ function openTransferModal(plan, options) {
             ${selectCell}
             <td>${escapeHtml(item.file.name)}</td>
             <td>${escapeHtml(entryLabel)}</td>
+            <td class="transfer-size">${escapeHtml(sizeLabel)}</td>
             <td class="transfer-type">${escapeHtml(typeLabel)}</td>
             ${locationCell}
             ${folderCell}
         `;
+        row.addEventListener('click', event => {
+            const interactive = event.target?.closest?.('input, select, option, button, a, label, textarea');
+            if (interactive) {
+                return;
+            }
+            const checkbox = row.querySelector('[data-field="select"]');
+            if (!checkbox || checkbox.disabled) {
+                return;
+            }
+            checkbox.checked = !checkbox.checked;
+        });
         els.transferTableBody.appendChild(row);
 
         if (options.hasFolder) {
@@ -5610,128 +5661,181 @@ function findDirlistMatch(name, type, folder, location) {
 async function performTransfers(plan, module, options) {
     const handle = await ensureCableOpen();
     let successCount = 0;
+    const configuredCableTimeout = Number(state.settings?.cableTimeout);
+    const originalCableTimeout = Number.isFinite(configuredCableTimeout) && configuredCableTimeout > 0
+        ? configuredCableTimeout
+        : 50;
+    const archiveEntryTimeout = 250; // 25.0s (setting unit is 1/10s)
 
     for (const item of plan) {
         if (!item.path) {
             continue;
         }
-
-        const isVar = isVarFileClass(item.fileClass);
-        let targetName = item.entryName || '';
-        const targetFolder = options.hasFolder ? (item.targetFolder || item.entryFolder || '') : '';
-        const folderOverride = options.hasFolder && isVar && item.targetFolder && item.targetFolder !== item.entryFolder
-            ? item.targetFolder
-            : '';
-        const locationMask = item.locationMask ?? 3;
-        const selectionLocation = item.targetLocation || item.locationMode || item.defaultLocation;
-        const canOverrideLocation = options.hasArchive && isVar && locationMask === 3;
-        const requestedLocation = canOverrideLocation ? selectionLocation : 'auto';
-        let targetLocation = selectionLocation;
-        if (!canOverrideLocation) {
-            if (locationMask === 2) {
-                targetLocation = 'archive';
-            } else if (locationMask === 1) {
-                targetLocation = 'ram';
-            } else if (requestedLocation === 'auto') {
-                targetLocation = item.entryAttr === 3 ? 'archive' : 'ram';
+        try {
+            const isVar = isVarFileClass(item.fileClass);
+            const displayName = item.entryName ? `${item.file.name} (${item.entryName})` : item.file.name;
+            let targetName = item.entryName || '';
+            const targetFolder = options.hasFolder ? (item.targetFolder || item.entryFolder || '') : '';
+            const folderOverride = options.hasFolder && isVar && item.targetFolder && item.targetFolder !== item.entryFolder
+                ? item.targetFolder
+                : '';
+            const locationMask = item.locationMask ?? 3;
+            const selectionLocation = item.targetLocation || item.locationMode || item.defaultLocation;
+            const canOverrideLocation = options.hasArchive && isVar && locationMask === 3;
+            const requestedLocation = canOverrideLocation ? selectionLocation : 'auto';
+            let targetLocation = selectionLocation;
+            if (!canOverrideLocation) {
+                if (locationMask === 2) {
+                    targetLocation = 'archive';
+                } else if (locationMask === 1) {
+                    targetLocation = 'ram';
+                } else if (requestedLocation === 'auto') {
+                    targetLocation = item.entryAttr === 3 ? 'archive' : 'ram';
+                }
             }
-        }
 
-        let existing = null;
-        if (isVar && state.dirlist.length && targetName && item.entryType != null) {
-            existing = findDirlistMatch(targetName, item.entryType, targetFolder, targetLocation);
-            if (existing) {
-                const overwrite = options.overwriteAll
-                    ? true
-                    : confirm(tFormat('confirm_overwrite_existing', { name: targetName }));
-                if (!overwrite) {
-                    log(`Skipped ${item.file.name}, because overwriting was declined.`);
-                    continue;
-                }
-                if (existing.attr !== 0 && hasSilverlinkConnected()) {
-                    const msg = tFormat('alert_cannot_overwrite_locked', { name: targetName });
-                    log(msg);
-                    alert(msg);
-                    continue;
-                }
-                const is89t_dusb = state.authorizedDevice?.productId === 0xe004;
-                if (is89t_dusb) {
-                    if (existing.attr !== 0) {
-                        const clearAttrResult = await ccallAsync(
-                            module,
-                            'calc_change_attr',
-                            'number',
-                            ['number', 'string', 'string', 'number', 'number'],
-                            [handle, targetFolder, targetName, item.entryType, 0],
-                            { timeoutMs: PROGRESS_IDLE_TIMEOUT_MS, useProgress: true, progressLabel: `Updating ${targetName}` }
-                        );
-                        if (clearAttrResult !== 0) {
-                            const msg = tFormat('alert_failed_clear_attributes', {
-                                name: targetName,
-                                error: formatErrorResult(module, clearAttrResult)
-                            });
-                            log(msg);
-                            alert(msg);
-                            continue;
-                        }
+            let existing = null;
+            if (isVar && state.dirlist.length && targetName && item.entryType != null) {
+                existing = findDirlistMatch(targetName, item.entryType, targetFolder, targetLocation);
+                if (existing) {
+                    const overwrite = options.overwriteAll
+                        ? true
+                        : confirm(tFormat('confirm_overwrite_existing', { name: targetName }));
+                    if (!overwrite) {
+                        log(`Skipped ${item.file.name}, because overwriting was declined.`);
+                        continue;
                     }
-                    const deleteResult = await ccallAsync(
-                        module,
-                        'calc_del_var',
-                        'number',
-                        ['number', 'string', 'string', 'number'],
-                        [handle, targetFolder, targetName, item.entryType],
-                        { timeoutMs: PROGRESS_IDLE_TIMEOUT_MS, useProgress: true, progressLabel: `Deleting ${targetName}` }
-                    );
-                    if (deleteResult !== 0) {
-                        const deleteRaw = module ? module._get_raw_protocol_code(deleteResult) : 0;
-                        let msg = '';
-                        if (deleteRaw === 0x0021) {
-                            msg = tFormat('alert_cannot_overwrite_locked', { name: targetName });
-                        } else {
-                            msg = tFormat('alert_failed_delete_existing', {
-                                name: targetName,
-                                error: formatErrorResult(module, deleteResult)
-                            });
-                        }
+                    if (existing.attr !== 0 && hasSilverlinkConnected()) {
+                        const msg = tFormat('alert_cannot_overwrite_locked', { name: targetName });
                         log(msg);
                         alert(msg);
                         continue;
                     }
-                    state.dirlist = state.dirlist.filter(entry => entry !== existing);
-                    existing = null;
+                    const is89t_dusb = state.authorizedDevice?.productId === 0xe004;
+                    if (is89t_dusb) {
+                        if (existing.attr !== 0) {
+                            const clearAttrResult = await ccallAsync(
+                                module,
+                                'calc_change_attr',
+                                'number',
+                                ['number', 'string', 'string', 'number', 'number'],
+                                [handle, targetFolder, targetName, item.entryType, 0],
+                                { timeoutMs: PROGRESS_IDLE_TIMEOUT_MS, useProgress: true, progressLabel: `Updating ${targetName}` }
+                            );
+                            if (clearAttrResult !== 0) {
+                                const msg = tFormat('alert_failed_clear_attributes', {
+                                    name: targetName,
+                                    error: formatErrorResult(module, clearAttrResult)
+                                });
+                                log(msg);
+                                alert(msg);
+                                continue;
+                            }
+                        }
+                        const deleteResult = await ccallAsync(
+                            module,
+                            'calc_del_var',
+                            'number',
+                            ['number', 'string', 'string', 'number'],
+                            [handle, targetFolder, targetName, item.entryType],
+                            { timeoutMs: PROGRESS_IDLE_TIMEOUT_MS, useProgress: true, progressLabel: `Deleting ${targetName}` }
+                        );
+                        if (deleteResult !== 0) {
+                            const deleteRaw = module ? module._get_raw_protocol_code(deleteResult) : 0;
+                            let msg = '';
+                            if (deleteRaw === 0x0021) {
+                                msg = tFormat('alert_cannot_overwrite_locked', { name: targetName });
+                            } else {
+                                msg = tFormat('alert_failed_delete_existing', {
+                                    name: targetName,
+                                    error: formatErrorResult(module, deleteResult)
+                                });
+                            }
+                            log(msg);
+                            alert(msg);
+                            continue;
+                        }
+                        state.dirlist = state.dirlist.filter(entry => entry !== existing);
+                        existing = null;
+                    }
                 }
             }
-        }
 
-        const locationCode = canOverrideLocation && selectionLocation !== item.defaultLocation
-            ? (selectionLocation === 'archive' ? 1 : 0)
-            : -1;
-        const result = await ccallAsync(
-            module,
-            'send_file_custom',
-            'number',
-            ['number', 'string', 'string', 'number'],
-            [handle, item.path, folderOverride, locationCode],
-            { timeoutMs: 60000, useProgress: true, progressLabel: `Sending ${item.file.name}` }
-        );
+            const locationCode = canOverrideLocation && selectionLocation !== item.defaultLocation
+                ? (selectionLocation === 'archive' ? 1 : 0)
+                : -1;
+            const isArchiveOrFlashTransfer = item.fileClass === 'application'
+                || item.fileClass === 'flash'
+                || item.fileClass === 'os'
+                || (isVar && targetLocation === 'archive');
+            const entryCableTimeout = isArchiveOrFlashTransfer
+                ? Math.max(originalCableTimeout, archiveEntryTimeout)
+                : originalCableTimeout;
 
-        if (result === 0) {
-            log(`Sent ${item.file.name} successfully.`);
-            successCount += 1;
-            if (isVar && targetName && item.entryType != null) {
-                state.dirlist.push({
-                    name: targetName,
-                    type: item.entryType,
-                    folder: targetFolder,
-                    attr: targetLocation === 'archive' ? 3 : (targetLocation === 'ram' ? 0 : item.entryAttr),
-                    kind: 'var',
-                    is_folder: 0,
-                    size: item.file.size
-                });
+            let timeoutAdjusted = false;
+            if (module && entryCableTimeout !== originalCableTimeout) {
+                try {
+                    module._set_cable_timeout(entryCableTimeout);
+                    timeoutAdjusted = true;
+                } catch (err) {
+                    console.warn('[WebTILP] Failed to set temporary cable timeout for archive/flash transfer', err);
+                }
             }
-        } else {
-            log(`Failed to send ${item.file.name} (${formatErrorResult(module, result)}).`);
+
+            let result = 0;
+            try {
+                if (item.sendByEntry && Number.isInteger(item.entryIndex)) {
+                    result = await ccallAsync(
+                        module,
+                        'send_file_entry_custom',
+                        'number',
+                        ['number', 'string', 'number', 'number', 'string', 'number'],
+                        [handle, item.path, item.entryIndex, item.containerKind || 0, folderOverride, locationCode],
+                        { timeoutMs: 60000, useProgress: true, progressLabel: `Sending ${displayName}` }
+                    );
+                } else {
+                    result = await ccallAsync(
+                        module,
+                        'send_file_custom',
+                        'number',
+                        ['number', 'string', 'string', 'number'],
+                        [handle, item.path, folderOverride, locationCode],
+                        { timeoutMs: 60000, useProgress: true, progressLabel: `Sending ${displayName}` }
+                    );
+                }
+            } finally {
+                if (timeoutAdjusted) {
+                    try {
+                        module._set_cable_timeout(originalCableTimeout);
+                    } catch (err) {
+                        console.warn('[WebTILP] Failed to restore cable timeout after archive/flash transfer', err);
+                    }
+                }
+            }
+
+            if (result === 0) {
+                log(`Sent ${displayName} successfully.`);
+                successCount += 1;
+                if (isVar && targetName && item.entryType != null) {
+                    state.dirlist.push({
+                        name: targetName,
+                        type: item.entryType,
+                        folder: targetFolder,
+                        attr: targetLocation === 'archive' ? 3 : (targetLocation === 'ram' ? 0 : item.entryAttr),
+                        kind: 'var',
+                        is_folder: 0,
+                        size: item.entries?.[0]?.size ?? item.file.size
+                    });
+                }
+            } else {
+                log(`Failed to send ${displayName} (${formatErrorResult(module, result)}).`);
+            }
+        } catch (err) {
+            if (err?.silent) {
+                throw err;
+            }
+            const label = item?.entryName ? `${item.file?.name || 'file'} (${item.entryName})` : (item.file?.name || 'file');
+            log(`Failed to send ${label} (${err?.message || 'unknown error'}).`);
         }
     }
     return { successCount };
@@ -5809,44 +5913,40 @@ async function processIncomingTransfers(files, options = {}) {
         }
 
         const plan = await buildTransferPlan(files, module);
+        const planPaths = [...new Set(plan.map(item => item.path).filter(Boolean))];
         let selections = [];
         let overwriteAll = false;
-        if (useModal) {
-            const modalResult = await openTransferModal(plan, { hasFolder, hasArchive, folders });
-            if (!modalResult) {
-                plan.forEach(item => {
-                    try {
-                        module.FS.unlink(item.path);
-                    } catch {
-                        // ignore
-                    }
-                });
-                return;
+        try {
+            if (useModal) {
+                const modalResult = await openTransferModal(plan, { hasFolder, hasArchive, folders });
+                if (!modalResult) {
+                    return;
+                }
+                selections = modalResult.selections;
+                overwriteAll = modalResult.overwriteAll;
+            } else {
+                selections = plan.map(item => ({
+                    ...item,
+                    targetFolder: effectiveFolder
+                }));
             }
-            selections = modalResult.selections;
-            overwriteAll = modalResult.overwriteAll;
-        } else {
-            selections = plan.map(item => ({
-                ...item,
-                targetFolder: effectiveFolder
-            }));
-        }
 
-        const { successCount } = await performTransfers(selections, module, { hasFolder, hasArchive, overwriteAll });
-        selections.forEach(item => {
-            try {
-                module.FS.unlink(item.path);
-            } catch {
-                // ignore
+            const { successCount } = await performTransfers(selections, module, { hasFolder, hasArchive, overwriteAll });
+            const hasOsTransfer = selections.some(item => item.fileClass === 'os');
+            if (successCount > 0) {
+                setSelectedFiles([]);
+                if (!hasOsTransfer) {
+                    await refreshDirlist();
+                }
             }
-        });
-
-        const hasOsTransfer = selections.some(item => item.fileClass === 'os');
-        if (successCount > 0) {
-            setSelectedFiles([]);
-            if (!hasOsTransfer) {
-                await refreshDirlist();
-            }
+        } finally {
+            planPaths.forEach(path => {
+                try {
+                    module.FS.unlink(path);
+                } catch {
+                    // ignore
+                }
+            });
         }
     } catch (err) {
         logError(err, errorContext);

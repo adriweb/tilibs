@@ -1072,6 +1072,12 @@ tr:focus-within .row-actions {
     text-transform: capitalize;
 }
 
+.transfer-size {
+    width: 90px;
+    white-space: nowrap;
+    text-align: right;
+}
+
 .transfer-table input,
 .transfer-table select {
     width: 100%;
