@@ -23,7 +23,11 @@ enum {
     TICABLES_ERR_READ_ERROR = 3,
     TICABLES_ERR_READ_TIMEOUT = 4,
     TICABLES_ERR_WRITE_ERROR = 5,
-    TICABLES_ERR_WRITE_TIMEOUT = 6
+    TICABLES_ERR_WRITE_TIMEOUT = 6,
+    ERR_WEB_INVALID_ARGUMENT = -1001,
+    ERR_WEB_NOT_TI_FILE = -1002,
+    ERR_WEB_INVALID_ENTRY_INDEX = -1003,
+    ERR_WEB_OUT_OF_MEMORY = -1004
 };
 
 enum{
@@ -644,13 +648,13 @@ const char* get_error_message(int code) {
     }
     if (ret != 0 || message == nullptr) {
         switch (code) {
-            case -1:
+            case ERR_WEB_INVALID_ARGUMENT:
                 return "invalid or missing argument";
-            case -2:
-                return "not a recognized TI file (or unsupported operation context)";
-            case -3:
+            case ERR_WEB_NOT_TI_FILE:
+                return "not a recognized TI file";
+            case ERR_WEB_INVALID_ENTRY_INDEX:
                 return "invalid entry selection/index";
-            case -4:
+            case ERR_WEB_OUT_OF_MEMORY:
                 return "out of memory";
             default:
                 return "";
@@ -2189,13 +2193,13 @@ EMSCRIPTEN_KEEPALIVE
 int send_file_custom(CableHandle* cable_handle, const char* filename, const char* folder, int location) {
     if (!filename || !*filename) {
         printf("ERROR: No filename provided\n");
-        return -1;
+        return ERR_WEB_INVALID_ARGUMENT;
     }
 
     printf("=== Sending File: %s ===\n", filename);
     if (!tifiles_file_is_ti(filename)) {
         printf("ERROR: Not a recognized TI file\n");
-        return -2;
+        return ERR_WEB_NOT_TI_FILE;
     }
 
     int result = 0;
@@ -2223,7 +2227,7 @@ int send_file_custom(CableHandle* cable_handle, const char* filename, const char
     } else {
         FileContent* content = tifiles_content_create_regular(g_calc_model);
         if (!content) {
-            return -4;
+            return ERR_WEB_OUT_OF_MEMORY;
         }
         result = tifiles_file_read_regular(filename, content);
         if (result != 0) {
@@ -2251,17 +2255,17 @@ EMSCRIPTEN_KEEPALIVE
 int send_file_entry_custom(CableHandle* cable_handle, const char* filename, int entry_index, int container_kind, const char* folder, int location) {
     if (!filename || !*filename) {
         printf("ERROR: No filename provided\n");
-        return -1;
+        return ERR_WEB_INVALID_ARGUMENT;
     }
     if (entry_index < 0) {
         printf("ERROR: Invalid entry index %d\n", entry_index);
-        return -3;
+        return ERR_WEB_INVALID_ENTRY_INDEX;
     }
 
     printf("=== Sending File Entry: %s [index=%d kind=%d] ===\n", filename, entry_index, container_kind);
     if (!tifiles_file_is_ti(filename)) {
         printf("ERROR: Not a recognized TI file\n");
-        return -2;
+        return ERR_WEB_NOT_TI_FILE;
     }
 
     const int ready_result = ensure_calc_ready(cable_handle, 0);
@@ -2274,7 +2278,7 @@ int send_file_entry_custom(CableHandle* cable_handle, const char* filename, int 
     if (fclass == TIFILE_TIGROUP) {
         TigContent* content = tifiles_content_create_tigroup(g_calc_model, 0);
         if (!content) {
-            return -4;
+            return ERR_WEB_OUT_OF_MEMORY;
         }
         result = tifiles_file_read_tigroup(filename, content);
         if (result != 0) {
@@ -2285,23 +2289,23 @@ int send_file_entry_custom(CableHandle* cable_handle, const char* filename, int 
         if (container_kind == 2) {
             if ((unsigned int)entry_index >= content->n_apps || !content->app_entries[entry_index] || !content->app_entries[entry_index]->content.flash) {
                 tifiles_content_delete_tigroup(content);
-                return -3;
+                return ERR_WEB_INVALID_ENTRY_INDEX;
             }
             result = ticalcs_calc_send_app(g_calc_handle, content->app_entries[entry_index]->content.flash);
         } else {
             if ((unsigned int)entry_index >= content->n_vars || !content->var_entries[entry_index] || !content->var_entries[entry_index]->content.regular) {
                 tifiles_content_delete_tigroup(content);
-                return -3;
+                return ERR_WEB_INVALID_ENTRY_INDEX;
             }
             FileContent* regular = content->var_entries[entry_index]->content.regular;
             if (!regular || regular->num_entries == 0 || !regular->entries[0]) {
                 tifiles_content_delete_tigroup(content);
-                return -3;
+                return ERR_WEB_INVALID_ENTRY_INDEX;
             }
             FileContent* single = create_single_entry_content(regular, regular->entries[0]);
             if (!single) {
                 tifiles_content_delete_tigroup(content);
-                return -4;
+                return ERR_WEB_OUT_OF_MEMORY;
             }
             apply_var_entry_overrides(single->entries[0], folder, location);
             result = ticalcs_calc_send_var(g_calc_handle, MODE_NORMAL, single);
@@ -2312,7 +2316,7 @@ int send_file_entry_custom(CableHandle* cable_handle, const char* filename, int 
     } else {
         FileContent* content = tifiles_content_create_regular(g_calc_model);
         if (!content) {
-            return -4;
+            return ERR_WEB_OUT_OF_MEMORY;
         }
         result = tifiles_file_read_regular(filename, content);
         if (result != 0) {
@@ -2321,13 +2325,13 @@ int send_file_entry_custom(CableHandle* cable_handle, const char* filename, int 
         }
         if ((unsigned int)entry_index >= content->num_entries || !content->entries[entry_index]) {
             tifiles_content_delete_regular(content);
-            return -3;
+            return ERR_WEB_INVALID_ENTRY_INDEX;
         }
 
         FileContent* single = create_single_entry_content(content, content->entries[entry_index]);
         if (!single) {
             tifiles_content_delete_regular(content);
-            return -4;
+            return ERR_WEB_OUT_OF_MEMORY;
         }
 
         apply_var_entry_overrides(single->entries[0], folder, location);
