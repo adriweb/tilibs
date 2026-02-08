@@ -1617,7 +1617,7 @@ static unsigned int compute_location_mask_for_entry(const VarEntry* ve) {
     return location_mask;
 }
 
-static void append_var_entry_json(GString* out, const VarEntry* ve) {
+static void append_var_entry_json_with_container(GString* out, const VarEntry* ve, const char* container_type, int container_index) {
     if (!out || !ve) {
         return;
     }
@@ -1652,6 +1652,86 @@ static void append_var_entry_json(GString* out, const VarEntry* ve) {
     g_string_append_printf(out, "%u", ve->attr);
     g_string_append(out, ",\"location_mask\":");
     g_string_append_printf(out, "%u", location_mask);
+    g_string_append(out, ",\"size\":");
+    g_string_append_printf(out, "%u", ve->size);
+    if (container_type && *container_type) {
+        g_string_append(out, ",\"container_type\":\"");
+        json_append_escaped(out, container_type);
+        g_string_append(out, "\"");
+        g_string_append(out, ",\"container_index\":");
+        g_string_append_printf(out, "%d", container_index);
+    }
+    g_string_append(out, "}");
+}
+
+static void append_var_entry_json(GString* out, const VarEntry* ve) {
+    append_var_entry_json_with_container(out, ve, nullptr, -1);
+}
+
+static uint32_t get_flash_content_size(const FlashContent* content) {
+    if (!content) {
+        return 0;
+    }
+    if (content->data_length > 0) {
+        return content->data_length;
+    }
+    if (content->num_pages > 0 && content->pages) {
+        uint64_t total = 0;
+        for (unsigned int i = 0; i < content->num_pages; i++) {
+            const FlashPage* page = content->pages[i];
+            if (!page) {
+                continue;
+            }
+            total += page->size;
+        }
+        if (total > G_MAXUINT32) {
+            return G_MAXUINT32;
+        }
+        return (uint32_t)total;
+    }
+    return 0;
+}
+
+static void append_flash_entry_json(GString* out, const FlashContent* content, const char* container_type, int container_index, FileClass flash_class) {
+    if (!out || !content) {
+        return;
+    }
+
+    const bool is_os = (flash_class == TIFILE_OS);
+    const uint8_t type_id = is_os ? TI83p_AMS : TI83p_APPL;
+
+    char name_buf[128] = {};
+    const char* raw_name = content->name;
+    if (raw_name && *raw_name) {
+        if (ticonv_varname_to_utf8_sn(g_calc_model, raw_name, name_buf, sizeof(name_buf), type_id) == nullptr) {
+            strncpy(name_buf, raw_name, sizeof(name_buf) - 1);
+        }
+    }
+
+    // Keep type_name empty for OS so JS falls back to the already-detected file class ("os").
+    const char* type_name = is_os ? "" : tifiles_vartype2type(g_calc_model, TI83p_APPL);
+
+    g_string_append(out, "{\"name\":\"");
+    json_append_escaped(out, name_buf);
+    g_string_append(out, "\",\"folder\":\"\"");
+    g_string_append(out, ",\"type\":");
+    g_string_append_printf(out, "%u", (unsigned int)type_id);
+    g_string_append(out, ",\"type_name\":\"");
+    json_append_escaped(out, type_name ? type_name : "App");
+    g_string_append(out, "\"");
+    g_string_append(out, ",\"attr\":");
+    g_string_append_printf(out, "%u", (unsigned int)ATTRB_ARCHIVED);
+    g_string_append(out, ",\"location_mask\":");
+    g_string_append_printf(out, "%u", (unsigned int)LOC_ARCHIVE);
+    g_string_append(out, ",\"size\":");
+    g_string_append_printf(out, "%u", get_flash_content_size(content));
+    if (container_type && *container_type) {
+        g_string_append(out, ",\"container_type\":\"");
+        json_append_escaped(out, container_type);
+        g_string_append(out, "\"");
+        g_string_append(out, ",\"container_index\":");
+        g_string_append_printf(out, "%d", container_index);
+    }
     g_string_append(out, "}");
 }
 
@@ -1670,6 +1750,62 @@ static void get_file_metadata_json(const char* filename, const char** class_name
     const char* class_name = tifiles_class_to_string(fclass);
     if (class_name_out) {
         *class_name_out = class_name ? class_name : "unknown";
+    }
+
+    if (fclass == TIFILE_TIGROUP) {
+        TigContent* content = tifiles_content_create_tigroup(g_calc_model, 0);
+        if (!content) {
+            return;
+        }
+        const int ret = tifiles_file_read_tigroup(filename, content);
+        if (ret != 0) {
+            tifiles_content_delete_tigroup(content);
+            return;
+        }
+
+        bool first = true;
+        for (unsigned int i = 0; i < content->n_vars; i++) {
+            const TigEntry* te = content->var_entries[i];
+            if (!te || !te->content.regular || te->content.regular->num_entries == 0 || !te->content.regular->entries[0]) {
+                continue;
+            }
+            if (!first) {
+                g_string_append(entries_json_out, ",");
+            }
+            append_var_entry_json_with_container(entries_json_out, te->content.regular->entries[0], "var", (int)i);
+            first = false;
+        }
+        for (unsigned int i = 0; i < content->n_apps; i++) {
+            const TigEntry* te = content->app_entries[i];
+            if (!te || !te->content.flash) {
+                continue;
+            }
+            if (!first) {
+                g_string_append(entries_json_out, ",");
+            }
+            append_flash_entry_json(entries_json_out, te->content.flash, "app", (int)i, TIFILE_APP);
+            first = false;
+        }
+
+        tifiles_content_delete_tigroup(content);
+        return;
+    }
+
+    if (fclass == TIFILE_FLASH || fclass == TIFILE_APP || fclass == TIFILE_OS) {
+        CalcModel model = tifiles_file_get_model(filename);
+        if (model == CALC_NONE) {
+            model = g_calc_model;
+        }
+        FlashContent* content = tifiles_content_create_flash(model);
+        if (!content) {
+            return;
+        }
+        const int ret = tifiles_file_read_flash(filename, content);
+        if (ret == 0) {
+            append_flash_entry_json(entries_json_out, content, nullptr, -1, fclass);
+        }
+        tifiles_content_delete_flash(content);
+        return;
     }
 
     FileContent* content = tifiles_content_create_regular(g_calc_model);
@@ -1695,6 +1831,34 @@ static void get_file_metadata_json(const char* filename, const char** class_name
         first = false;
     }
     tifiles_content_delete_regular(content);
+}
+
+static void apply_var_entry_overrides(VarEntry* ve, const char* folder, int location) {
+    if (!ve) {
+        return;
+    }
+
+    if (folder && *folder) {
+        char* raw_folder = ticonv_varname_tokenize(g_calc_model, folder, ve->type);
+        if (raw_folder) {
+            if (strncmp(ve->folder, raw_folder, sizeof(ve->folder)) != 0) {
+                strncpy(ve->folder, raw_folder, sizeof(ve->folder) - 1);
+                ve->folder[sizeof(ve->folder) - 1] = '\0';
+            }
+            ticonv_varname_free(raw_folder);
+        }
+    }
+    if (location == 0) {
+        if (ve->attr != ATTRB_NONE) {
+            ve->attr = ATTRB_NONE;
+        }
+    } else if (location == 1) {
+        if (ve->attr != ATTRB_ARCHIVED) {
+            ve->attr = ATTRB_ARCHIVED;
+        }
+    } else if (location != -1) {
+        printf("WARN: Unknown location override %d\n", location);
+    }
 }
 
 EMSCRIPTEN_KEEPALIVE
@@ -1991,8 +2155,12 @@ int send_file_custom(CableHandle* cable_handle, const char* filename, const char
         result = ticalcs_calc_send_backup2(g_calc_handle, filename);
     } else {
         FileContent* content = tifiles_content_create_regular(g_calc_model);
+        if (!content) {
+            return -4;
+        }
         result = tifiles_file_read_regular(filename, content);
         if (result != 0) {
+            tifiles_content_delete_regular(content);
             return result;
         }
 
@@ -2001,27 +2169,7 @@ int send_file_custom(CableHandle* cable_handle, const char* filename, const char
             if (!ve) {
                 continue;
             }
-            if (folder && *folder) {
-                char* raw_folder = ticonv_varname_tokenize(g_calc_model, folder, ve->type);
-                if (raw_folder) {
-                    if (strncmp(ve->folder, raw_folder, sizeof(ve->folder)) != 0) {
-                        strncpy(ve->folder, raw_folder, sizeof(ve->folder) - 1);
-                        ve->folder[sizeof(ve->folder) - 1] = '\0';
-                    }
-                    ticonv_varname_free(raw_folder);
-                }
-            }
-            if (location == 0) {
-                if (ve->attr != ATTRB_NONE) {
-                    ve->attr = ATTRB_NONE;
-                }
-            } else if (location == 1) {
-                if (ve->attr != ATTRB_ARCHIVED) {
-                    ve->attr = ATTRB_ARCHIVED;
-                }
-            } else if (location != -1) {
-                printf("WARN: Unknown location override %d\n", location);
-            }
+            apply_var_entry_overrides(ve, folder, location);
         }
 
         result = ticalcs_calc_send_var(g_calc_handle, MODE_NORMAL, content);
@@ -2029,6 +2177,115 @@ int send_file_custom(CableHandle* cable_handle, const char* filename, const char
     }
 
     printf("Send result: %d\n", result);
+    return result;
+}
+
+EMSCRIPTEN_KEEPALIVE
+int send_file_entry_custom(CableHandle* cable_handle, const char* filename, int entry_index, int container_kind, const char* folder, int location) {
+    if (!filename || !*filename) {
+        printf("ERROR: No filename provided\n");
+        return -1;
+    }
+    if (entry_index < 0) {
+        printf("ERROR: Invalid entry index %d\n", entry_index);
+        return -3;
+    }
+
+    printf("=== Sending File Entry: %s [index=%d kind=%d] ===\n", filename, entry_index, container_kind);
+    if (!tifiles_file_is_ti(filename)) {
+        printf("ERROR: Not a recognized TI file\n");
+        return -2;
+    }
+
+    const int ready_result = ensure_calc_ready(cable_handle, 0);
+    if (ready_result != 0) {
+        return ready_result;
+    }
+
+    int result = 0;
+    const FileClass fclass = tifiles_file_get_class(filename);
+    if (fclass == TIFILE_TIGROUP) {
+        TigContent* content = tifiles_content_create_tigroup(g_calc_model, 0);
+        if (!content) {
+            return -4;
+        }
+        result = tifiles_file_read_tigroup(filename, content);
+        if (result != 0) {
+            tifiles_content_delete_tigroup(content);
+            return result;
+        }
+
+        if (container_kind == 2) {
+            if ((unsigned int)entry_index >= content->n_apps || !content->app_entries[entry_index] || !content->app_entries[entry_index]->content.flash) {
+                tifiles_content_delete_tigroup(content);
+                return -3;
+            }
+            result = ticalcs_calc_send_app(g_calc_handle, content->app_entries[entry_index]->content.flash);
+        } else {
+            if ((unsigned int)entry_index >= content->n_vars || !content->var_entries[entry_index] || !content->var_entries[entry_index]->content.regular) {
+                tifiles_content_delete_tigroup(content);
+                return -3;
+            }
+            FileContent* regular = content->var_entries[entry_index]->content.regular;
+            if (!regular || regular->num_entries == 0 || !regular->entries[0]) {
+                tifiles_content_delete_tigroup(content);
+                return -3;
+            }
+            apply_var_entry_overrides(regular->entries[0], folder, location);
+            result = ticalcs_calc_send_var(g_calc_handle, MODE_NORMAL, regular);
+        }
+
+        tifiles_content_delete_tigroup(content);
+    } else {
+        FileContent* content = tifiles_content_create_regular(g_calc_model);
+        if (!content) {
+            return -4;
+        }
+        result = tifiles_file_read_regular(filename, content);
+        if (result != 0) {
+            tifiles_content_delete_regular(content);
+            return result;
+        }
+        if ((unsigned int)entry_index >= content->num_entries || !content->entries[entry_index]) {
+            tifiles_content_delete_regular(content);
+            return -3;
+        }
+
+        FileContent* single = tifiles_content_create_regular(g_calc_model);
+        if (!single) {
+            tifiles_content_delete_regular(content);
+            return -4;
+        }
+
+        single->model = content->model;
+        single->model_dst = content->model_dst;
+        single->checksum = content->checksum;
+        single->stored_checksum = content->stored_checksum;
+        strncpy(single->default_folder, content->default_folder, sizeof(single->default_folder) - 1);
+        single->default_folder[sizeof(single->default_folder) - 1] = '\0';
+        strncpy(single->comment, content->comment, sizeof(single->comment) - 1);
+        single->comment[sizeof(single->comment) - 1] = '\0';
+        single->num_entries = 1;
+        single->entries = tifiles_ve_create_array(1);
+        if (!single->entries) {
+            tifiles_content_delete_regular(single);
+            tifiles_content_delete_regular(content);
+            return -4;
+        }
+        single->entries[0] = tifiles_ve_dup(content->entries[entry_index]);
+        if (!single->entries[0]) {
+            tifiles_content_delete_regular(single);
+            tifiles_content_delete_regular(content);
+            return -4;
+        }
+
+        apply_var_entry_overrides(single->entries[0], folder, location);
+        result = ticalcs_calc_send_var(g_calc_handle, MODE_NORMAL, single);
+        tifiles_content_delete_regular(single);
+        tifiles_content_delete_regular(content);
+    }
+
+    printf("Send entry result: %d\n", result);
     return result;
 }
 
