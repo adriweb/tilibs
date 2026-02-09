@@ -951,6 +951,10 @@ tr:focus-within .row-actions {
     gap: 10px;
 }
 
+a {
+    color: var(--accent-2);
+}
+
 .footer a {
     color: var(--text);
     text-decoration: none;
