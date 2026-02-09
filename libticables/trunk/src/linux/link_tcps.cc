@@ -65,15 +65,14 @@ typedef int tcp_socket_t;
 #include "../gettext.h"
 #include "../internal.h"
 #include "../timeout.h"
-#include "detect.h"
 
 typedef struct
 {
 	tcp_socket_t listen_sock;
 	tcp_socket_t client_sock;
-	char *server_address;
-	char *advertised_address;
-	char *bind_address;
+	const char *server_address;
+	const char *advertised_address;
+	const char *bind_address;
 	uint16_t port;
 } TcpsPrivData;
 
@@ -119,12 +118,9 @@ static int tcp_wait_socket(tcp_socket_t sock, int want_read, unsigned int timeou
 		FD_SET(sock, &wfds);
 	}
 
-	if (timeout_ms > 0)
-	{
-		tv.tv_sec = timeout_ms / 1000;
-		tv.tv_usec = (timeout_ms % 1000) * 1000;
-		ptv = &tv;
-	}
+	tv.tv_sec = timeout_ms / 1000;
+	tv.tv_usec = (timeout_ms % 1000) * 1000;
+	ptv = &tv;
 
 	return select((int)(sock + 1), want_read ? &rfds : nullptr, want_read ? nullptr : &wfds, nullptr, ptv);
 }
@@ -206,6 +202,22 @@ static unsigned int tcps_timeout_ms(const CableHandle *h)
 	return h->timeout * 100;
 }
 
+static unsigned int tcps_wait_slice_ms(const CableHandle *h, tiTIME clk)
+{
+	const unsigned int total = tcps_timeout_ms(h);
+	const unsigned int slice = 200;
+	const unsigned long elapsed = TO_CURRENT(clk);
+	unsigned int remaining = 0;
+
+	if (elapsed >= total)
+	{
+		return 0;
+	}
+
+	remaining = total - (unsigned int)elapsed;
+	return remaining < slice ? remaining : slice;
+}
+
 static void tcps_free_priv(TcpsPrivData *priv)
 {
 	if (priv == nullptr)
@@ -223,12 +235,6 @@ static void tcps_free_priv(TcpsPrivData *priv)
 		tcp_close(priv->listen_sock);
 		priv->listen_sock = TCP_INVALID_SOCKET;
 	}
-	free(priv->server_address);
-	priv->server_address = nullptr;
-	free(priv->advertised_address);
-	priv->advertised_address = nullptr;
-	free(priv->bind_address);
-	priv->bind_address = nullptr;
 	free(priv);
 }
 
@@ -269,33 +275,9 @@ static int tcps_prepare(CableHandle *h)
 	priv->listen_sock = TCP_INVALID_SOCKET;
 	priv->client_sock = TCP_INVALID_SOCKET;
 	priv->port = port;
-
-	priv->bind_address = strdup(bind_address);
-	if (priv->bind_address == nullptr)
-	{
-		tcps_free_priv(priv);
-		return ERR_TCPS_OPEN;
-	}
-
-	if (server_address != nullptr)
-	{
-		priv->server_address = strdup(server_address);
-		if (priv->server_address == nullptr)
-		{
-			tcps_free_priv(priv);
-			return ERR_TCPS_OPEN;
-		}
-	}
-
-	if (advertised_address != nullptr)
-	{
-		priv->advertised_address = strdup(advertised_address);
-		if (priv->advertised_address == nullptr)
-		{
-			tcps_free_priv(priv);
-			return ERR_TCPS_OPEN;
-		}
-	}
+	priv->bind_address = bind_address;
+	priv->server_address = server_address;
+	priv->advertised_address = advertised_address;
 
 	tcps_free_priv((TcpsPrivData *)h->priv2);
 	h->priv2 = priv;
@@ -376,31 +358,36 @@ static int tcps_open(CableHandle *h)
 	wait_ret = tcp_wait_socket(priv->listen_sock, 1, timeout_ms);
 	if (wait_ret == 0)
 	{
-		return ERR_TCPS_ACCEPT;
+		ret = ERR_TCPS_ACCEPT;
+		goto fail;
 	}
 	if (wait_ret < 0)
 	{
-		return ERR_TCPS_ACCEPT;
+		ret = ERR_TCPS_ACCEPT;
+		goto fail;
 	}
 
 	priv->client_sock = accept(priv->listen_sock, (struct sockaddr *)&peer_addr, &peer_len);
 	if (priv->client_sock == TCP_INVALID_SOCKET)
 	{
-		return ERR_TCPS_ACCEPT;
+		ret = ERR_TCPS_ACCEPT;
+		goto fail;
 	}
 
 	if (priv->server_address != nullptr && !cidr_match(priv->server_address, (struct sockaddr *)&peer_addr))
 	{
 		tcp_close(priv->client_sock);
 		priv->client_sock = TCP_INVALID_SOCKET;
-		return ERR_TCPS_ACCEPT;
+		ret = ERR_TCPS_ACCEPT;
+		goto fail;
 	}
 
 	if (tcp_set_nonblocking(priv->client_sock, 0) != 0)
 	{
 		tcp_close(priv->client_sock);
 		priv->client_sock = TCP_INVALID_SOCKET;
-		return ERR_TCPS_OPEN;
+		ret = ERR_TCPS_OPEN;
+		goto fail;
 	}
 
 	{
@@ -409,6 +396,19 @@ static int tcps_open(CableHandle *h)
 	}
 
 	ret = 0;
+	return ret;
+
+fail:
+	if (priv->listen_sock != TCP_INVALID_SOCKET)
+	{
+		tcp_close(priv->listen_sock);
+		priv->listen_sock = TCP_INVALID_SOCKET;
+	}
+	if (priv->client_sock != TCP_INVALID_SOCKET)
+	{
+		tcp_close(priv->client_sock);
+		priv->client_sock = TCP_INVALID_SOCKET;
+	}
 	return ret;
 }
 
@@ -472,7 +472,6 @@ static int tcps_put(CableHandle *h, uint8_t *data, uint32_t len)
 	TcpsPrivData *priv = (TcpsPrivData *)h->priv2;
 	tiTIME clk;
 	uint32_t sent = 0;
-	unsigned int timeout_ms = tcps_timeout_ms(h);
 
 	if (priv == nullptr || priv->client_sock == TCP_INVALID_SOCKET)
 	{
@@ -482,6 +481,7 @@ static int tcps_put(CableHandle *h, uint8_t *data, uint32_t len)
 	TO_START(clk);
 	while (sent < len)
 	{
+		const unsigned int timeout_ms = tcps_wait_slice_ms(h, clk);
 		int wait_ret = tcp_wait_socket(priv->client_sock, 0, timeout_ms);
 		if (wait_ret == 0 || TO_ELAPSED(clk, h->timeout))
 		{
@@ -519,7 +519,6 @@ static int tcps_get(CableHandle *h, uint8_t *data, uint32_t len)
 	TcpsPrivData *priv = (TcpsPrivData *)h->priv2;
 	tiTIME clk;
 	uint32_t received = 0;
-	unsigned int timeout_ms = tcps_timeout_ms(h);
 
 	if (priv == nullptr || priv->client_sock == TCP_INVALID_SOCKET)
 	{
@@ -529,6 +528,7 @@ static int tcps_get(CableHandle *h, uint8_t *data, uint32_t len)
 	TO_START(clk);
 	while (received < len)
 	{
+		const unsigned int timeout_ms = tcps_wait_slice_ms(h, clk);
 		int wait_ret = tcp_wait_socket(priv->client_sock, 1, timeout_ms);
 		if (wait_ret == 0 || TO_ELAPSED(clk, h->timeout))
 		{
