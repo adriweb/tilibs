@@ -135,5 +135,10 @@
   "prompt_rename_entry": "{kind} hernoemen:",
   "kind_folder": "map",
   "kind_item": "item",
-  "transfer_overwrite_all": "Alle bestaande items overschrijven (zonder bevestiging per bestand)"
+  "transfer_overwrite_all": "Alle bestaande items overschrijven (zonder bevestiging per bestand)",
+  "close": "Sluiten",
+  "winusb_nspire_block_title": "TI-Nspire CX II wordt nog niet ondersteund in deze browser-/OS-configuratie",
+  "winusb_nspire_block_text": "Op Windows kan WebTILP nog geen verbinding maken met de TI-Nspire CX II vanwege <a href=\"https://chromium.googlesource.com/chromium/src/+/ce1b7e514576f31c05/services/device/usb/usb_device_handle_win.cc#254\" target=\"_blank\">technische beperkingen<\/a>. We werken eraan!",
+  "winusb_nspire_block_alternatives": "Alternatieven:",
+  "log_winusb_nspire_blocked": "Verbinding geblokkeerd: TI-Nspire CX II wordt hier niet ondersteund."
 }

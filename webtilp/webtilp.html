@@ -351,6 +351,26 @@
             </div>
         </div>
     </div>
+
+    <div class="modal hidden" id="winUsbNspireModal" aria-hidden="true">
+        <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="winUsbNspireTitle">
+            <div class="modal-header">
+                <h3 id="winUsbNspireTitle">TI-Nspire CX II is not supported on this browser/OS setup</h3>
+            </div>
+            <div class="modal-body">
+                <p id="winUsbNspireBody">On Windows, WebTILP cannot connect to the TI-Nspire CX II yet due to <a href="https://chromium.googlesource.com/chromium/src/+/ce1b7e514576f31c05/services/device/usb/usb_device_handle_win.cc#254" target="_blank">technical limitations</a>. We're working on it!</p>
+                <p id="winUsbNspireAlternativesLabel">Alternatives:</p>
+                <ul>
+                    <li><a href="https://nspireconnect.ti.com" target="_blank" rel="noopener noreferrer">NspireConnect</a> (official)</li>
+                    <li><a href="https://lights0123.com/n-link/" target="_blank" rel="noopener noreferrer">N-Link</a> (third-party)</li>
+                </ul>
+            </div>
+            <div class="modal-footer">
+                <button class="btn primary" id="btnCloseWinUsbNspire">Close</button>
+            </div>
+        </div>
+    </div>
+
     <footer class="footer">
         <span>WebTILP by <a href="https://github.com/adriweb/tilibs/tree/exp2-full-emscripten" target="_blank">Adriweb</a>.</span>
         <span>Powered by <a href="https://github.com/debrouxl/tilibs/" target="_blank">tilibs</a>.</span>

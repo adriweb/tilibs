@@ -232,7 +232,12 @@ const I18N_EN = {
     "confirm_download_items_from_target": "Download {count} item(s) from {target}?",
     "prompt_rename_entry": "Rename {kind}:",
     "kind_folder": "folder",
-    "kind_item": "item"
+    "kind_item": "item",
+    "close": "Close",
+    "winusb_nspire_block_title": "The TI-Nspire CX II is not supported on Windows here yet",
+    "winusb_nspire_block_text": "On Windows, WebTILP cannot connect to the TI-Nspire CX II yet due to <a href=\"https://chromium.googlesource.com/chromium/src/+/ce1b7e514576f31c05/services/device/usb/usb_device_handle_win.cc#254\" target=\"_blank\">technical limitations</a>. We're working on it!",
+    "winusb_nspire_block_alternatives": "Alternatives:",
+    "log_winusb_nspire_blocked": "Connection failure: TI-Nspire CX II is not supported here."
 };
 
 const LOCALE_CACHE = new Map([['en', I18N_EN]]);
@@ -708,6 +713,7 @@ const CALC_MODEL_OPTIONS = [
 ];
 
 const PID_SILVERLINK = 0xe001;
+const PID_NSPIRE_CXII = 0xe022;
 const DIRECTLINK_PIDS = new Set([
     0xe003,
     0xe004,
@@ -2301,7 +2307,9 @@ const els = {
     backupIncludeFlash: document.getElementById('backupIncludeFlash'),
     backupModalOverlay: document.getElementById('backupModalOverlay'),
     backupModalOverlayText: document.getElementById('backupModalOverlayText'),
-    toastContainer: document.getElementById('toastContainer')
+    toastContainer: document.getElementById('toastContainer'),
+    winUsbNspireModal: document.getElementById('winUsbNspireModal'),
+    btnCloseWinUsbNspire: document.getElementById('btnCloseWinUsbNspire')
 };
 
 state.settings = loadSettings();
@@ -2919,6 +2927,10 @@ async function applyTranslations() {
     setTextContent(document.getElementById('backupModalOverlayText'), t('loading_dirlist'));
     setTextContent(els.btnCancelBackup, t('cancel'));
     setTextContent(els.btnConfirmBackup, `📥 ${t('create_backup')}`);
+    setTextContent(document.getElementById('winUsbNspireTitle'), '⚠️ ' + t('winusb_nspire_block_title'));
+    document.getElementById('winUsbNspireBody').innerHTML = t('winusb_nspire_block_text');
+    setTextContent(document.getElementById('winUsbNspireAlternativesLabel'), t('winusb_nspire_block_alternatives'));
+    setTextContent(els.btnCloseWinUsbNspire, t('close'));
 
     if (els.btnNuke) {
         els.btnNuke.title = t('force_disconnect_reset');
@@ -3316,6 +3328,56 @@ function updateWebUsbSplashState() {
     els.btnSplashConnect.classList.toggle('hidden', !webUsbReady);
 }
 
+function isWindowsPlatform() {
+    const platform = navigator.userAgentData?.platform || navigator.platform || navigator.userAgent || '';
+    return /win/i.test(String(platform));
+}
+
+function resetToSplashState() {
+    clearActiveOperations();
+    state.handle = 0;
+    state.cableOpen = false;
+    state.authorizedDevice = null;
+    state.connectInProgress = false;
+    state.handlePromise = null;
+    state.needsReauthorize = false;
+    state.silentReconnectInProgress = false;
+    clearDeviceData();
+    setConnected(false);
+    if (!navigator.usb) {
+        setStatus('WebUSB unsupported', false);
+    } else if (!self.isSecureContext) {
+        setStatus('Insecure context', false);
+    } else {
+        setStatus('Idle', false);
+    }
+}
+
+function openWinUsbNspireModal() {
+    if (!els.winUsbNspireModal) {
+        return;
+    }
+    els.winUsbNspireModal.classList.remove('hidden');
+}
+
+function closeWinUsbNspireModal() {
+    if (!els.winUsbNspireModal) {
+        return;
+    }
+    els.winUsbNspireModal.classList.add('hidden');
+    resetToSplashState();
+}
+
+function guardWinUsbNspireCX2(device = state.authorizedDevice) {
+    if (!isWindowsPlatform() || Number(device.productId) !== PID_NSPIRE_CXII) {
+        return false;
+    }
+    resetToSplashState();
+    openWinUsbNspireModal();
+    log(t('log_winusb_nspire_blocked'));
+    return true;
+}
+
 function isNspireActive() {
     const pid = state.authorizedDevice?.productId;
     return typeof pid === 'number' && NSPIRE_PIDS.has(pid);
@@ -3460,6 +3522,10 @@ async function autoConnectIfAuthorized() {
     }
 
     state.authorizedDevice = devices[0];
+
+    if (guardWinUsbNspireCX2(state.authorizedDevice)) {
+        return;
+    }
 
     if (isNspireActive()) {
         // Nspires can't reconnect automatically, let's USB reset and ask the user for the device again
@@ -3692,6 +3758,9 @@ async function connect() {
     try {
         state.connectInProgress = true;
         await authorizeDevice(true);
+        if (guardWinUsbNspireCX2(state.authorizedDevice)) {
+            return;
+        }
         if (promptCableMismatchResolution()) {
             return;
         }
@@ -6726,10 +6795,20 @@ function bindEvents() {
             closeSettingsModal();
         }
     });
+    if (els.btnCloseWinUsbNspire) {
+        els.btnCloseWinUsbNspire.addEventListener('click', closeWinUsbNspireModal);
+    }
     if (els.newFolderModal) {
         els.newFolderModal.addEventListener('click', event => {
             if (event.target === els.newFolderModal) {
                 closeNewFolderModal();
+            }
+        });
+    }
+    if (els.winUsbNspireModal) {
+        els.winUsbNspireModal.addEventListener('click', event => {
+            if (event.target === els.winUsbNspireModal) {
+                closeWinUsbNspireModal();
             }
         });
     }
