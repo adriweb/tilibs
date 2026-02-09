@@ -65,12 +65,11 @@ typedef int tcp_socket_t;
 #include "../gettext.h"
 #include "../internal.h"
 #include "../timeout.h"
-#include "detect.h"
 
 typedef struct
 {
 	tcp_socket_t sock;
-	char *connect_address;
+	const char *connect_address;
 	uint16_t port;
 } TcpcPrivData;
 
@@ -116,12 +115,9 @@ static int tcp_wait_socket(tcp_socket_t sock, int want_read, unsigned int timeou
 		FD_SET(sock, &wfds);
 	}
 
-	if (timeout_ms > 0)
-	{
-		tv.tv_sec = timeout_ms / 1000;
-		tv.tv_usec = (timeout_ms % 1000) * 1000;
-		ptv = &tv;
-	}
+	tv.tv_sec = timeout_ms / 1000;
+	tv.tv_usec = (timeout_ms % 1000) * 1000;
+	ptv = &tv;
 
 	return select((int)(sock + 1), want_read ? &rfds : nullptr, want_read ? nullptr : &wfds, nullptr, ptv);
 }
@@ -129,6 +125,22 @@ static int tcp_wait_socket(tcp_socket_t sock, int want_read, unsigned int timeou
 static unsigned int tcpc_timeout_ms(const CableHandle *h)
 {
 	return h->timeout * 100;
+}
+
+static unsigned int tcpc_wait_slice_ms(const CableHandle *h, tiTIME clk)
+{
+	const unsigned int total = tcpc_timeout_ms(h);
+	const unsigned int slice = 200;
+	const unsigned long elapsed = TO_CURRENT(clk);
+	unsigned int remaining = 0;
+
+	if (elapsed >= total)
+	{
+		return 0;
+	}
+
+	remaining = total - (unsigned int)elapsed;
+	return remaining < slice ? remaining : slice;
 }
 
 static void tcpc_free_priv(TcpcPrivData *priv)
@@ -143,8 +155,6 @@ static void tcpc_free_priv(TcpcPrivData *priv)
 		tcp_close(priv->sock);
 		priv->sock = TCP_INVALID_SOCKET;
 	}
-	free(priv->connect_address);
-	priv->connect_address = nullptr;
 	free(priv);
 }
 
@@ -174,12 +184,7 @@ static int tcpc_prepare(CableHandle *h)
 
 	priv->sock = TCP_INVALID_SOCKET;
 	priv->port = port;
-	priv->connect_address = strdup(connect_address);
-	if (priv->connect_address == nullptr)
-	{
-		tcpc_free_priv(priv);
-		return ERR_TCPC_OPEN;
-	}
+	priv->connect_address = connect_address;
 
 	tcpc_free_priv((TcpcPrivData *)h->priv2);
 	h->priv2 = priv;
@@ -228,9 +233,7 @@ static int tcpc_open(CableHandle *h)
 
 		if (setsockopt(priv->sock, IPPROTO_TCP, TCP_NODELAY, (const char *)&one, sizeof(one)) != 0)
 		{
-			tcp_close(priv->sock);
-			priv->sock = TCP_INVALID_SOCKET;
-			continue;
+			ticables_warning("tcpc_open: unable to set TCP_NODELAY, continuing.");
 		}
 
 		if (tcp_set_nonblocking(priv->sock, 1) != 0)
@@ -364,7 +367,6 @@ static int tcpc_put(CableHandle *h, uint8_t *data, uint32_t len)
 	TcpcPrivData *priv = (TcpcPrivData *)h->priv2;
 	tiTIME clk;
 	uint32_t sent = 0;
-	unsigned int timeout_ms = tcpc_timeout_ms(h);
 
 	if (priv == nullptr || priv->sock == TCP_INVALID_SOCKET)
 	{
@@ -374,6 +376,7 @@ static int tcpc_put(CableHandle *h, uint8_t *data, uint32_t len)
 	TO_START(clk);
 	while (sent < len)
 	{
+		const unsigned int timeout_ms = tcpc_wait_slice_ms(h, clk);
 		int wait_ret = tcp_wait_socket(priv->sock, 0, timeout_ms);
 		if (wait_ret == 0 || TO_ELAPSED(clk, h->timeout))
 		{
@@ -411,7 +414,6 @@ static int tcpc_get(CableHandle *h, uint8_t *data, uint32_t len)
 	TcpcPrivData *priv = (TcpcPrivData *)h->priv2;
 	tiTIME clk;
 	uint32_t received = 0;
-	unsigned int timeout_ms = tcpc_timeout_ms(h);
 
 	if (priv == nullptr || priv->sock == TCP_INVALID_SOCKET)
 	{
@@ -421,6 +423,7 @@ static int tcpc_get(CableHandle *h, uint8_t *data, uint32_t len)
 	TO_START(clk);
 	while (received < len)
 	{
+		const unsigned int timeout_ms = tcpc_wait_slice_ms(h, clk);
 		int wait_ret = tcp_wait_socket(priv->sock, 1, timeout_ms);
 		if (wait_ret == 0 || TO_ELAPSED(clk, h->timeout))
 		{

@@ -532,6 +532,14 @@ int TICALL ticables_cable_set_options(CableHandle *handle, const CableOptions *o
 
 	ticables_free_cable_options(handle->options);
 	handle->options = new_options;
+	if (options->timeout > 0)
+	{
+		handle->timeout = options->timeout;
+	}
+	if (options->delay > 0)
+	{
+		handle->delay = options->delay;
+	}
 
 	return 0;
 }
