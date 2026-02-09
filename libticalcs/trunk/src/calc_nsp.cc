@@ -800,18 +800,31 @@ static int		send_os    (CalcHandle* handle, FlashContent* content)
 			handle->updat->cnt2 = 0;
 			handle->updat->max2 = 100;
 			ticalcs_update_pbar(handle);
+			const unsigned int old_timeout = ticables_options_set_timeout(handle->cable,
+				MAX(ticables_get_timeout(handle->cable), 300));
+			int saw_progress = 0;
 
 			do
 			{
 				ret = nsp_cmd_r_progress(handle, &value);
 				if (ret)
 				{
+					if (ret == ERROR_READ_TIMEOUT && saw_progress)
+					{
+						// After the payload upload, the calculator can spend a long time
+						// verifying/installing the OS without emitting more progress packets.
+						// If we already observed progress, treat a late timeout as non-fatal.
+						ticalcs_info("  progress timeout after partial progress, assuming install continues");
+						ret = 0;
+					}
 					break;
 				}
+				saw_progress = 1;
 
 				handle->updat->cnt2 = value;
 				ticalcs_update_pbar(handle);
 			} while (value < 100);
+			ticables_options_set_timeout(handle->cable, old_timeout);
 
 			DO_CLOSE_SESSION(handle);
 		}
