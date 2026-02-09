@@ -135,5 +135,10 @@
   "prompt_rename_entry": "Renomina {kind}:",
   "kind_folder": "capsa",
   "kind_item": "res",
-  "transfer_overwrite_all": "Omnia iam existentia supercribe (sine confirmatione per fasciculum)"
+  "transfer_overwrite_all": "Omnia iam existentia supercribe (sine confirmatione per fasciculum)",
+  "close": "Claudere",
+  "winusb_nspire_block_title": "TI-Nspire CX II hac in forma navigatoris/systematis nondum sustinetur",
+  "winusb_nspire_block_text": "In Windows, WebTILP ad TI-Nspire CX II adhuc coniungi non potest propter <a href=\"https://chromium.googlesource.com/chromium/src/+/ce1b7e514576f31c05/services/device/usb/usb_device_handle_win.cc#254\" target=\"_blank\">limitationes technicas<\/a>. Id nunc emendamus!",
+  "winusb_nspire_block_alternatives": "Alternativae viae:",
+  "log_winusb_nspire_blocked": "Coniunctio obstructa: TI-Nspire CX II hic non sustinetur."
 }
