@@ -135,5 +135,10 @@
   "prompt_rename_entry": "Rinomina {kind}:",
   "kind_folder": "cartella",
   "kind_item": "elemento",
-  "transfer_overwrite_all": "Sovrascrivi tutti gli elementi esistenti (senza conferma per file)"
+  "transfer_overwrite_all": "Sovrascrivi tutti gli elementi esistenti (senza conferma per file)",
+  "close": "Chiudi",
+  "winusb_nspire_block_title": "TI-Nspire CX II non è ancora supportato con questa configurazione browser/OS",
+  "winusb_nspire_block_text": "Su Windows, WebTILP non può ancora connettersi al TI-Nspire CX II a causa di <a href=\"https://chromium.googlesource.com/chromium/src/+/ce1b7e514576f31c05/services/device/usb/usb_device_handle_win.cc#254\" target=\"_blank\">limitazioni tecniche<\/a>. Ci stiamo lavorando!",
+  "winusb_nspire_block_alternatives": "Alternative:",
+  "log_winusb_nspire_blocked": "Connessione bloccata: TI-Nspire CX II non è supportato qui."
 }
