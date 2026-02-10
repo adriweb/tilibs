@@ -1,5 +1,87 @@
 /* global TILibsModule */
 
+const TI_VENDOR_ID = 0x0451; // Texas Instruments
+
+// Known TI USB devices
+const TI_USB_DEVICES = [
+    { productId: 0xE001, name: "TI-GRAPH LINK USB (SilverLink)" },
+    { productId: 0xE003, name: "TI-84 Plus Hand-Held" },
+    { productId: 0xE004, name: "TI-89 Titanium Hand-Held" },
+    { productId: 0xE008, name: "TI-84 Plus Silver Edition Hand-Held" },
+ // { productId: 0xE010, name: "TI SmartPad Keyboard" },                    // not for us, acts as an HID keyboard
+ // { productId: 0xE011, name: "Nspire CAS+ prototype" },                   // protocol not supported
+    { productId: 0xE012, name: "TI-Nspire Hand-Held" },
+ // { productId: 0xE013, name: "Network Bridge" },                          // not for us
+ // { productId: 0xE016, name: "TI Bluetooth Adapter" },                    // not for us
+    { productId: 0xE01C, name: "Data Collection Sled [Nspire Lab Cradle, Nspire Datatracker Cradle]" },
+ // { productId: 0xE01E, name: "Nspire CX Navigator Access Point" },        // not for us
+ // { productId: 0xE01F, name: "Python Adapter (firmware install mode)" },  // not for us
+ // { productId: 0xE020, name: "Python Adapter" },                          // not for us
+    { productId: 0xE022, name: "TI-Nspire CX II Hand-Held" },
+];
+
+/**
+ * Request access to a TI calculator via WebUSB.
+ * This function must be called from a user gesture (e.g., button click).
+ *
+ * @returns {Promise<USBDevice>} The selected USB device
+ * @throws {Error} If the user cancels device selection or WebUSB is not supported
+ */
+async function requestTICalculatorDevice() {
+    // Check if WebUSB is supported
+    if (!navigator.usb) {
+        throw new Error("WebUSB is not supported in this browser. Please use a recent version of Chrome/Chromium/Edge/Opera.");
+    }
+
+    try {
+        const device = await navigator.usb.requestDevice({
+            filters: TI_USB_DEVICES.map(dev => ({
+                vendorId: TI_VENDOR_ID,
+                productId: dev.productId
+            }))
+        });
+
+        console.log("TI device selected:", device.productName || "Unknown device");
+        console.log("  Vendor ID:", "0x" + device.vendorId.toString(16).padStart(4, '0'));
+        console.log("  Product ID:", "0x" + device.productId.toString(16).padStart(4, '0'));
+
+        return device;
+    } catch (error) {
+        if (error && error.name === 'NotFoundError') {
+            console.warn("No TI device was selected");
+            return null;
+        }
+        console.error("WebUSB device selection failed:", error);
+        throw error;
+    }
+}
+
+/**
+ * Get a list of previously authorized TI calculators.
+ *
+ * @returns {Promise<USBDevice[]>} Array of authorized devices
+ */
+async function getAuthorizedDevices() {
+    if (!navigator.usb) {
+        return [];
+    }
+
+    try {
+        const devices = await navigator.usb.getDevices();
+        const tiDevices = devices.filter(device => device.vendorId === TI_VENDOR_ID);
+
+        console.log("Found", tiDevices.length, "authorized TI device(s)");
+        tiDevices.forEach((device, index) => {
+            console.log(`  [${index}] ${device.productName || 'Unknown'} (PID: 0x${device.productId.toString(16)})`);
+        });
+
+        return tiDevices;
+    } catch (error) {
+        console.error("Failed to get authorized devices:", error);
+        return [];
+    }
+}
+
 const state = {
     module: null,
     handle: 0,
@@ -3472,8 +3554,8 @@ async function initModule() {
 async function authorizeDevice(forcePrompt = false) {
     const module = await initModule();
     const mustPrompt = forcePrompt || state.needsReauthorize;
-    if (!mustPrompt && module.getAuthorizedDevices) {
-        const devices = await module.getAuthorizedDevices();
+    if (!mustPrompt && getAuthorizedDevices) {
+        const devices = await getAuthorizedDevices();
         if (devices && devices.length) {
             if (!deviceMatches(state.authorizedDevice, devices[0])) {
                 log(`Using authorized device: ${devices[0].productName || 'Unknown'}`);
@@ -3486,7 +3568,7 @@ async function authorizeDevice(forcePrompt = false) {
             return devices[0];
         }
     }
-    const device = await module.requestTICalculatorDevice();
+    const device = await requestTICalculatorDevice();
     if (!device) {
         const cancelError = new Error('No device selected.');
         cancelError.silent = true;
@@ -3513,10 +3595,10 @@ async function autoConnectIfAuthorized() {
         return;
     }
     const module = await initModule();
-    if (!module.getAuthorizedDevices) {
+    if (!getAuthorizedDevices) {
         return;
     }
-    const devices = await module.getAuthorizedDevices();
+    const devices = await getAuthorizedDevices();
     if (!devices || !devices.length) {
         return;
     }
