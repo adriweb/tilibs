@@ -93,6 +93,7 @@ libarchive/
 tifileutil/testData/
 
 webtilp/app.bundle.js*
+webtilp/build-profile.css
 webtilp/webtilp.js
 webtilp/webtilp_prejs.js
 webtilp/webtilp.wasm
