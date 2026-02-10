@@ -6,6 +6,7 @@ const PRECACHE_URLS = [
   'index.html',
   'app.bundle.js',
   'app.css',
+  'build-profile.css',
   'webtilp.js',
   'webtilp.wasm',
   'webtilp_prejs.js',
