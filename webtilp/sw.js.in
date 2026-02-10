@@ -4,11 +4,11 @@ const CACHE_NAME = `webtilp-${CACHE_VERSION}`;
 const PRECACHE_URLS = [
   'webtilp.html',
   'index.html',
-  'app.js',
+  'app.bundle.js',
   'app.css',
   'webtilp.js',
   'webtilp.wasm',
-  'webusb_helper.js',
+  'webtilp_prejs.js',
   'version.json',
   'site.webmanifest',
   'favicon.ico',
