@@ -92,7 +92,9 @@ libusb/
 libarchive/
 tifileutil/testData/
 
+webtilp/app.bundle.js*
 webtilp/webtilp.js
+webtilp/webtilp_prejs.js
 webtilp/webtilp.wasm
 webtilp/version.json
 webtilp/sw.js
