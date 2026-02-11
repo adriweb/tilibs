@@ -1427,7 +1427,8 @@ extern const CalcFncts calc_80 =
 	 "",     /* recv_all_vars_backup */
 	 "",     /* send_lab_equipment_data */
 	 "",     /* get_lab_equipment_data */
-	 "",     /* del_folder */ },
+	 "",     /* del_folder */
+	 "",     /* recv_os */ },
 	&noop_is_ready,
 	&noop_send_key,
 	&noop_execute,
@@ -1460,6 +1461,7 @@ extern const CalcFncts calc_80 =
 	&noop_send_lab_equipment_data,
 	&noop_get_lab_equipment_data,
 	&noop_del_folder,
+	&noop_recv_os,
 };
 
 extern const CalcFncts calc_82 =
@@ -1502,7 +1504,8 @@ extern const CalcFncts calc_82 =
 	 "",     /* recv_all_vars_backup */
 	 "",     /* send_lab_equipment_data */
 	 "",     /* get_lab_equipment_data */
-	 "",     /* del_folder */ },
+	 "",     /* del_folder */
+	 "",     /* recv_os */ },
 	&noop_is_ready,
 	&noop_send_key,
 	&noop_execute,
@@ -1535,6 +1538,7 @@ extern const CalcFncts calc_82 =
 	&noop_send_lab_equipment_data,
 	&noop_get_lab_equipment_data,
 	&noop_del_folder,
+	&noop_recv_os,
 };
 
 extern const CalcFncts calc_83 =
@@ -1578,7 +1582,8 @@ extern const CalcFncts calc_83 =
 	 "",     /* recv_all_vars_backup */
 	 "",     /* send_lab_equipment_data */
 	 "",     /* get_lab_equipment_data */
-	 "",     /* del_folder */ },
+	 "",     /* del_folder */
+	 "",     /* recv_os */ },
 	&noop_is_ready,
 	&send_key,
 	&execute,
@@ -1611,6 +1616,7 @@ extern const CalcFncts calc_83 =
 	&noop_send_lab_equipment_data,
 	&noop_get_lab_equipment_data,
 	&noop_del_folder,
+	&noop_recv_os,
 };
 
 extern const CalcFncts calc_85 =
@@ -1653,7 +1659,8 @@ extern const CalcFncts calc_85 =
 	 "",     /* recv_all_vars_backup */
 	 "",     /* send_lab_equipment_data */
 	 "",     /* get_lab_equipment_data */
-	 "",     /* del_folder */ },
+	 "",     /* del_folder */
+	 "",     /* recv_os */ },
 	&noop_is_ready,
 	&noop_send_key,
 	&noop_execute,
@@ -1686,6 +1693,7 @@ extern const CalcFncts calc_85 =
 	&noop_send_lab_equipment_data,
 	&noop_get_lab_equipment_data,
 	&noop_del_folder,
+	&noop_recv_os,
 };
 
 extern const CalcFncts calc_86 =
@@ -1728,7 +1736,8 @@ extern const CalcFncts calc_86 =
 	 "",     /* recv_all_vars_backup */
 	 "",     /* send_lab_equipment_data */
 	 "",     /* get_lab_equipment_data */
-	 "",     /* del_folder */ },
+	 "",     /* del_folder */
+	 "",     /* recv_os */ },
 	&noop_is_ready,
 	&send_key,
 	&noop_execute,
@@ -1761,6 +1770,7 @@ extern const CalcFncts calc_86 =
 	&noop_send_lab_equipment_data,
 	&noop_get_lab_equipment_data,
 	&noop_del_folder,
+	&noop_recv_os,
 };
 
 extern const CalcFncts calc_cbl =
@@ -1803,7 +1813,8 @@ extern const CalcFncts calc_cbl =
 	 "",     /* recv_all_vars_backup */
 	 "",     /* send_lab_equipment_data */
 	 "",     /* get_lab_equipment_data */
-	 "",     /* del_folder */ },
+	 "",     /* del_folder */
+	 "",     /* recv_os */ },
 	&is_ready,
 	&noop_send_key,
 	&noop_execute,
@@ -1836,6 +1847,7 @@ extern const CalcFncts calc_cbl =
 	&tixx_send_lab_equipment_data,
 	&tixx_get_lab_equipment_data,
 	&noop_del_folder,
+	&noop_recv_os,
 };
 
 extern const CalcFncts calc_cbr =
@@ -1878,7 +1890,8 @@ extern const CalcFncts calc_cbr =
 	 "",     /* recv_all_vars_backup */
 	 "",     /* send_lab_equipment_data */
 	 "",     /* get_lab_equipment_data */
-	 "",     /* del_folder */ },
+	 "",     /* del_folder */
+	 "",     /* recv_os */ },
 	&is_ready,
 	&noop_send_key,
 	&noop_execute,
@@ -1911,6 +1924,7 @@ extern const CalcFncts calc_cbr =
 	&tixx_send_lab_equipment_data,
 	&tixx_get_lab_equipment_data,
 	&noop_del_folder,
+	&noop_recv_os,
 };
 
 extern const CalcFncts calc_cbr2 =
@@ -1953,7 +1967,8 @@ extern const CalcFncts calc_cbr2 =
 	 "",     /* recv_all_vars_backup */
 	 "",     /* send_lab_equipment_data */
 	 "",     /* get_lab_equipment_data */
-	 "",     /* del_folder */ },
+	 "",     /* del_folder */
+	 "",     /* recv_os */ },
 	&is_ready,
 	&noop_send_key,
 	&noop_execute,
@@ -1986,4 +2001,5 @@ extern const CalcFncts calc_cbr2 =
 	&tixx_send_lab_equipment_data,
 	&tixx_get_lab_equipment_data,
 	&noop_del_folder,
+	&noop_recv_os,
 };

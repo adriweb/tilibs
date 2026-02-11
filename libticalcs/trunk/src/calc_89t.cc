@@ -1500,7 +1500,8 @@ extern const CalcFncts calc_89t_usb =
 	 "2P1L", /* recv_all_vars_backup */
 	 "",     /* send_lab_equipment_data */
 	 "",     /* get_lab_equipment_data */
-	 "",     /* del_folder */ },
+	 "",     /* del_folder */
+	 "",     /* recv_os */ },
 	&is_ready,
 	&send_key,
 	&execute,
@@ -1533,4 +1534,5 @@ extern const CalcFncts calc_89t_usb =
 	&noop_send_lab_equipment_data,
 	&noop_get_lab_equipment_data,
 	&noop_del_folder,
+	&noop_recv_os,
 };
