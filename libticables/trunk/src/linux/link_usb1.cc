@@ -62,6 +62,7 @@
 #include "../gettext.h"
 #include "../internal.h"
 #include "../evo_serial.h"
+#include "../usb_endpoint_pair.h"
 #if defined(__WIN32__)
 #include "../win32/detect.h"
 #elif defined(__MACOSX__)
@@ -80,6 +81,8 @@
 #define VID_TI       0x0451     /* Texas Instruments, Inc.            */
 
 #define to           (100 * h->timeout)        // in ms
+
+#define DEFAULT_BULK_PACKET_SIZE 64
 
 /* Types */
 
@@ -123,7 +126,8 @@ typedef struct
 	uint8_t* rBufPtr;
 	uint8_t  in_endpoint;
 	uint8_t  out_endpoint;
-	int      max_ps;
+	int      max_ps_in;
+	int      max_ps_out;
 	int      was_max_ps;
 	EvoSerial serial;
 } usb_struct;
@@ -137,7 +141,8 @@ static int completed = 0;
 #define uDev       (((usb_struct *)(h->priv2))->device)
 #define uHdl       (((usb_struct *)(h->priv2))->handle)
 #define cable_info (((usb_struct *)(h->priv2))->cable_info)
-#define max_ps     (((usb_struct *)(h->priv2))->max_ps)
+#define max_ps_in  (((usb_struct *)(h->priv2))->max_ps_in)
+#define max_ps_out (((usb_struct *)(h->priv2))->max_ps_out)
 #define was_max_ps (((usb_struct *)(h->priv2))->was_max_ps)
 #define nBytesRead (((usb_struct *)(h->priv2))->nBytesRead)
 #define rBuf       (((usb_struct *)(h->priv2))->rBuf)
@@ -365,6 +370,106 @@ static int tigl_reset(CableHandle *h)
 
 /* API */
 
+int ticables_usb1_discover_bulk_endpoint_pair(const struct libusb_config_descriptor *config,
+	TicablesUsbEndpointPair *pair)
+{
+	if (config == NULL || pair == NULL)
+	{
+		return 0;
+	}
+
+	for (int i = 0; i < config->bNumInterfaces; i++)
+	{
+		const struct libusb_interface* interface_ = &(config->interface[i]);
+		if (interface_ == NULL || interface_->altsetting == NULL || interface_->num_altsetting <= 0)
+		{
+			continue;
+		}
+
+		for (int j = 0; j < interface_->num_altsetting; j++)
+		{
+			const struct libusb_interface_descriptor* interface = &(interface_->altsetting[j]);
+			if (interface == NULL || interface->bInterfaceNumber != 0 || interface->bAlternateSetting != 0 ||
+			    interface->endpoint == NULL || interface->bNumEndpoints <= 0)
+			{
+				continue;
+			}
+
+			TicablesUsbEndpointPair candidate = {};
+			int in_found = 0;
+			int out_found = 0;
+			for (int k = 0; k < interface->bNumEndpoints && (!in_found || !out_found); k++)
+			{
+				const struct libusb_endpoint_descriptor* endpoint = &(interface->endpoint[k]);
+				if ((endpoint->bmAttributes & LIBUSB_TRANSFER_TYPE_MASK) != LIBUSB_TRANSFER_TYPE_BULK)
+				{
+					continue;
+				}
+
+				if (endpoint->wMaxPacketSize == 0)
+				{
+					ticables_warning("ignoring bulk endpoint 0x%02X with zero packet size\n", endpoint->bEndpointAddress);
+					continue;
+				}
+
+				if (endpoint->bEndpointAddress & LIBUSB_ENDPOINT_IN)
+				{
+					if (endpoint->bEndpointAddress == 0x83) // Some Nspire OS use that seemingly bogus endpoint.
+					{
+						ticables_info("XXX: swallowing bulk in endpoint 0x83, advertised by Nspire (CAS and non-CAS) 1.x but seemingly not working\n");
+						continue;
+					}
+					if (!in_found)
+					{
+						candidate.in_endpoint = endpoint->bEndpointAddress;
+						candidate.in_packet_size = endpoint->wMaxPacketSize;
+						in_found = 1;
+					}
+				}
+				else
+				{
+					if (!out_found)
+					{
+						candidate.out_endpoint = endpoint->bEndpointAddress;
+						candidate.out_packet_size = endpoint->wMaxPacketSize;
+						out_found = 1;
+					}
+				}
+			}
+			if (in_found && out_found)
+			{
+				*pair = candidate;
+				return 1;
+			}
+		}
+	}
+
+	return 0;
+}
+
+static int finalize_bulk_packet_size(int discovered_ps, int fallback_ps, int max_ps, const char *direction)
+{
+	int packet_size = fallback_ps;
+
+	if (discovered_ps > 0)
+	{
+		packet_size = discovered_ps;
+	}
+	if (packet_size > max_ps)
+	{
+		ticables_critical("Reducing %s max packet size to maximum supported by library, expect communication issues", direction);
+		packet_size = max_ps;
+	}
+
+	if (packet_size <= 0)
+	{
+		ticables_warning("invalid %s max packet size %d, falling back to %d\n", direction, packet_size, DEFAULT_BULK_PACKET_SIZE);
+		packet_size = DEFAULT_BULK_PACKET_SIZE;
+	}
+
+	return packet_size;
+}
+
 static int slv_prepare(CableHandle *h)
 {
 	int ret;
@@ -404,11 +509,10 @@ static int slv_prepare(CableHandle *h)
 static int slv_open(CableHandle *h)
 {
 	int ret;
-	int i;
-	struct libusb_config_descriptor *config;
-	const struct libusb_interface *interface_;
-	const struct libusb_interface_descriptor *interface;
-	const struct libusb_endpoint_descriptor *endpoint;
+	struct libusb_config_descriptor *config = NULL;
+	int active_cfg_value = 0;
+	int endpoint_pair_found = 0;
+	TicablesUsbEndpointPair endpoint_pair = {};
 
 	ret = tigl_enum();
 	if (ret)
@@ -431,44 +535,66 @@ static int slv_open(CableHandle *h)
 	uDev = (libusb_device *)(tigl_devices[h->address].dev);
 	uInEnd  = 0x81;
 	uOutEnd = 0x02;
+	max_ps_in = DEFAULT_BULK_PACKET_SIZE;
+	max_ps_out = DEFAULT_BULK_PACKET_SIZE;
 
-	// get max packet size
-	libusb_get_active_config_descriptor(uDev, &config);
-	interface_ = &(config->interface[0]);
-	interface = &(interface_->altsetting[0]);
-	endpoint = &(interface->endpoint[0]);
-	max_ps = endpoint->wMaxPacketSize;
-	if (max_ps > (int)sizeof(rBuf))
+	ret = libusb_get_configuration(uHdl, &active_cfg_value);
+	if (ret)
 	{
-		ticables_critical("Reducing max packet size to maximum supported by library, expect communication issues");
-		max_ps = (int)sizeof(rBuf);
+		ticables_warning("libusb_get_configuration (%s).\n", libusb_strerror((libusb_error)ret));
 	}
-
-	// Enumerate endpoints.
-	for (i = 0; i < interface->bNumEndpoints; i++)
+	else if (active_cfg_value > 0)
 	{
-		endpoint = &(interface->endpoint[i]);
-		if ((endpoint->bmAttributes & LIBUSB_TRANSFER_TYPE_BULK) == LIBUSB_TRANSFER_TYPE_BULK)
+		ret = libusb_get_config_descriptor_by_value(uDev, (uint8_t)active_cfg_value, &config);
+		if (ret || config == NULL)
 		{
-			if (endpoint->bEndpointAddress & LIBUSB_ENDPOINT_IN)
-			{
-				if (endpoint->bEndpointAddress != 0x83) // Some Nspire OS use that seemingly bogus endpoint.
-				{
-					uInEnd = endpoint->bEndpointAddress;
-					ticables_info("found bulk in endpoint 0x%02X\n", uInEnd);
-				}
-				else
-				{
-					ticables_info("XXX: swallowing bulk in endpoint 0x83, advertised by Nspire (CAS and non-CAS) 1.x but seemingly not working\n");
-				}
-			}
-			else
-			{
-				uOutEnd = endpoint->bEndpointAddress;
-				ticables_info("found bulk out endpoint 0x%02X\n", uOutEnd);
-			}
+			ticables_warning("libusb_get_config_descriptor_by_value(%d) (%s).\n", active_cfg_value, libusb_strerror((libusb_error)ret));
+		}
+		else
+		{
+			ticables_info("using active configuration value #%d descriptor\n", active_cfg_value);
+			endpoint_pair_found = ticables_usb1_discover_bulk_endpoint_pair(config, &endpoint_pair);
+			libusb_free_config_descriptor(config);
+			config = NULL;
 		}
 	}
+
+	if (!endpoint_pair_found)
+	{
+		ret = libusb_get_active_config_descriptor(uDev, &config);
+		if (ret || config == NULL)
+		{
+			ticables_warning("libusb_get_active_config_descriptor (%s).\n", libusb_strerror((libusb_error)ret));
+		}
+		else
+		{
+			ticables_info("using active config descriptor fallback\n");
+			endpoint_pair_found = ticables_usb1_discover_bulk_endpoint_pair(config, &endpoint_pair);
+			libusb_free_config_descriptor(config);
+			config = NULL;
+		}
+	}
+
+	if (endpoint_pair_found)
+	{
+		uInEnd = endpoint_pair.in_endpoint;
+		uOutEnd = endpoint_pair.out_endpoint;
+		ticables_info("found bulk endpoint pair IN=0x%02X OUT=0x%02X on interface 0 altsetting 0\n", uInEnd, uOutEnd);
+	}
+	else
+	{
+		ticables_warning("no usable bulk endpoint pair found on interface 0 altsetting 0; falling back to IN=0x%02X OUT=0x%02X\n", uInEnd, uOutEnd);
+	}
+
+	if (config != NULL)
+	{
+		libusb_free_config_descriptor(config);
+		config = NULL;
+	}
+
+	max_ps_in = finalize_bulk_packet_size(endpoint_pair.in_packet_size, max_ps_in, (int)sizeof(rBuf), "IN");
+	max_ps_out = finalize_bulk_packet_size(endpoint_pair.out_packet_size, max_ps_out, (int)sizeof(rBuf), "OUT");
+
 	nBytesRead = 0;
 	was_max_ps = 0;
 
@@ -587,7 +713,7 @@ static int send_block(CableHandle *h, uint8_t *data, int length)
 	}
 
 	// FIXME do Nspire CX II calculators also need this ?
-	if ((tigl_devices[h->address].pid == PID_NSPIRE || tigl_devices[h->address].pid == PID_NSPIRE_CRADLE) && length % max_ps == 0)
+	if ((tigl_devices[h->address].pid == PID_NSPIRE || tigl_devices[h->address].pid == PID_NSPIRE_CRADLE) && length % max_ps_out == 0)
 	{
 		ticables_info("XXX triggering an extra bulk write");
 		ret = libusb_bulk_transfer(uHdl, uOutEnd, (unsigned char*)data, 0, &tmp, to);
@@ -710,18 +836,18 @@ static int slv_get_(CableHandle *h, uint8_t *data)
 	int len = 0;
 	tiTIME clk;
 
-	/* Read up to max_ps bytes and store them in a buffer for subsequent accesses */
+	/* Read up to max_ps_in bytes and store them in a buffer for subsequent accesses */
 	if (nBytesRead <= 0)
 	{
 		TO_START(clk);
 		do
 		{
 			// NOTE: slv_get() has already checked for uHdl != NULL .
-			ret = slv_bulk_read(uHdl, uInEnd, (unsigned char*)rBuf, max_ps, &len, to);
+			ret = slv_bulk_read(uHdl, uInEnd, (unsigned char*)rBuf, max_ps_in, &len, to);
 		}
 		while(!len && !ret);
 
-		if (len == max_ps)
+		if (len == max_ps_in)
 		{
 			was_max_ps = 1;
 		}
@@ -796,7 +922,7 @@ static int slv_get(CableHandle* h, uint8_t *data, uint32_t len)
 		   )
 		{
 			ticables_info("XXX triggering an extra bulk read");
-			ret = slv_bulk_read(uHdl, uInEnd, (unsigned char*)data, max_ps, &tmp, to);
+			ret = slv_bulk_read(uHdl, uInEnd, (unsigned char*)data, max_ps_in, &tmp, to);
 
 			if (ret == LIBUSB_ERROR_TIMEOUT)
 			{
@@ -901,7 +1027,7 @@ static int slv_check(CableHandle *h, int *status)
 		}
 
 		libusb_fill_bulk_transfer(transfer, uHdl, uInEnd, rBuf,
-					  max_ps, bulk_transfer_cb,
+					  max_ps_in, bulk_transfer_cb,
 					  &completed, to);
 		transfer->type = LIBUSB_TRANSFER_TYPE_BULK;
 
