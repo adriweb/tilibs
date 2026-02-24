@@ -48,7 +48,7 @@ int tnsp_file_read_flash(const char *filename, FlashContent *content);
 
 // writing
 int tnsp_file_write_regular(const char *filename, FileContent *content, char **filename2);
-int tnsp_file_write_flash(const char *filename, FileContent *content, char **filename2);
+int tnsp_file_write_flash(const char *filename, FlashContent *content, char **filename2);
 
 // displaying
 int tnsp_file_display(const char *filename);
