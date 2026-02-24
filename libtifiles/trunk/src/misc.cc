@@ -59,6 +59,19 @@ int TICALL tifiles_calc_is_ti9x(CalcModel model)
 }
 
 /**
+ * tifiles_calc_is_tinspire:
+ * @model: a calculator model.
+ *
+ * Check whether %model is a TI-Nspire calculator.
+ *
+ * Return value: a boolean value.
+ **/
+int TICALL tifiles_calc_is_tinspire(CalcModel model)
+{
+	return ticonv_model_is_tinspire(model);
+}
+
+/**
  * tifiles_calc_are_compat:
  * @model: a calculator model.
  * @ref: a calculator model.
