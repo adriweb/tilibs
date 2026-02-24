@@ -458,6 +458,87 @@ tfwr:  // release on exit
 	return ERR_FILE_IO;
 }
 
+int tnsp_file_write_flash(const char *filename, FlashContent *content, char **filename2)
+{
+	char *out_filename = nullptr;
+	const FlashContent *ptr = nullptr;
+
+	if (content == nullptr)
+	{
+		tifiles_critical("%s: content is NULL", __FUNCTION__);
+		return ERR_INVALID_FILE;
+	}
+
+	if (filename != nullptr)
+	{
+		out_filename = g_strdup(filename);
+		if (out_filename == nullptr)
+		{
+			return ERR_MALLOC;
+		}
+	}
+	else
+	{
+		const CalcModel model = content->model_dst != CALC_NONE ? content->model_dst : content->model;
+		const char *ext = tifiles_fext_of_flash_os(model);
+		const char *base_name = content->name[0] ? content->name : "ti-nspire_os";
+
+		if (ext != nullptr)
+		{
+			out_filename = g_strconcat(base_name, ".", ext, NULL);
+		}
+		else
+		{
+			out_filename = g_strdup(base_name);
+		}
+
+		if (out_filename == nullptr)
+		{
+			return ERR_MALLOC;
+		}
+
+		if (filename2 != nullptr)
+		{
+			*filename2 = g_strdup(out_filename);
+			if (*filename2 == nullptr)
+			{
+				g_free(out_filename);
+				return ERR_MALLOC;
+			}
+		}
+	}
+
+	FILE *f = g_fopen(out_filename, "wb");
+	if (f == nullptr)
+	{
+		tifiles_info("Unable to open this file: %s", out_filename);
+		g_free(out_filename);
+		return ERR_FILE_OPEN;
+	}
+
+	for (ptr = content; ptr != nullptr; ptr = ptr->next)
+	{
+		if (ptr->data_length != 0 && ptr->data_part == nullptr)
+		{
+			goto tfwf;
+		}
+		if (ptr->data_length != 0 && fwrite(ptr->data_part, 1, ptr->data_length, f) < ptr->data_length)
+		{
+			goto tfwf;
+		}
+	}
+
+	g_free(out_filename);
+	fclose(f);
+	return 0;
+
+tfwf:
+	tifiles_critical("%s: error writing file %s", __FUNCTION__, out_filename);
+	g_free(out_filename);
+	fclose(f);
+	return ERR_FILE_IO;
+}
+
 /**************/
 /* Displaying */
 /**************/
