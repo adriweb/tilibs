@@ -413,6 +413,7 @@ typedef struct
 	// misc.c
 	TIEXPORT2 int TICALL tifiles_calc_is_ti8x(CalcModel model);
 	TIEXPORT2 int TICALL tifiles_calc_is_ti9x(CalcModel model);
+	TIEXPORT2 int TICALL tifiles_calc_is_tinspire(CalcModel model);
 
 	TIEXPORT2 int TICALL tifiles_calc_are_compat(CalcModel model1, CalcModel model2);
 
