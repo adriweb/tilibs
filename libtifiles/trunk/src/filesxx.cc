@@ -756,6 +756,13 @@ int tifiles_file_write_flash2(const char *filename, FlashContent *content, char 
 	}
 	else
 #endif
+#if !defined(DISABLE_NSPIRE)
+	if (tifiles_calc_is_tinspire(content->model))
+	{
+		return tnsp_file_write_flash(filename, content, real_fname);
+	}
+	else
+#endif
 	return ERR_BAD_CALC;
 }
 
