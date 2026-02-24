@@ -2200,7 +2200,6 @@ int TICALL ticalcs_calc_recv_cert2(CalcHandle* handle, const char* filename)
 int TICALL ticalcs_calc_recv_os2(CalcHandle* handle, const char* filename)
 {
 	FlashContent *content = NULL;
-	char *ext;
 	int ret;
 
 	VALIDATE_HANDLE(handle);
@@ -2211,7 +2210,7 @@ int TICALL ticalcs_calc_recv_os2(CalcHandle* handle, const char* filename)
 	RETURN_IF_HANDLE_BUSY(handle);
 
 	content = tifiles_content_create_flash(handle->model);
-	ret = ticalcs_calc_recv_cert(handle, content);
+	ret = ticalcs_calc_recv_os(handle, content);
 	if (!ret)
 	{
 		ret = tifiles_file_write_flash(filename, content);
