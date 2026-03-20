@@ -577,24 +577,28 @@ int TICALL tifiles_content_delete_flash(FlashContent *content)
 	{
 #if !defined(DISABLE_TI8X) && !defined(DISABLE_TI9X)
 
-		g_free(content->data_part);
-
-		FlashContent* ptr = content->next;
-		while (ptr != nullptr)
+		/* Walk the linked list starting at the head.  For each node free its
+		 * own pages array and data_part, then free the node struct itself
+		 * (except for the head, which the caller owns and is freed last). */
+		FlashContent *node = content;
+		while (node != nullptr)
 		{
-			FlashContent *next = ptr->next;
+			FlashContent *next = node->next;
 
-			g_free(ptr->data_part);
-			g_free(ptr);
-
-			for (unsigned int i = 0; i < content->num_pages; i++)
+			for (unsigned int i = 0; i < node->num_pages; i++)
 			{
-				g_free(content->pages[i]->data);
-				g_free(content->pages[i]);
+				g_free(node->pages[i]->data);
+				g_free(node->pages[i]);
 			}
-			g_free(content->pages);
+			g_free(node->pages);
+			g_free(node->data_part);
 
-			ptr = next;
+			if (node != content)
+			{
+				g_free(node);
+			}
+
+			node = next;
 		}
 
 		g_free(content);
