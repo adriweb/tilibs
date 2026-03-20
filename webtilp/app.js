@@ -346,20 +346,19 @@ async function loadLocaleDictionary(language) {
 }
 
 
-const STATUS_TRANSLATION_KEYS = {
-    'Loading module...': 'status_loading_module',
-    'WebTILP ready': 'status_module_ready',
-    'Module ready': 'status_module_ready',
-    Connected: 'status_connected',
-    'Connection failed': 'status_connection_failed',
-    Disconnected: 'status_disconnected',
-    'Device connected': 'status_device_connected',
-    'WebUSB unsupported': 'status_webusb_unsupported',
-    'Insecure context': 'status_insecure_context',
-    'Connection lost': 'status_connection_lost',
-    'Select device to continue': 'status_select_device',
-    Idle: 'idle'
-};
+const STATUS_I18N_KEYS = new Set([
+    'status_loading_module',
+    'status_module_ready',
+    'status_connected',
+    'status_connection_failed',
+    'status_disconnected',
+    'status_device_connected',
+    'status_webusb_unsupported',
+    'status_insecure_context',
+    'status_connection_lost',
+    'status_select_device',
+    'idle'
+]);
 
 function normalizeLanguageCode(code) {
     const raw = String(code || '').trim().toLowerCase();
@@ -463,12 +462,34 @@ function setButtonText(element, text) {
     }
 }
 
-function applyStatusTranslation(text) {
-    const key = STATUS_TRANSLATION_KEYS[text];
-    if (!key) {
+function getStatusTranslationKey(text) {
+    const raw = String(text || '').trim();
+    if (!raw) {
+        return null;
+    }
+    return STATUS_I18N_KEYS.has(raw) ? raw : null;
+}
+
+function applyStatusTranslation(text, key = null) {
+    const resolvedKey = key || getStatusTranslationKey(text);
+    if (!resolvedKey) {
         return text;
     }
-    return t(key);
+    return t(resolvedKey);
+}
+
+function syncStatusTranslation(text) {
+    if (!els.statusText) {
+        return;
+    }
+    const key = getStatusTranslationKey(text) || getStatusTranslationKey(els.statusText.dataset.i18nKey);
+    if (key) {
+        els.statusText.dataset.i18nKey = key;
+        els.statusText.textContent = applyStatusTranslation(key, key);
+        return;
+    }
+    delete els.statusText.dataset.i18nKey;
+    els.statusText.textContent = text;
 }
 
 const CCALL_TIMEOUT_MS = 12000;
@@ -594,7 +615,7 @@ function handleFatalWasmRuntimeError(err) {
     state.connectInProgress = false;
     state.silentReconnectInProgress = false;
     setConnected(false);
-    setStatus('Connection lost', false);
+    setStatus('status_connection_lost', false);
     log('Connection lost due to calculator reset/disconnect. Please reconnect.');
 }
 
@@ -3021,7 +3042,7 @@ async function applyTranslations() {
         els.btnSettings.title = t('update_available');
     }
     if (els.statusText) {
-        els.statusText.textContent = applyStatusTranslation(els.statusText.textContent.trim());
+        syncStatusTranslation(els.statusText.dataset.i18nKey);
     }
     updateThemeButton();
     updateCalcHint(els.settingCableModel?.value || state.settings?.cableModel || 'auto');
@@ -3382,7 +3403,7 @@ function formatMemoryValue(value) {
 }
 
 function setStatus(text, active) {
-    els.statusText.textContent = applyStatusTranslation(text);
+    syncStatusTranslation(text);
     els.statusDot.style.background = active ? '#4fd3b4' : '#586178';
     els.statusDot.style.boxShadow = active ? '0 0 0 4px rgba(79, 211, 180, 0.2)' : '0 0 0 4px rgba(88, 97, 120, 0.2)';
 }
@@ -3427,11 +3448,11 @@ function resetToSplashState() {
     clearDeviceData();
     setConnected(false);
     if (!navigator.usb) {
-        setStatus('WebUSB unsupported', false);
+        setStatus('status_webusb_unsupported', false);
     } else if (!self.isSecureContext) {
-        setStatus('Insecure context', false);
+        setStatus('status_insecure_context', false);
     } else {
-        setStatus('Idle', false);
+        setStatus('idle', false);
     }
 }
 
@@ -3514,7 +3535,7 @@ async function initModule() {
     if (state.module) {
         return state.module;
     }
-    setStatus('Loading module...', false);
+    setStatus('status_loading_module', false);
     state.module = await TILibsModule();
     if (!state.progressHooked) {
         const touchProgress = () => {
@@ -3547,7 +3568,7 @@ async function initModule() {
     await state.module.ccall('init', 'number', [], [], { async: true });
     applySettingsToModule();
     log('WASM module initialized.');
-    setStatus('WebTILP ready', true);
+    setStatus('status_module_ready', true);
     return state.module;
 }
 
@@ -3582,7 +3603,7 @@ async function authorizeDevice(forcePrompt = false) {
     if (state.needsReauthorize) {
         state.needsReauthorize = false;
         state.silentReconnectInProgress = false;
-        setStatus('Connected', true);
+        setStatus('status_connected', true);
     }
     return device;
 }
@@ -3643,7 +3664,7 @@ async function autoConnectIfAuthorized() {
             log('Skipping automatic device info query for TI-92.');
         }
         setConnected(true);
-        setStatus('Connected', true);
+        setStatus('status_connected', true);
         log('Auto-connected to authorized device.');
     } catch (err) {
         logError(err, 'Auto-connect failed');
@@ -3857,13 +3878,13 @@ async function connect() {
             log('Skipping automatic device info query for TI-92.');
         }
         setConnected(true);
-        setStatus('Connected', true);
+        setStatus('status_connected', true);
         log('Device connected.');
     } catch (err) {
         if (hadWorkingConnection) {
-            setStatus('Connected', true);
+            setStatus('status_connected', true);
         } else {
-            setStatus('Connection failed', false);
+            setStatus('status_connection_failed', false);
         }
         logError(err, 'Connect failed');
     } finally {
@@ -6784,7 +6805,7 @@ async function nukeConnection(tryReconnect = true) {
         state.silentReconnectInProgress = false;
         clearDeviceData();
         setConnected(false);
-        setStatus('Disconnected', false);
+        setStatus('status_disconnected', false);
         log('Device disconnected.');
     }
     if (els.btnNuke) {
@@ -6805,7 +6826,7 @@ async function silentReconnectAfterNspireTransfer() {
     state.silentReconnectInProgress = true;
     try {
         clearActiveOperations();
-        setStatus('Select device to continue', false);
+        setStatus('status_select_device', false);
         await state.authorizedDevice?.reset();
     } catch (err) {
         console.warn('[WebTILP] Silent reconnect reset failed', err);
@@ -7263,7 +7284,7 @@ if (navigator.usb) {
             state.needsReauthorize = false;
             clearDeviceData();
             setConnected(false);
-            setStatus('Disconnected', false);
+            setStatus('status_disconnected', false);
             log('Device disconnected.');
         }
     });
@@ -7277,17 +7298,17 @@ if (navigator.usb) {
         state.authorizedDevice = null;
         state.connectInProgress = false;
         setConnected(false);
-        setStatus('Device connected', false);
+        setStatus('status_device_connected', false);
         log('Device connected. Reinitialize to use it.');
         clearDeviceData();
     });
 }
 if (!navigator.usb) {
-    setStatus('WebUSB unsupported', false);
+    setStatus('status_webusb_unsupported', false);
     log('WebUSB is not available in this browser. Only Chrome and derivatives are supported.');
 } else if (!self.isSecureContext) {
-    setStatus('Insecure context', false);
+    setStatus('status_insecure_context', false);
     log('WebUSB requires HTTPS or localhost.');
 } else {
-    setStatus('Idle', false);
+    setStatus('idle', false);
 }
