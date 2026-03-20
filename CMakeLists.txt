@@ -64,6 +64,7 @@ project(tilibs C CXX)
 option(BUILD_TESTS "Whether to build tests" ON)
 option(BUILD_TIFILEUTIL "Whether to build the tifileutil tool" ON)
 option(BUILD_SHARED_LIBS "Whether to build shared libs instead of static ones" ON)
+option(BUILD_FUZZING "Whether to build libFuzzer fuzz targets (requires Clang)" OFF)
 
 # Our modules
 list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/.cmake)

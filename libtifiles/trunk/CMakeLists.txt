@@ -100,6 +100,6 @@ endif()
 target_compile_definitions(tifiles2 PUBLIC TIFILES_EXPORTS)
 
 # tests
-if (BUILD_TESTS)
+if (BUILD_TESTS OR BUILD_FUZZING)
     add_subdirectory(tests)
 endif()
