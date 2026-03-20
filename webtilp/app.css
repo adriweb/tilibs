@@ -11,6 +11,12 @@
     --shadow: rgba(7, 10, 16, 0.45);
     --shadow-soft: rgba(7, 10, 16, 0.25);
     --glow: rgba(91, 210, 195, 0.22);
+    --toast-bg: rgba(20, 24, 34, 0.95);
+    --toast-text: #f3f6fc;
+    --toast-border: rgba(255, 255, 255, 0.08);
+    --toast-error-bg: rgba(56, 20, 20, 0.95);
+    --toast-error-text: #fff1f1;
+    --toast-error-border: rgba(255, 84, 84, 0.5);
 }
 
 body[data-theme="dark-modern"] {
@@ -35,6 +41,12 @@ body[data-theme="light-modern"] {
     --shadow: rgba(16, 24, 40, 0.12);
     --shadow-soft: rgba(16, 24, 40, 0.08);
     --glow: rgba(45, 156, 219, 0.2);
+    --toast-bg: rgba(36, 42, 54, 0.96);
+    --toast-text: #f7f9fd;
+    --toast-border: rgba(28, 37, 51, 0.12);
+    --toast-error-bg: rgba(92, 30, 36, 0.96);
+    --toast-error-text: #fff4f4;
+    --toast-error-border: rgba(217, 72, 95, 0.4);
     font-family: "Avenir Next", "Futura", "Trebuchet MS", sans-serif;
     background:
         radial-gradient(circle at 15% 10%, rgba(45, 156, 219, 0.2), transparent 40%),
@@ -62,6 +74,12 @@ body[data-theme="retro"] {
     --shadow: rgba(0, 0, 0, 0.6);
     --shadow-soft: rgba(0, 0, 0, 0.35);
     --glow: rgba(47, 255, 143, 0.18);
+    --toast-bg: rgba(7, 18, 10, 0.96);
+    --toast-text: #9cffc5;
+    --toast-border: rgba(47, 255, 143, 0.2);
+    --toast-error-bg: rgba(58, 10, 20, 0.96);
+    --toast-error-text: #ffd3dc;
+    --toast-error-border: rgba(255, 77, 109, 0.45);
     font-family: "Courier New", "Lucida Console", monospace;
     background:
         repeating-linear-gradient(0deg, rgba(0, 0, 0, 0.3), rgba(0, 0, 0, 0.3) 1px, transparent 1px, transparent 3px),
@@ -247,8 +265,8 @@ body {
     margin-top: 16px;
     padding: 12px;
     border-radius: 12px;
-    border: 1px solid rgba(120, 150, 190, 0.2);
-    background: rgba(18, 24, 32, 0.6);
+    border: 1px solid var(--border);
+    background: var(--surface-alt);
     color: var(--muted);
     font-size: 12px;
 }
@@ -1116,9 +1134,9 @@ a {
     max-width: 420px;
     padding: 12px 14px;
     border-radius: 10px;
-    background: rgba(20, 24, 34, 0.95);
-    color: var(--text);
-    border: 1px solid rgba(255, 255, 255, 0.08);
+    background: var(--toast-bg);
+    color: var(--toast-text);
+    border: 1px solid var(--toast-border);
     box-shadow: 0 10px 24px rgba(0, 0, 0, 0.35);
     font-size: 13px;
     line-height: 1.4;
@@ -1133,8 +1151,9 @@ a {
 }
 
 .toast.error {
-    border-color: rgba(255, 84, 84, 0.5);
-    background: rgba(56, 20, 20, 0.95);
+    border-color: var(--toast-error-border);
+    background: var(--toast-error-bg);
+    color: var(--toast-error-text);
 }
 
 .toast-title {
