@@ -204,6 +204,7 @@ int tifiles_file_read_regular(const char *filename, FileContent *content)
 	}
 	else
 	{
+		tifiles_content_delete_regular(content);
 		return ERR_BAD_CALC;
 	}
 }
@@ -433,7 +434,7 @@ int tifiles_file_read_backup(const char *filename, BackupContent *content)
 		return ti8x_file_read_backup(filename, content);
 	}
 	else
-#endif 
+#endif
 #if !defined(DISABLE_TI9X)
 	if (tifiles_calc_is_ti9x(tifiles_file_get_model(filename)))
 	{
@@ -441,7 +442,10 @@ int tifiles_file_read_backup(const char *filename, BackupContent *content)
 	}
 	else
 #endif
-	return ERR_BAD_CALC;
+	{
+		tifiles_content_delete_backup(content);
+		return ERR_BAD_CALC;
+	}
 }
 
 /**
@@ -720,6 +724,7 @@ int tifiles_file_read_flash(const char *filename, FlashContent *content)
 	}
 	else
 	{
+		tifiles_content_delete_flash(content);
 		return ERR_BAD_CALC;
 	}
 }
