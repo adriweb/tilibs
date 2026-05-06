@@ -223,6 +223,7 @@ static struct usb_urb urb;
 #endif
 #include "../timeout.h"
 #include "../internal.h"
+#include "../evo_serial.h"
 
 /* Constants */
 
@@ -252,6 +253,7 @@ static const usb_infos tigl_infos[] =
 	{VID_TI, PID_TI89TM,        "TI-89 Titanium Hand-Held",    NULL},
 	{VID_TI, PID_TI84P_SE,      "TI-84 Plus Silver Hand-Held", NULL},
 	{VID_TI, PID_NSPIRE,        "TI-Nspire Hand-Held",         NULL},
+	{VID_TI, PID_TI84EVO,       "TI-84 Evo Hand-Held",         NULL},
 	{VID_TI, PID_NSPIRE_CRADLE, "TI-Nspire Cradle",            NULL},
 	{VID_TI, PID_NSPIRE_CXII,   "TI-Nspire CX II Hand-Held",   NULL},
 	{0,      0,                 NULL,                          NULL}
@@ -275,6 +277,7 @@ typedef struct
 	int               out_endpoint;
 	int               max_ps;
 	int               was_max_size_packet;
+	EvoSerial         serial;
 } usb_struct;
 
 // convenient macros
@@ -288,6 +291,8 @@ typedef struct
 #define rBufPtr             (((usb_struct *)(h->priv2))->rBufPtr)
 #define uInEnd              (((usb_struct *)(h->priv2))->in_endpoint)
 #define uOutEnd             (((usb_struct *)(h->priv2))->out_endpoint)
+#define serial_obj          (((usb_struct *)(h->priv2))->serial)
+#define serial_mode         evo_serial_is_open(&serial_obj)
 
 /* Helpers (=driver API) */
 
@@ -334,6 +339,10 @@ static int tigl_find(void)
 						tigl_devices[j].version = dev->descriptor.bcdDevice;
 
 						tigl_get_product(tigl_devices[j].product_str, sizeof(tigl_devices[j].product_str), dev);
+						if (dev->descriptor.idProduct == PID_TI84EVO)
+						{
+							evo_serial_find_path(tigl_devices[j].device_path, sizeof(tigl_devices[j].device_path), &tigl_devices[j]);
+						}
 						ticables_info(" found %s on #%i, version <%x.%02x>",
 						tigl_devices[j].product_str, j+1,
 						dev->descriptor.bcdDevice >> 8,
@@ -351,6 +360,14 @@ static int tigl_find(void)
 			}
 		}
 	}
+
+#if defined(__WIN32__)
+	if (j < MAX_CABLES)
+	{
+		j = evo_serial_add_devices(tigl_devices, j, MAX_CABLES, VID_TI, PID_TI84EVO);
+		tigl_n_devices = j;
+	}
+#endif
 
 	return j;
 }
@@ -389,12 +406,6 @@ static int tigl_enum(void)
 static int tigl_open(int id, usb_dev_handle **udh)
 {
 	int ret;
-
-	ret = tigl_enum();
-	if (ret)
-	{
-		return ret;
-	}
 
 	if (tigl_devices[id].dev == NULL)
 	{
@@ -495,6 +506,10 @@ static int slv_prepare(CableHandle *h)
 		sprintf(str, "TiglUsb #%i", h->port);
 		h->device = strdup(str);
 		h->priv2 = (usb_struct *)calloc(1, sizeof(usb_struct));
+		if (h->priv2 != NULL)
+		{
+			evo_serial_init(&serial_obj);
+		}
 	}
 
 	return ret;
@@ -508,6 +523,17 @@ static int slv_open(CableHandle *h)
 	struct usb_interface *interface_;
 	struct usb_interface_descriptor *interface;
 	struct usb_endpoint_descriptor *endpoint;    
+
+	ret = tigl_enum();
+	if (ret)
+	{
+		return ret;
+	}
+	cable_info = tigl_devices[h->address];
+	if (tigl_devices[h->address].pid == PID_TI84EVO)
+	{
+		return evo_serial_open(h, &serial_obj, &cable_info);
+	}
 
 	// open device
 	ret = tigl_open(h->address, &uHdl);
@@ -564,6 +590,11 @@ static int slv_open(CableHandle *h)
 
 static int slv_close(CableHandle *h)
 {
+	if (serial_mode)
+	{
+		evo_serial_close(&serial_obj);
+	}
+
 	if (uHdl != NULL) 
 	{
 		tigl_close(&uHdl);
@@ -585,6 +616,11 @@ static int slv_get_device_info(CableHandle *h, CableDeviceInfo *info)
 static int slv_reset(CableHandle *h)
 {
 	int ret = 0;
+
+	if (serial_mode)
+	{
+		return evo_serial_reset(&serial_obj);
+	}
 
 #if !defined(__BSD__)
 	/* Reset both endpoints (send an URB_FUNCTION_RESET_PIPE) */
@@ -624,6 +660,10 @@ static int slv_reset(CableHandle *h)
 			if (!ret)
 			{
 				h->priv2 = (usb_struct *)calloc(1, sizeof(usb_struct));
+				if (h->priv2 != nullptr)
+				{
+					evo_serial_init(&serial_obj);
+				}
 				ret = slv_open(h);
 			}
 		}
@@ -637,6 +677,11 @@ static int slv_reset(CableHandle *h)
 static int send_block(CableHandle *h, uint8_t *data, int length)
 {
 	int ret;
+
+	if (serial_mode)
+	{
+		return evo_serial_send(h, &serial_obj, data, (uint32_t)length);
+	}
 
 	if (NULL == uHdl)
 	{
@@ -945,6 +990,11 @@ static int slv_get(CableHandle* h, uint8_t *data, uint32_t len)
 {
 	int i, ret;
 
+	if (serial_mode)
+	{
+		return evo_serial_recv(h, &serial_obj, data, len);
+	}
+
 	if (NULL == uHdl)
 	{
 		return ERR_READ_ERROR;
@@ -1023,6 +1073,7 @@ static int raw_probe(CableHandle *h)
 		if (tigl_devices[h->address].pid == PID_TI89TM ||
 		    tigl_devices[h->address].pid == PID_TI84P ||
 		    tigl_devices[h->address].pid == PID_TI84P_SE ||
+		    tigl_devices[h->address].pid == PID_TI84EVO ||
 		    tigl_devices[h->address].pid == PID_NSPIRE ||
 		    tigl_devices[h->address].pid == PID_NSPIRE_CRADLE ||
 		    tigl_devices[h->address].pid == PID_NSPIRE_CXII)
@@ -1036,6 +1087,11 @@ static int raw_probe(CableHandle *h)
 
 static int slv_check(CableHandle *h, int *status)
 {
+	if (serial_mode)
+	{
+		return evo_serial_check(h, &serial_obj, status);
+	}
+
 #if defined(__LINUX__)
 	// This really should be in libusb, but alas it isn't, so their code was
 	// adapted by Kevin Kofler for use here. It's required to get TiEmu 3 to

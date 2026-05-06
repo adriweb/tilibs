@@ -167,6 +167,7 @@ const char *TICALL ticables_usbpid_to_string(UsbPid pid)
 	case PID_TI89TM: return "TI89t";		// must match tifiles name
 	case PID_TI84P: return "TI84+";			// must match tifiles name
 	case PID_TI84P_SE: return "TI84+";		// remap
+	case PID_TI84EVO: return "TI84Evo";		// must match tifiles name
 	case PID_NSPIRE: return "Nspire";		// must match tifiles name
 	case PID_NSPIRE_CRADLE: return "Nspire Cradle";		// must match tifiles name
 	case PID_NSPIRE_CXII: return "Nspire CX II";		// must match tifiles name
@@ -199,6 +200,8 @@ UsbPid TICALL ticables_string_to_usbpid(const char *str)
 		return PID_TI84P;
 	else if(!strcmp(str, "TI84+SE"))
 		return PID_TI84P_SE;
+	else if(!strcmp(str, "TI84Evo"))
+		return PID_TI84EVO;
 	else if(!strcmp(str, "Nspire Cradle"))
 		return PID_NSPIRE_CRADLE;
 	else if(!strcmp(str, "Nspire CX II"))

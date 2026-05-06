@@ -176,6 +176,15 @@ static CalcFncts const *const calcs[] =
 #ifndef NO_TIPRESENTER
 	&calc_tipresenter,
 #endif
+#ifndef NO_TI84EVO_USB
+	&calc_84evo_usb,
+#endif
+#ifndef NO_TI84EVOT_USB
+	&calc_84evot_usb,
+#endif
+#ifndef NO_TI83EVO_USB
+	&calc_83evo_usb,
+#endif
 	nullptr
 };
 
@@ -306,6 +315,15 @@ static const uint64_t supported_calcs =
 #endif
 #ifndef NO_TIPRESENTER
 	| (UINT64_C(1) << CALC_TIPRESENTER)
+#endif
+#ifndef NO_TI84EVO_USB
+	| (UINT64_C(1) << CALC_TI84EVO_USB)
+#endif
+#ifndef NO_TI84EVOT_USB
+	| (UINT64_C(1) << CALC_TI84EVOT_USB)
+#endif
+#ifndef NO_TI83EVO_USB
+	| (UINT64_C(1) << CALC_TI83EVO_USB)
 #endif
 ;
 
@@ -449,8 +467,8 @@ int ticalcs_default_event_hook(CalcHandle * handle, uint32_t event_count, const 
 	(void)user_pointer;
 	const char * calcstr = ticalcs_model_to_string(ticalcs_get_model(handle));
 	CableHandle * cable = ticalcs_cable_get(handle);
-	const char * cablestr = ticables_model_to_string(ticables_get_model(cable));
-	const char * portstr = ticables_port_to_string(ticables_get_port(cable));
+	const char * cablestr = cable != nullptr ? ticables_model_to_string(ticables_get_model(cable)) : "none";
+	const char * portstr = cable != nullptr ? ticables_port_to_string(ticables_get_port(cable)) : "none";
 	const int pkt_debug = (getenv("TICALCS_PKT_DEBUG") != nullptr);
 	if (getenv("TICALCS_EVENT_DEBUG") != nullptr)
 	{
@@ -922,6 +940,9 @@ int TICALL ticalcs_model_supports_installing_flashapps(CalcModel model)
 	return ticonv_model_has_flash_memory(model) && !(   model == CALC_TI82A_USB
 	                                                 || model == CALC_TI84PT_USB
 	                                                 || model == CALC_TI82AEP_USB
+	                                                 || model == CALC_TI84EVO_USB
+	                                                 || model == CALC_TI83EVO_USB
+	                                                 || model == CALC_TI84EVOT_USB
 	                                                 || ticonv_model_is_tinspire(model)
 	                                                 || model == CALC_CBL2
 	                                                 || model == CALC_CBR2

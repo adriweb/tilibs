@@ -52,7 +52,7 @@ static const char GROUP_FILE_EXT[CALC_MAX + 1][4] =
 	"",    "",    "",    "", // 35
 	"8xg", // 36
 	"",    "",    "",    "",    "",    "", // 42
-	""
+	"",    "",    ""
 };
 
 static const char BACKUP_FILE_EXT[CALC_MAX + 1][4] =
@@ -68,8 +68,53 @@ static const char BACKUP_FILE_EXT[CALC_MAX + 1][4] =
 	"",    "",    "",    "", // 35
 	"8Xb", // 36
 	"",    "",    "",    "",    "",    "", // 42
-	""
+	"",    "",    ""
 };
+
+static int tifiles_fext_is_evo(const char *ext)
+{
+	static const char *const evo_exts[] = {
+		"8xn2", "8xl2", "8xm2", "8xy2", "8xs2", "8xp2",
+		"8ci2", "8xd2", "8xw2", "8xz2", "8xt2", "8xv2",
+		"8xpy2",
+		"8xg2", "8ca2", "8ek2", nullptr
+	};
+
+	if (ext == nullptr)
+	{
+		return 0;
+	}
+	for (unsigned int i = 0; evo_exts[i] != nullptr; i++)
+	{
+		if (!g_ascii_strcasecmp(ext, evo_exts[i]))
+		{
+			return !0;
+		}
+	}
+	return 0;
+}
+
+static int tifiles_fext_is_evo_os(const char *ext)
+{
+	static const char *const evo_os_exts[] = {
+		"84b2", "83b2", "84tb2",
+		"84pk2", "83pk2", "84tpk2",
+		nullptr
+	};
+
+	if (ext == nullptr)
+	{
+		return 0;
+	}
+	for (unsigned int i = 0; evo_os_exts[i] != nullptr; i++)
+	{
+		if (!g_ascii_strcasecmp(ext, evo_os_exts[i]))
+		{
+			return !0;
+		}
+	}
+	return 0;
+}
 
 /*******************/
 /* File extensions */
@@ -109,6 +154,10 @@ const char * TICALL tifiles_fext_of_group (CalcModel model)
 		case CALC_TI84PT_USB:
 		case CALC_TI82AEP_USB:
 			return "8Xg"; // There's also 8Cg.
+		case CALC_TI84EVO_USB:
+		case CALC_TI83EVO_USB:
+		case CALC_TI84EVOT_USB:
+			return nullptr;
 		case CALC_TI85:
 			return "85g";
 		case CALC_TI86:
@@ -191,6 +240,9 @@ const char * TICALL tifiles_fext_of_backup (CalcModel model)
 			return "8Cb";
 		case CALC_TI83PCE_USB:
 		case CALC_TI84PCE_USB:
+		case CALC_TI84EVO_USB:
+		case CALC_TI83EVO_USB:
+		case CALC_TI84EVOT_USB:
 			return nullptr;
 		case CALC_TI85:
 			return "85b";
@@ -276,6 +328,9 @@ const char * TICALL tifiles_fext_of_flash_app (CalcModel model)
 		case CALC_TI82A_USB:
 		case CALC_TI84PT_USB:
 		case CALC_TI82AEP_USB:
+		case CALC_TI84EVO_USB:
+		case CALC_TI83EVO_USB:
+		case CALC_TI84EVOT_USB:
 			return nullptr;
 		case CALC_TI85:
 			return nullptr;
@@ -363,6 +418,12 @@ const char * TICALL tifiles_fext_of_flash_os(CalcModel model)
 			return "82u";
 		case CALC_TI82AEP_USB:
 			return "8Yu";
+		case CALC_TI84EVO_USB:
+			return "84b2";
+		case CALC_TI83EVO_USB:
+			return "83b2";
+		case CALC_TI84EVOT_USB:
+			return "84tb2";
 		case CALC_TI85:
 			return nullptr;
 		case CALC_TI86:
@@ -463,6 +524,9 @@ const char * TICALL tifiles_fext_of_certif(CalcModel model)
 		case CALC_TI82A_USB:
 		case CALC_TI84PT_USB:
 		case CALC_TI82AEP_USB:
+		case CALC_TI84EVO_USB:
+		case CALC_TI83EVO_USB:
+		case CALC_TI84EVOT_USB:
 			return nullptr;
 		case CALC_TI85:
 			return nullptr;
@@ -925,6 +989,9 @@ int TICALL tifiles_model_to_dev_type(CalcModel model)
 	case CALC_TI82A_USB:
 	case CALC_TI84PT_USB:
 	case CALC_TI82AEP_USB:
+	case CALC_TI84EVO_USB:
+	case CALC_TI83EVO_USB:
+	case CALC_TI84EVOT_USB:
 		return DEVICE_TYPE_83P;
 #endif
 #ifndef DISABLE_TI9X
@@ -1043,6 +1110,10 @@ int TICALL tifiles_file_is_ti(const char *filename)
 #endif
 
 		if (!g_ascii_strcasecmp(e, "tns"))
+		{
+			return !0;
+		}
+		if (tifiles_fext_is_evo(e) || tifiles_fext_is_evo_os(e))
 		{
 			return !0;
 		}
@@ -1186,6 +1257,7 @@ int TICALL tifiles_file_is_os(const char *filename)
 
 	if (   tifiles_file_is_tib(filename)
 	    || tifiles_file_is_tno(filename)
+	    || tifiles_fext_is_evo_os(tifiles_fext_get(filename))
 	    || (tifiles_file_has_tifl_header(filename, nullptr, &type) && type == TI83p_AMS))
 	{
 		return !0;
@@ -1231,6 +1303,7 @@ int TICALL tifiles_file_is_flash(const char *filename)
 {
 	return (tifiles_file_is_tib(filename) ||
 	        tifiles_file_is_tno(filename) ||
+	        tifiles_fext_is_evo_os(tifiles_fext_get(filename)) ||
 	        tifiles_file_has_tifl_header(filename, nullptr, nullptr));
 }
 
@@ -1413,6 +1486,10 @@ int TICALL tifiles_file_test(const char *filename, FileClass type, CalcModel tar
 		}
 		else
 		{
+			if (tifiles_fext_is_evo_os(e))
+			{
+				return ticonv_model_is_tievo(target);
+			}
 			return tifiles_file_is_os(filename);
 		}
 	}
@@ -1517,7 +1594,19 @@ CalcModel TICALL tifiles_fext_to_model(const char *ext)
 		const char c3 = g_ascii_tolower(ext[2]);
 
 #ifndef DISABLE_TI8X
-		if (c1 == '7' && c2 == '3')
+		if (!g_ascii_strcasecmp(ext, "84tb2") || !g_ascii_strcasecmp(ext, "84tpk2"))
+		{
+			type = CALC_TI84EVOT_USB;
+		}
+		else if (!g_ascii_strcasecmp(ext, "83b2") || !g_ascii_strcasecmp(ext, "83pk2"))
+		{
+			type = CALC_TI83EVO_USB;
+		}
+		else if (tifiles_fext_is_evo(ext) || tifiles_fext_is_evo_os(ext))
+		{
+			type = CALC_TI84EVO_USB;
+		}
+		else if (c1 == '7' && c2 == '3')
 		{
 			type = CALC_TI73;
 		}

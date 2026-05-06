@@ -96,6 +96,10 @@ int TICALL tifiles_calc_are_compat(CalcModel model, CalcModel ref)
 	{
 		return !0;
 	}
+	else if (ticonv_model_is_tievo(model) && ticonv_model_is_tievo(ref))
+	{
+		return !0;
+	}
 
 	return 0;
 }

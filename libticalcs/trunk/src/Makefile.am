@@ -25,12 +25,14 @@ libticalcs2_la_SOURCES = *.h \
 	calc_00.cc calc_xx.cc \
 	calc_73.cc calc_8x.cc calc_9x.cc \
 	calc_84p.cc calc_89t.cc \
+	calc_evo.cc \
 	calc_nsp.cc \
 	calclabequipmentdata.cc \
 	clock.cc \
 	cmdz80.cc cmd68k.cc dusb_cmd.cc nsp_cmd.cc \
 	dirlist.cc \
 	error.cc \
+	evo_cbor.cc evo_cmd.cc \
 	keys73.cc keys83.cc keys83p.cc keys86.cc keys89.cc keys92p.cc \
 	dbus_pkt.cc \
 	dusb_rpkt.cc dusb_vpkt.cc \

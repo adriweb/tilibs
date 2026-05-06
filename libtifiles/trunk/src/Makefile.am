@@ -23,7 +23,7 @@ libtifiles2_la_SOURCES = *.h \
 	cert.cc \
 	comments.cc \
 	error.cc \
-	files8x.cc files9x.cc filesnsp.cc filesxx.cc \
+	files8x.cc files_evo.cc files9x.cc filesnsp.cc filesxx.cc \
 	filetypes.cc \
 	grouped.cc \
 	intelhex.cc \

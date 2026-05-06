@@ -11,6 +11,7 @@ set(SRC_FILES
         src/calc_00.cc
         src/calc_73.cc
         src/calc_84p.cc
+        src/calc_evo.cc
         src/calc_89t.cc
         src/calc_8x.cc
         src/calc_9x.cc
@@ -26,6 +27,8 @@ set(SRC_FILES
         src/dusb_rpkt.cc
         src/dusb_vpkt.cc
         src/error.cc
+        src/evo_cbor.cc
+        src/evo_cmd.cc
         src/keys73.cc
         src/keys83.cc
         src/keys83p.cc

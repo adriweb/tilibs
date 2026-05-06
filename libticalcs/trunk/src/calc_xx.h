@@ -77,5 +77,8 @@ extern const CalcFncts calc_cbl2;
 extern const CalcFncts calc_cbr2;
 extern const CalcFncts calc_labpro;
 extern const CalcFncts calc_tipresenter;
+extern const CalcFncts calc_84evo_usb;
+extern const CalcFncts calc_84evot_usb;
+extern const CalcFncts calc_83evo_usb;
 
 #endif

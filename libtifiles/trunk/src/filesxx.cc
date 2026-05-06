@@ -32,6 +32,7 @@
 #include "tifiles.h"
 #include "error.h"
 #include "files8x.h"
+#include "files_evo.h"
 #include "files9x.h"
 #include "filesnsp.h"
 #include "logging.h"
@@ -185,6 +186,11 @@ int tifiles_file_read_regular(const char *filename, FileContent *content)
 	}
 
 #if !defined(DISABLE_TI8X)
+	if (ticonv_model_is_tievo(tifiles_file_get_model(filename)))
+	{
+		return evo_file_read_regular(filename, content);
+	}
+	else
 	if (tifiles_calc_is_ti8x(tifiles_file_get_model(filename)))
 	{
 		return ti8x_file_read_regular(filename, (Ti8xRegular *)content);
@@ -231,6 +237,11 @@ int tifiles_file_write_regular(const char *filename, FileContent *content, char 
 	}
 
 #if !defined(DISABLE_TI8X)
+	if (ticonv_model_is_tievo(content->model))
+	{
+		return evo_file_write_regular(filename, content, real_fname);
+	}
+	else
 	if (tifiles_calc_is_ti8x(content->model))
 	{
 		return ti8x_file_write_regular(filename, (Ti8xRegular *)content, real_fname);
@@ -274,7 +285,12 @@ int TICALL tifiles_file_display_regular(FileContent *content)
 	}
 
 #if !defined(DISABLE_TI8X)
-	if (tifiles_calc_is_ti8x(content->model))
+	if (ticonv_model_is_tievo(content->model))
+	{
+		tifiles_info("FileContent for TI-84 Evo: %p", content);
+		model_supports_folder = 0;
+	}
+	else if (tifiles_calc_is_ti8x(content->model))
 	{
 		tifiles_info("FileContent for TI-8x: %p", content);
 		model_supports_folder = 0;
@@ -697,7 +713,11 @@ int tifiles_file_read_flash(const char *filename, FlashContent *content)
 	}
 
 #if !defined(DISABLE_TI8X)
-	if (tifiles_calc_is_ti8x(tifiles_file_get_model(filename)))
+	if (ticonv_model_is_tievo(tifiles_file_get_model(filename)))
+	{
+		return evo_file_read_flash(filename, content);
+	}
+	else if (tifiles_calc_is_ti8x(tifiles_file_get_model(filename)))
 	{
 		return ti8x_file_read_flash(filename, content);
 	}

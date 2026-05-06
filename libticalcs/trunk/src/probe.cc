@@ -695,6 +695,26 @@ CalcModel TICALL ticalcs_device_info_to_model(const CableDeviceInfo *info)
 				model = CALC_TI84PCE_USB;
 			}
 		}
+		else if (info->family == CABLE_FAMILY_USB_EVO)
+		{
+			if (info->variant == CABLE_VARIANT_TI83EVO)
+			{
+				model = CALC_TI83EVO_USB;
+			}
+			else if (info->variant == CABLE_VARIANT_TI84EVOT)
+			{
+				model = CALC_TI84EVOT_USB;
+			}
+			else if (info->variant == CABLE_VARIANT_TI84EVO)
+			{
+				model = CALC_TI84EVO_USB;
+			}
+			else
+			{
+				ticalcs_warning("Unexpected variant %d for TI-84 Evo CDC serial device, assuming TI-84 Evo", info->variant);
+				model = CALC_TI84EVO_USB;
+			}
+		}
 		else if (info->family == CABLE_FAMILY_USB_TI9X)
 		{
 			// This cable family has a single corresponding calc model.

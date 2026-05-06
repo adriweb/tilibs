@@ -53,6 +53,33 @@ static void charset_functions_unit_test(void)
     assert(ti[2] == 0);
 }
 
+static void evo_varname_unit_test(void)
+{
+    char raw_pic[9] = { 'P', 'i', 'c', '1', 0, 0, 0, 0, 0 };
+    char raw_rcl[9] = { 'R', 'c', 'l', 'W', 'i', 'n', 'd', 'w', 0 };
+    char *retval;
+
+    retval = ticonv_varname_to_utf8(CALC_TI84EVO_USB, raw_pic, 4);
+    assert(retval != NULL);
+    assert(!strcmp(retval, "Pic1"));
+    ticonv_utf8_free(retval);
+
+    retval = ticonv_varname_to_utf8(CALC_TI84EVOT_USB, raw_rcl, 13);
+    assert(retval != NULL);
+    assert(!strcmp(retval, "RclWindw"));
+    ticonv_utf8_free(retval);
+
+    retval = ticonv_varname_to_tifile(CALC_TI84EVO_USB, "Pic1", 4);
+    assert(retval != NULL);
+    assert(!strcmp(retval, "Pic1"));
+    ticonv_varname_free(retval);
+
+    retval = ticonv_varname_from_tifile(CALC_TI84EVOT_USB, "Image1", 5);
+    assert(retval != NULL);
+    assert(!strcmp(retval, "Image1"));
+    ticonv_ti_free(retval);
+}
+
 int main(int argc, char **argv)
 {
     char * retval;
@@ -75,6 +102,7 @@ int main(int argc, char **argv)
     PRINTF(ticonv_model_uses_utf8, INT, CALC_NONE);
     PRINTF(ticonv_model_is_tiz80, INT, CALC_NONE);
     PRINTF(ticonv_model_is_tiez80, INT, CALC_NONE);
+    PRINTF(ticonv_model_is_tievo, INT, CALC_NONE);
     PRINTF(ticonv_model_is_ti68k, INT, CALC_NONE);
     PRINTF(ticonv_model_is_tinspire, INT, CALC_NONE);
     PRINTF(ticonv_model_is_lab_equipment, INT, CALC_NONE);
@@ -196,6 +224,7 @@ int main(int argc, char **argv)
     PRINTF(ticonv_utf16_to_ti89tusb, PTR, (void *)0x12345678, NULL);
 
     charset_functions_unit_test();
+    evo_varname_unit_test();
 
     return 0;
 }

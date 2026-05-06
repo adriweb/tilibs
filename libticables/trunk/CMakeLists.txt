@@ -10,6 +10,7 @@ set(SRC_FILES
         src/data_log.cc
         src/detect.cc
         src/error.cc
+        src/evo_serial.cc
         src/hex2dbus.cc
         src/hex2dusb.cc
         src/hex2nsp.cc
@@ -52,8 +53,9 @@ create_lib_target_with_deps(ticables2)
 
 if(APPLE)
     find_library(IOKitFramework IOKit REQUIRED)
+    find_library(CoreFoundationFramework CoreFoundation REQUIRED)
     find_library(SecurityFramework Security REQUIRED)
-    target_link_libraries(ticables2 PRIVATE ${IOKitFramework} ${SecurityFramework})
+    target_link_libraries(ticables2 PRIVATE ${IOKitFramework} ${CoreFoundationFramework} ${SecurityFramework})
 endif()
 
 if(LINUX)
@@ -63,7 +65,7 @@ endif()
 # external deps lookup
 if(WIN32)
     find_library(LIBUSB0 NAMES libusb0.lib usb0 REQUIRED)
-    target_link_libraries(ticables2 PRIVATE ${LIBUSB0})
+    target_link_libraries(ticables2 PRIVATE ${LIBUSB0} setupapi cfgmgr32)
 elseif(EMSCRIPTEN)
     # Emscripten libusb WebUSB backend
     pkg_check_modules(libusb REQUIRED IMPORTED_TARGET libusb-1.0>=1.0.27)
