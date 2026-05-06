@@ -3423,12 +3423,19 @@ function setConnected(connected) {
 }
 
 function updateWebUsbSplashState() {
-    if (!els.splashWebUsbWarning || !els.btnSplashConnect) {
-        return;
-    }
     const webUsbReady = navigator.usb && self.isSecureContext;
-    els.splashWebUsbWarning.classList.toggle('hidden', !!webUsbReady);
-    els.btnSplashConnect.classList.toggle('hidden', !webUsbReady);
+    if (els.splashWebUsbWarning) {
+        els.splashWebUsbWarning.classList.toggle('hidden', !!webUsbReady);
+    }
+    if (els.btnSplashConnect) {
+        els.btnSplashConnect.classList.toggle('hidden', !webUsbReady);
+    }
+    if (els.btnConnect) {
+        els.btnConnect.classList.toggle('hidden', !webUsbReady);
+    }
+    if (els.btnSettings) {
+        els.btnSettings.classList.toggle('hidden', !webUsbReady);
+    }
 }
 
 function isWindowsPlatform() {
