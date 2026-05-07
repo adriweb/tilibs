@@ -68,9 +68,6 @@ static int ser_prepare(CableHandle *h)
 		default: return ERR_ILLEGAL_ARG;
 	}
 
-	// TODO pay attention to h->options_ex.parameters_blk.device and h->options_ex.parameters_blk.address ,
-	// which can override the above values.
-
 	if (h->device == NULL)
 	{
 		h->device = strdup(device);
@@ -385,20 +382,23 @@ static int ser_get_raw(CableHandle *h, int *state)
 	return 0;
 }
 
-static int ser_set_extra_options(CableHandle * h, CableExtraOptions * options_ex)
+static int ser_set_device(CableHandle *h, const char * device)
 {
-	(void)h, (void)options_ex;
+	if (device != NULL)
+	{
+		char * device2 = strdup(device);
+		if (device2 != NULL)
+		{
+			free(h->device);
+			h->device = device2;
+		}
+		else
+		{
+			ticables_warning(_("unable to set device %s.\n"), device);
+		}
+		return 0;
+	}
 	return ERR_ILLEGAL_ARG;
-}
-
-static int ser_get_extra_options(CableHandle * h, CableExtraOptions * options_ex)
-{
-	options_ex->version = 1;
-	options_ex->has_parameters = 1;
-	memset((void *)&options_ex->parameters, 0, sizeof(options_ex->parameters));
-	options_ex->parameters.parameters_blk.device = h->device;
-	options_ex->parameters.parameters_blk.address = h->address;
-	return 0;
 }
 
 extern const CableFncts cable_ser = 
@@ -414,6 +414,6 @@ extern const CableFncts cable_ser =
 	&ser_set_red_wire, &ser_set_white_wire,
 	&ser_get_red_wire, &ser_get_white_wire,
 	&ser_set_raw, &ser_get_raw,
-	NULL,
-	&ser_set_extra_options, &ser_get_extra_options
+	&ser_set_device,
+	NULL
 };

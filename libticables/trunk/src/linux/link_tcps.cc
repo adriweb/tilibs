@@ -49,8 +49,6 @@
 
 static int tcps_prepare(CableHandle *h)
 {
-	// TODO pay attention to cable options.
-
 	return 0;
 }
 
@@ -89,24 +87,23 @@ static int tcps_check(CableHandle *h, int *status)
 	return 0;
 }
 
-static int tcps_set_extra_options(CableHandle * h, CableExtraOptions * options_ex)
+static int tcps_set_device(CableHandle *h, const char * device)
 {
-	(void)h, (void)options_ex;
+	if (device != NULL)
+	{
+		char * device2 = strdup(device);
+		if (device2 != NULL)
+		{
+			free(h->device);
+			h->device = device2;
+		}
+		else
+		{
+			ticables_warning(_("unable to set device %s.\n"), device);
+		}
+		return 0;
+	}
 	return ERR_ILLEGAL_ARG;
-}
-
-static int tcps_get_extra_options(CableHandle * h, CableExtraOptions * options_ex)
-{
-	options_ex->version = 1;
-	options_ex->has_parameters = 1;
-	memset((void *)&options_ex->parameters, 0, sizeof(options_ex->parameters));
-	options_ex->parameters.parameters_tcps.use_fd = 0; // TODO
-	options_ex->parameters.parameters_tcps.bind_port = 0; // TODO
-	options_ex->parameters.parameters_tcps.fd = 0; // TODO
-	options_ex->parameters.parameters_tcps.server_address = NULL; // TODO
-	options_ex->parameters.parameters_tcps.advertised_address = NULL; // TODO
-	options_ex->parameters.parameters_tcps.bind_address = NULL; // TODO
-	return 0;
 }
 
 extern const CableFncts cable_tcps =
@@ -122,6 +119,6 @@ extern const CableFncts cable_tcps =
 	&noop_set_red_wire, &noop_set_white_wire,
 	&noop_get_red_wire, &noop_get_white_wire,
 	NULL, NULL,
-	NULL,
-	&tcps_set_extra_options, &tcps_get_extra_options
+	&tcps_set_device,
+	NULL
 };

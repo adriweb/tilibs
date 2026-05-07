@@ -361,6 +361,6 @@ extern const CableFncts cable_tie =
 	&noop_set_red_wire, &noop_set_white_wire,
 	&noop_get_red_wire, &noop_get_white_wire,
 	NULL, NULL,
-	NULL,
-	&noop_set_extra_options, &noop_get_extra_options
+	&noop_set_device,
+	NULL
 };
