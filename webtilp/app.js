@@ -2574,7 +2574,11 @@ const els = {
     backupModalOverlayText: document.getElementById('backupModalOverlayText'),
     toastContainer: document.getElementById('toastContainer'),
     winUsbNspireModal: document.getElementById('winUsbNspireModal'),
-    btnCloseWinUsbNspire: document.getElementById('btnCloseWinUsbNspire')
+    btnCloseWinUsbNspire: document.getElementById('btnCloseWinUsbNspire'),
+    connectionHelpModal: document.getElementById('connectionHelpModal'),
+    connectionHelpTitle: document.getElementById('connectionHelpTitle'),
+    connectionHelpBody: document.getElementById('connectionHelpBody'),
+    btnCloseConnectionHelp: document.getElementById('btnCloseConnectionHelp')
 };
 
 state.settings = loadSettings();
@@ -3218,6 +3222,7 @@ async function applyTranslations() {
     document.getElementById('winUsbNspireBody').innerHTML = t('winusb_nspire_block_text');
     setTextContent(document.getElementById('winUsbNspireAlternativesLabel'), t('winusb_nspire_block_alternatives'));
     setTextContent(els.btnCloseWinUsbNspire, t('close'));
+    setTextContent(els.btnCloseConnectionHelp, t('close'));
 
     if (els.btnNuke) {
         els.btnNuke.title = t('force_disconnect_reset');
@@ -3627,6 +3632,11 @@ function isWindowsPlatform() {
     return /win/i.test(String(platform));
 }
 
+function isLinuxPlatform() {
+    const platform = navigator.userAgentData?.platform || navigator.platform || navigator.userAgent || '';
+    return /linux/i.test(String(platform));
+}
+
 function resetToSplashState() {
     clearActiveOperations();
     state.handle = 0;
@@ -3660,6 +3670,61 @@ function closeWinUsbNspireModal() {
     }
     els.winUsbNspireModal.classList.add('hidden');
     resetToSplashState();
+}
+
+function openConnectionHelpModal(title, html) {
+    if (!els.connectionHelpModal || !els.connectionHelpBody) {
+        alert(`${title}\n\n${html.replace(/<[^>]+>/g, '')}`);
+        return;
+    }
+    if (els.connectionHelpTitle) {
+        els.connectionHelpTitle.textContent = title;
+    }
+    els.connectionHelpBody.innerHTML = html;
+    els.connectionHelpModal.classList.remove('hidden');
+    els.connectionHelpModal.setAttribute('aria-hidden', 'false');
+}
+
+function closeConnectionHelpModal() {
+    if (!els.connectionHelpModal) {
+        return;
+    }
+    els.connectionHelpModal.classList.add('hidden');
+    els.connectionHelpModal.setAttribute('aria-hidden', 'true');
+}
+
+function showCableOpenHelp(result) {
+    const code = Number(result);
+    const closeAppsReminder = '<p>Before trying again, close any other WebTILP pages, browser tabs, TI tools, terminal sessions, or other apps that may already be using the calculator or cable.</p>';
+
+    if (isLinuxPlatform() && code === 58) {
+        openConnectionHelpModal('Linux serial permission needed', `
+            <p>WebTILP can see the TI-84 Evo / Evo-T, but Linux refused to open its serial device.</p>
+            <ol>
+                <li>Add your user to the serial device group: <code>sudo usermod -a -G dialout $USER</code></li>
+                <li>Fully log out and log back in, or reboot. Restarting the browser alone is not enough.</li>
+                <li>Unplug and replug the calculator, then try connecting again.</li>
+            </ol>
+            <p>Some distributions use another serial group such as <code>uucp</code> or <code>lock</code>; check the group on <code>/dev/ttyACM0</code> if <code>dialout</code> is not used.</p>
+            ${closeAppsReminder}
+        `);
+        return;
+    }
+
+    if (isWindowsPlatform() && code === 37) {
+        openConnectionHelpModal('Install the WinUSB driver with Zadig', `
+            <p>Windows could not open the calculator through WebUSB. Install the WinUSB driver for the calculator/cable, then try again.</p>
+            <ol>
+                <li>Download and run <a href="https://zadig.akeo.ie/" target="_blank" rel="noopener noreferrer">Zadig</a>.</li>
+                <li>In Zadig, choose <strong>Options</strong> &gt; <strong>List All Devices</strong>.</li>
+                <li>Select the TI calculator or SilverLink cable. Be careful not to select your keyboard, mouse, or USB hub.</li>
+                <li>Choose <strong>WinUSB</strong> as the target driver.</li>
+                <li>Click <strong>Replace Driver</strong> or <strong>Install Driver</strong>.</li>
+                <li>Unplug and replug the calculator, refresh this page if needed, then try again.</li>
+            </ol>
+            ${closeAppsReminder}
+        `);
+    }
 }
 
 function guardWinUsbNspireCX2(device = state.authorizedDevice) {
@@ -3926,6 +3991,7 @@ async function ensureCableOpen() {
     }
     const result = await ccallAsync(module, 'open_cable', 'number', ['number'], [handle], { timeoutMs: 8000 });
     if (result !== 0) {
+        showCableOpenHelp(result);
         throw new Error(`open_cable failed with code ${result}`);
     }
     state.cableOpen = true;
@@ -7105,6 +7171,9 @@ function bindEvents() {
     if (els.btnCloseWinUsbNspire) {
         els.btnCloseWinUsbNspire.addEventListener('click', closeWinUsbNspireModal);
     }
+    if (els.btnCloseConnectionHelp) {
+        els.btnCloseConnectionHelp.addEventListener('click', closeConnectionHelpModal);
+    }
     if (els.newFolderModal) {
         els.newFolderModal.addEventListener('click', event => {
             if (event.target === els.newFolderModal) {
@@ -7116,6 +7185,13 @@ function bindEvents() {
         els.winUsbNspireModal.addEventListener('click', event => {
             if (event.target === els.winUsbNspireModal) {
                 closeWinUsbNspireModal();
+            }
+        });
+    }
+    if (els.connectionHelpModal) {
+        els.connectionHelpModal.addEventListener('click', event => {
+            if (event.target === els.connectionHelpModal) {
+                closeConnectionHelpModal();
             }
         });
     }
