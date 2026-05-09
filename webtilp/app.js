@@ -295,6 +295,8 @@ const I18N_EN = {
     "welcome_text": "Plug in your TI graphing calculator, then click \"Connect Calculator\" to get started.",
     "webusb_unavailable_title": "WebUSB is not available in this browser.",
     "webusb_unavailable_text": "Please use a WebUSB-compatible browser like Chrome, Edge, or Brave.",
+    "webserial_only_title": "WebUSB is not available; TI-84 Evo support only.",
+    "webserial_only_text": "This browser supports WebSerial, so WebTILP can connect to TI-84 Evo / Evo-T calculators only. Use a WebUSB-enabled browser for all supported calculators.",
     "device": "Device",
     "model": "Model",
     "free_memory": "Free Memory",
@@ -388,6 +390,7 @@ const I18N_EN = {
     "status_disconnected": "Disconnected",
     "status_device_connected": "Device connected",
     "status_webusb_unsupported": "WebUSB unsupported",
+    "status_webserial_only": "WebSerial-only mode",
     "status_insecure_context": "Insecure context",
     "status_connection_lost": "Connection lost",
     "status_select_device": "Select device to continue",
@@ -464,6 +467,7 @@ const STATUS_I18N_KEYS = new Set([
     'status_disconnected',
     'status_device_connected',
     'status_webusb_unsupported',
+    'status_webserial_only',
     'status_insecure_context',
     'status_connection_lost',
     'status_select_device',
@@ -630,6 +634,18 @@ function isErrorMessage(message) {
         return true;
     }
     return text.includes('(error') || text.includes('error ') || text.includes('failed');
+}
+
+function hasWebUsbTransport() {
+    return Boolean(navigator.usb && self.isSecureContext);
+}
+
+function hasEvoWebSerialTransport() {
+    return Boolean(navigator.serial && self.isSecureContext);
+}
+
+function hasAnySupportedTransport() {
+    return hasWebUsbTransport() || hasEvoWebSerialTransport();
 }
 
 function showToast(message, type = 'error') {
@@ -2912,7 +2928,8 @@ async function applyWebUsbDeviceCableHint(module, device) {
         bindEvoSerialPortToModule(module, device);
         module._set_cable_model(5);
         module._set_force_cable(1);
-        if (state.settings?.calcModel === 'auto') {
+        const calcSetting = String(state.settings?.calcModel ?? 'auto');
+        if (calcSetting === 'auto' || (!navigator.usb && calcSetting !== '43' && calcSetting !== '44')) {
             module._set_calc_model(getEvoCalcModelForDevice(device));
             module._set_force_calc(0);
         }
@@ -3006,6 +3023,9 @@ function deviceMatches(a, b) {
 
 function getEvoCalcModelForDevice(device) {
     const name = `${device?.productName || ''} ${device?.deviceName || ''}`;
+    if (/evo\s*\/\s*evo[-_ ]?t/i.test(name)) {
+        return 43;
+    }
     return /evo[-_ ]?t/i.test(name) ? 44 : 43;
 }
 
@@ -3219,10 +3239,14 @@ async function applyTranslations() {
     setTextContent(els.btnCancelBackup, t('cancel'));
     setTextContent(els.btnConfirmBackup, `📥 ${t('create_backup')}`);
     setTextContent(document.getElementById('winUsbNspireTitle'), '⚠️ ' + t('winusb_nspire_block_title'));
-    document.getElementById('winUsbNspireBody').innerHTML = t('winusb_nspire_block_text');
+    const winUsbNspireBody = document.getElementById('winUsbNspireBody');
+    if (winUsbNspireBody) {
+        winUsbNspireBody.innerHTML = t('winusb_nspire_block_text');
+    }
     setTextContent(document.getElementById('winUsbNspireAlternativesLabel'), t('winusb_nspire_block_alternatives'));
     setTextContent(els.btnCloseWinUsbNspire, t('close'));
     setTextContent(els.btnCloseConnectionHelp, t('close'));
+    updateTransportSplashState();
 
     if (els.btnNuke) {
         els.btnNuke.title = t('force_disconnect_reset');
@@ -3607,23 +3631,35 @@ function setConnected(connected) {
         els.mainContent.classList.toggle('hidden', !connected);
     }
     if (!connected) {
-        updateWebUsbSplashState();
+        updateTransportSplashState();
     }
 }
 
-function updateWebUsbSplashState() {
-    const webUsbReady = navigator.usb && self.isSecureContext;
+function updateTransportSplashState() {
+    const webUsbReady = hasWebUsbTransport();
+    const evoSerialReady = hasEvoWebSerialTransport();
+    const supported = webUsbReady || evoSerialReady;
     if (els.splashWebUsbWarning) {
-        els.splashWebUsbWarning.classList.toggle('hidden', !!webUsbReady);
+        els.splashWebUsbWarning.classList.toggle('hidden', webUsbReady);
+        if (!webUsbReady) {
+            setTextContent(
+                document.getElementById('splashWebUsbWarningTitle'),
+                evoSerialReady ? t('webserial_only_title') : t('webusb_unavailable_title')
+            );
+            setTextContent(
+                document.getElementById('splashWebUsbWarningText'),
+                evoSerialReady ? t('webserial_only_text') : t('webusb_unavailable_text')
+            );
+        }
     }
     if (els.btnSplashConnect) {
-        els.btnSplashConnect.classList.toggle('hidden', !webUsbReady);
+        els.btnSplashConnect.classList.toggle('hidden', !supported);
     }
     if (els.btnConnect) {
-        els.btnConnect.classList.toggle('hidden', !webUsbReady);
+        els.btnConnect.classList.toggle('hidden', !supported);
     }
     if (els.btnSettings) {
-        els.btnSettings.classList.toggle('hidden', !webUsbReady);
+        els.btnSettings.classList.toggle('hidden', !supported);
     }
 }
 
@@ -3648,12 +3684,14 @@ function resetToSplashState() {
     state.silentReconnectInProgress = false;
     clearDeviceData();
     setConnected(false);
-    if (!navigator.usb) {
-        setStatus('status_webusb_unsupported', false);
-    } else if (!self.isSecureContext) {
+    if (!self.isSecureContext) {
         setStatus('status_insecure_context', false);
-    } else {
+    } else if (hasWebUsbTransport()) {
         setStatus('idle', false);
+    } else if (hasEvoWebSerialTransport()) {
+        setStatus('status_webserial_only', false);
+    } else {
+        setStatus('status_webusb_unsupported', false);
     }
 }
 
@@ -3777,17 +3815,17 @@ function getNspireOsExtensionFromModule(module) {
     }
 }
 
-function ensureWebUsb() {
-    if (!navigator.usb) {
-        throw new Error('WebUSB is not supported in this browser.');
-    }
+function ensureSupportedTransport() {
     if (!self.isSecureContext) {
-        throw new Error('WebUSB requires HTTPS or localhost.');
+        throw new Error('WebUSB/WebSerial requires HTTPS or localhost.');
+    }
+    if (!navigator.usb && !navigator.serial) {
+        throw new Error('WebUSB is not supported in this browser, and WebSerial is not available for TI-84 Evo / Evo-T.');
     }
 }
 
 async function initModule() {
-    ensureWebUsb();
+    ensureSupportedTransport();
     if (state.module) {
         return state.module;
     }
@@ -3819,6 +3857,30 @@ async function authorizeDevice(forcePrompt = false) {
     const mustPrompt = forcePrompt || state.needsReauthorize;
     const selectedCalcModel = String(state.settings?.calcModel ?? '');
     const wantsEvoSerial = selectedCalcModel === '43' || selectedCalcModel === '44';
+    if (!navigator.usb) {
+        let device = null;
+        if (!mustPrompt) {
+            device = await getAuthorizedEvoSerialDevice();
+        }
+        if (!device) {
+            device = await requestTIEvoSerialDevice();
+        }
+        if (!device) {
+            const cancelError = new Error('No TI-84 Evo / Evo-T serial device selected.');
+            cancelError.silent = true;
+            throw cancelError;
+        }
+        bindEvoSerialPortToModule(module, device);
+        state.authorizedDevice = device;
+        state.deviceModelName = device.productName || state.deviceModelName;
+        updateDeviceModelDisplay();
+        if (state.needsReauthorize) {
+            state.needsReauthorize = false;
+            state.silentReconnectInProgress = false;
+            setStatus('status_connected', true);
+        }
+        return device;
+    }
     if (!mustPrompt && getAuthorizedDevices) {
         const devices = await getAuthorizedDevices();
         if (devices && devices.length) {
@@ -3865,30 +3927,38 @@ async function authorizeDevice(forcePrompt = false) {
 }
 
 async function autoConnectIfAuthorized() {
-    if (!navigator.usb || !self.isSecureContext) {
+    if (!hasAnySupportedTransport()) {
         return;
     }
     if (state.connectInProgress) {
         return;
     }
     const module = await initModule();
-    if (!getAuthorizedDevices) {
-        return;
-    }
-    const devices = await getAuthorizedDevices();
-    if (!devices || !devices.length) {
-        return;
-    }
-
-    const usbDevice = devices[0];
-    if (isEvoUsbDevice(usbDevice)) {
-        const serialDevice = await getAuthorizedEvoSerialDevice(usbDevice);
+    if (!navigator.usb) {
+        const serialDevice = await getAuthorizedEvoSerialDevice();
         if (!serialDevice) {
             return;
         }
         state.authorizedDevice = serialDevice;
     } else {
-        state.authorizedDevice = usbDevice;
+        if (!getAuthorizedDevices) {
+            return;
+        }
+        const devices = await getAuthorizedDevices();
+        if (!devices || !devices.length) {
+            return;
+        }
+
+        const usbDevice = devices[0];
+        if (isEvoUsbDevice(usbDevice)) {
+            const serialDevice = await getAuthorizedEvoSerialDevice(usbDevice);
+            if (!serialDevice) {
+                return;
+            }
+            state.authorizedDevice = serialDevice;
+        } else {
+            state.authorizedDevice = usbDevice;
+        }
     }
 
     if (guardWinUsbNspireCX2(state.authorizedDevice)) {
@@ -7517,7 +7587,7 @@ async function bootstrap() {
     updateSendFilesButtonState();
     updateSelectionActionButtons();
     updateKeyControlsState(false);
-    updateWebUsbSplashState();
+    updateTransportSplashState();
     autoConnectIfAuthorized();
     window.addEventListener('resize', updateScreenshotCanvasScale);
 }
@@ -7591,12 +7661,15 @@ if (navigator.serial) {
     navigator.serial.addEventListener('disconnect', handleTransportDisconnect);
     navigator.serial.addEventListener('connect', handleTransportConnect);
 }
-if (!navigator.usb) {
-    setStatus('status_webusb_unsupported', false);
-    log('WebUSB is not available in this browser. Only Chrome and derivatives are supported.');
-} else if (!self.isSecureContext) {
+if (!self.isSecureContext) {
     setStatus('status_insecure_context', false);
-    log('WebUSB requires HTTPS or localhost.');
-} else {
+    log('WebUSB/WebSerial requires HTTPS or localhost.');
+} else if (navigator.usb) {
     setStatus('idle', false);
+} else if (navigator.serial) {
+    setStatus('status_webserial_only', false);
+    log('WebUSB is not available in this browser. WebSerial-only mode supports TI-84 Evo / Evo-T calculators only.');
+} else {
+    setStatus('status_webusb_unsupported', false);
+    log('WebUSB is not available in this browser. Use a WebUSB-compatible browser for full calculator support.');
 }
