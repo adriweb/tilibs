@@ -1,4 +1,6 @@
 #include <unistd.h>
+#include <stdio.h>
+#include <string.h>
 #include <emscripten.h>
 #include <libusb.h>
 #include <glib.h>
@@ -52,6 +54,49 @@ static int g_model_update_pending = 0;
 static CalcUpdate g_update;
 static int g_update_ready = 0;
 static volatile uint32_t g_progress_tick = 0;
+static char g_native_warnings[2048];
+static int g_log_handlers_installed = 0;
+
+static void append_native_warning(const char* domain, const char* message)
+{
+    (void)domain;
+    if (!message || !*message) {
+        return;
+    }
+
+    char line[512];
+    snprintf(line, sizeof(line), "%s", message);
+
+    if (strstr(g_native_warnings, line) != nullptr) {
+        return;
+    }
+
+    const size_t used = strlen(g_native_warnings);
+    const size_t avail = sizeof(g_native_warnings) - used;
+    if (avail <= 1) {
+        return;
+    }
+    snprintf(g_native_warnings + used, avail, "%s%s", used ? "\n" : "", line);
+}
+
+static void webtilp_log_handler(const gchar* log_domain, GLogLevelFlags log_level, const gchar* message, gpointer user_data)
+{
+    if ((log_level & G_LOG_LEVEL_WARNING) != 0) {
+        append_native_warning(log_domain, message);
+    }
+    g_log_default_handler(log_domain, log_level, message, user_data);
+}
+
+static void install_log_handlers(void)
+{
+    if (g_log_handlers_installed) {
+        return;
+    }
+    g_log_set_handler("ticables", G_LOG_LEVEL_WARNING, webtilp_log_handler, nullptr);
+    g_log_set_handler("ticalcs", G_LOG_LEVEL_WARNING, webtilp_log_handler, nullptr);
+    g_log_set_handler("tifiles", G_LOG_LEVEL_WARNING, webtilp_log_handler, nullptr);
+    g_log_handlers_installed = 1;
+}
 
 static void reset_calc_handle_state(void)
 {
@@ -538,6 +583,7 @@ static int write_last_path(const char* path)
 EMSCRIPTEN_KEEPALIVE
 int init() {
     printf("Initializing tilibs...\n");
+    install_log_handlers();
     int result = ticables_library_init();
     printf("ticables_library_init: %d\n", result);
     result = tifiles_library_init();
@@ -548,6 +594,18 @@ int init() {
     printf("tilibs init done!\n");
 
     return result;
+}
+
+EMSCRIPTEN_KEEPALIVE
+void clear_native_warnings(void)
+{
+    g_native_warnings[0] = '\0';
+}
+
+EMSCRIPTEN_KEEPALIVE
+const char* get_native_warnings(void)
+{
+    return g_native_warnings;
 }
 
 EMSCRIPTEN_KEEPALIVE
