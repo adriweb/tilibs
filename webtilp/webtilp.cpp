@@ -701,6 +701,9 @@ EMSCRIPTEN_KEEPALIVE
 void set_cable_timeout(int timeout) {
     if (timeout > 0) {
         g_cable_timeout = timeout;
+        if (g_cable_handle) {
+            ticables_options_set_timeout(g_cable_handle, g_cable_timeout);
+        }
     }
 }
 
@@ -708,6 +711,9 @@ EMSCRIPTEN_KEEPALIVE
 void set_cable_delay(int delay) {
     if (delay >= 0) {
         g_cable_delay = delay;
+        if (g_cable_handle) {
+            ticables_options_set_delay(g_cable_handle, g_cable_delay);
+        }
     }
 }
 
