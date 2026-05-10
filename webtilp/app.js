@@ -14,7 +14,7 @@ const TI_USB_DEVICES = [
     { productId: 0xE012, name: "TI-Nspire Hand-Held" },
  // { productId: 0xE013, name: "Network Bridge" },                          // not for us
  // { productId: 0xE016, name: "TI Bluetooth Adapter" },                    // not for us
-    { productId: 0xE018, name: "TI-84 Evo / Evo-T" },                        // CDC serial: selected through WebUSB, data through WebSerial
+    { productId: 0xE018, name: "TI-83/84 Evo" },                            // CDC serial: selected through WebUSB, data through WebSerial
     { productId: 0xE01C, name: "Data Collection Sled [Nspire Lab Cradle, Nspire Datatracker Cradle]" },
  // { productId: 0xE01E, name: "Nspire CX Navigator Access Point" },        // not for us
  // { productId: 0xE01F, name: "Python Adapter (firmware install mode)" },  // not for us
@@ -97,7 +97,7 @@ function serialPortToDevice(port, usbDevice = null) {
         serialPort: port,
         vendorId: info.usbVendorId || TI_VENDOR_ID,
         productId: info.usbProductId || PID_TI84_EVO_SERIAL,
-        productName: usbDevice?.productName || 'TI-84 Evo / Evo-T',
+        productName: usbDevice?.productName || 'TI-83/84 Evo',
         reset: async () => {},
         forget: async () => {
             if (port?.forget) {
@@ -131,7 +131,7 @@ async function requestTIEvoSerialDevice() {
         return serialPortToDevice(port);
     } catch (error) {
         if (error && error.name === 'NotFoundError') {
-            console.warn('No TI-84 Evo serial device was selected');
+            console.warn('No TI-83/84 Evo serial device was selected');
             return null;
         }
         console.error('WebSerial device selection failed:', error);
@@ -295,8 +295,8 @@ const I18N_EN = {
     "welcome_text": "Plug in your TI graphing calculator, then click \"Connect Calculator\" to get started.",
     "webusb_unavailable_title": "WebUSB is not available in this browser.",
     "webusb_unavailable_text": "Please use a WebUSB-compatible browser like Chrome, Edge, or Brave.",
-    "webserial_only_title": "WebUSB is not available; TI-84 Evo support only.",
-    "webserial_only_text": "This browser supports WebSerial, so WebTILP can connect to TI-84 Evo / Evo-T calculators only. Use a WebUSB-enabled browser for all supported calculators.",
+    "webserial_only_title": "WebUSB is not available; TI-83/84 Evo support only.",
+    "webserial_only_text": "This browser supports WebSerial, so WebTILP can connect to TI-83/84 Evo calculators only. Use a WebUSB-enabled browser for all supported calculators.",
     "device": "Device",
     "model": "Model",
     "free_memory": "Free Memory",
@@ -942,7 +942,7 @@ const CABLE_OPTIONS = [
 ];
 
 const SILVERLINK_CALC_VALUES = new Set([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 16, 17]);
-const DIRECTLINK_CALC_VALUES = new Set([13, 14, 15, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 43, 44]);
+const DIRECTLINK_CALC_VALUES = new Set([13, 14, 15, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 43, 44, 45]);
 
 const CALC_MODEL_OPTIONS = [
     { value: 'auto', label: 'Auto' },
@@ -989,7 +989,8 @@ const CALC_MODEL_OPTIONS = [
     { value: 41, label: 'LabPro' },
     { value: 42, label: 'TI Presenter' },
     { value: 43, label: 'TI-84 Evo' },
-    { value: 44, label: 'TI-84 Evo-T' }
+    { value: 44, label: 'TI-84 Evo-T' },
+    { value: 45, label: 'TI-83 Evo' }
 ];
 
 const PID_SILVERLINK = 0xe001;
@@ -2929,11 +2930,11 @@ async function applyWebUsbDeviceCableHint(module, device) {
         module._set_cable_model(5);
         module._set_force_cable(1);
         const calcSetting = String(state.settings?.calcModel ?? 'auto');
-        if (calcSetting === 'auto' || (!navigator.usb && calcSetting !== '43' && calcSetting !== '44')) {
+        if (calcSetting === 'auto' || (!navigator.usb && calcSetting !== '43' && calcSetting !== '44' && calcSetting !== '45')) {
             module._set_calc_model(getEvoCalcModelForDevice(device));
             module._set_force_calc(0);
         }
-        log('Cable hint applied: TI-84 Evo WebSerial');
+        log('Cable hint applied: TI-83/84 Evo WebSerial');
         return;
     }
     if (state.settings && state.settings.cableModel !== 'auto') {
@@ -3023,8 +3024,11 @@ function deviceMatches(a, b) {
 
 function getEvoCalcModelForDevice(device) {
     const name = `${device?.productName || ''} ${device?.deviceName || ''}`;
-    if (/evo\s*\/\s*evo[-_ ]?t/i.test(name)) {
+    if (/83\s*\/\s*84\s*evo|evo\s*\/\s*evo[-_ ]?t/i.test(name)) {
         return 43;
+    }
+    if (/ti[-_ ]?83|83\s*evo|83evo/i.test(name)) {
+        return 45;
     }
     return /evo[-_ ]?t/i.test(name) ? 44 : 43;
 }
@@ -3737,7 +3741,7 @@ function showCableOpenHelp(result) {
 
     if (isLinuxPlatform() && code === 58) {
         openConnectionHelpModal('Linux serial permission needed', `
-            <p>WebTILP can see the TI-84 Evo / Evo-T, but Linux refused to open its serial device.</p>
+            <p>WebTILP can see the TI-83/84 Evo, but Linux refused to open its serial device.</p>
             <ol>
                 <li>Add your user to the serial device group: <code>sudo usermod -a -G dialout $USER</code></li>
                 <li>Fully log out and log back in, or reboot. Restarting the browser alone is not enough.</li>
@@ -3820,7 +3824,7 @@ function ensureSupportedTransport() {
         throw new Error('WebUSB/WebSerial requires HTTPS or localhost.');
     }
     if (!navigator.usb && !navigator.serial) {
-        throw new Error('WebUSB is not supported in this browser, and WebSerial is not available for TI-84 Evo / Evo-T.');
+        throw new Error('WebUSB is not supported in this browser, and WebSerial is not available for TI-83/84 Evo.');
     }
 }
 
@@ -3856,7 +3860,7 @@ async function authorizeDevice(forcePrompt = false) {
     const module = await initModule();
     const mustPrompt = forcePrompt || state.needsReauthorize;
     const selectedCalcModel = String(state.settings?.calcModel ?? '');
-    const wantsEvoSerial = selectedCalcModel === '43' || selectedCalcModel === '44';
+    const wantsEvoSerial = selectedCalcModel === '43' || selectedCalcModel === '44' || selectedCalcModel === '45';
     if (!navigator.usb) {
         let device = null;
         if (!mustPrompt) {
@@ -3866,7 +3870,7 @@ async function authorizeDevice(forcePrompt = false) {
             device = await requestTIEvoSerialDevice();
         }
         if (!device) {
-            const cancelError = new Error('No TI-84 Evo / Evo-T serial device selected.');
+            const cancelError = new Error('No TI-83/84 Evo serial device selected.');
             cancelError.silent = true;
             throw cancelError;
         }
@@ -3891,7 +3895,7 @@ async function authorizeDevice(forcePrompt = false) {
                 ? await getAuthorizedEvoSerialDevice(usbDevice)
                 : usbDevice;
             if (!device) {
-                const cancelError = new Error('TI-84 Evo serial port authorization is required.');
+                const cancelError = new Error('TI-83/84 Evo serial port authorization is required.');
                 cancelError.silent = true;
                 throw cancelError;
             }
@@ -7668,7 +7672,7 @@ if (!self.isSecureContext) {
     setStatus('idle', false);
 } else if (navigator.serial) {
     setStatus('status_webserial_only', false);
-    log('WebUSB is not available in this browser. WebSerial-only mode supports TI-84 Evo / Evo-T calculators only.');
+    log('WebUSB is not available in this browser. WebSerial-only mode supports TI-83/84 Evo calculators only.');
 } else {
     setStatus('status_webusb_unsupported', false);
     log('WebUSB is not available in this browser. Use a WebUSB-compatible browser for full calculator support.');
