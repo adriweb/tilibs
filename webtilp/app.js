@@ -588,6 +588,55 @@ function formatErrorResult(module, code) {
     return `error ${label}: ${cleaned}`;
 }
 
+function clearNativeWarnings() {
+    if (state.module) {
+        try {
+            state.module.ccall('clear_native_warnings', 'void', [], []);
+        } catch {
+            // Older builds may not expose native warning capture yet.
+        }
+    }
+}
+
+function getNativeWarningSuffix() {
+    const warnings = [];
+    if (state.module) {
+        try {
+            const nativeWarnings = state.module.ccall('get_native_warnings', 'string', [], []);
+            if (nativeWarnings) {
+                warnings.push(...nativeWarnings.split(/\n+/));
+            }
+        } catch {
+            // Older builds may not expose native warning capture yet.
+        }
+    }
+    const unique = [];
+    for (const warning of warnings) {
+        const text = String(warning || '').trim();
+        if (text && !unique.includes(text)) {
+            unique.push(text);
+        }
+    }
+    return unique.length ? ` Details: ${unique.join(' ')}` : '';
+}
+
+function makeModulePrintHandlers(touchProgress = null) {
+    return {
+        print: (...args) => {
+            if (touchProgress) {
+                touchProgress();
+            }
+            console.log(...args);
+        },
+        printErr: (...args) => {
+            if (touchProgress) {
+                touchProgress();
+            }
+            console.error(...args);
+        }
+    };
+}
+
 function isAcceptableLeaveExamModeDiscError(err) {
     const text = String(err?.message || err || '').toLowerCase();
     return text.includes('device was disconnected')
@@ -3543,11 +3592,11 @@ async function initModule() {
         return state.module;
     }
     setStatus('status_loading_module', false);
-    state.module = await TILibsModule();
+    const touchProgress = () => {
+        state.lastProgressTs = Date.now();
+    };
+    state.module = await TILibsModule(makeModulePrintHandlers(touchProgress));
     if (!state.progressHooked) {
-        const touchProgress = () => {
-            state.lastProgressTs = Date.now();
-        };
         state.module.__progressTick = touchProgress;
         if (state.progressTickPtr === null || state.progressTickPtr === undefined) {
             try {
@@ -3556,20 +3605,6 @@ async function initModule() {
                 console.warn('[WebTILP] progress tick unavailable', err);
             }
         }
-        const originalPrint = state.module.print;
-        state.module.print = (...args) => {
-            touchProgress();
-            if (originalPrint) {
-                originalPrint(...args);
-            }
-        };
-        const originalPrintErr = state.module.printErr;
-        state.module.printErr = (...args) => {
-            touchProgress();
-            if (originalPrintErr) {
-                originalPrintErr(...args);
-            }
-        };
         state.progressHooked = true;
     }
     await state.module.ccall('init', 'number', [], [], { async: true });
@@ -5963,6 +5998,7 @@ async function performTransfers(plan, module, options) {
 
             let result = 0;
             try {
+                clearNativeWarnings();
                 if (item.sendByEntry && Number.isInteger(item.entryIndex)) {
                     result = await ccallAsync(
                         module,
