@@ -270,9 +270,15 @@
                     <span id="transferOverwriteAllLabel">Overwrite all existing items (no per-file confirmation)</span>
                 </label>
             </div>
-            <div class="modal-footer">
-                <button class="btn ghost" id="btnCancelTransfer">Cancel</button>
-                <button class="btn primary" id="btnConfirmTransfer">🚀 Start Transfer</button>
+            <div class="modal-footer modal-footer-split">
+                <div class="modal-footer-actions hidden" id="transferBulkLocationActions">
+                    <button class="btn ghost" id="btnTransferAllRam" type="button">All RAM</button>
+                    <button class="btn ghost" id="btnTransferAllArchive" type="button">All Archive</button>
+                </div>
+                <div class="modal-footer-actions">
+                    <button class="btn ghost" id="btnCancelTransfer">Cancel</button>
+                    <button class="btn primary" id="btnConfirmTransfer">🚀 Start Transfer</button>
+                </div>
             </div>
         </div>
     </div>
