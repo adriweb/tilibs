@@ -341,6 +341,7 @@ const I18N_EN = {
     "cable_timeout": "Cable timeout (1/10s)",
     "cable_delay": "Cable delay (us)",
     "language": "Language",
+    "convert_python_files": "Convert Python files (.py <-> calculator format)",
     "settings_note": "Changing settings resets the current handle. Reconnect for full effect.",
     "offline_ready": "This app can now run without a network connection.",
     "offline_update_available": "An update is available. Reload to use the latest version.",
@@ -934,7 +935,8 @@ const SETTINGS_DEFAULTS = {
     calcModel: 'auto',
     cableTimeout: 50,
     cableDelay: 10,
-    language: 'auto'
+    language: 'auto',
+    convertPythonFiles: true
 };
 
 const CABLE_OPTIONS = [
@@ -2569,6 +2571,7 @@ const els = {
     settingTimeout: document.getElementById('settingTimeout'),
     settingDelay: document.getElementById('settingDelay'),
     settingLanguage: document.getElementById('settingLanguage'),
+    settingConvertPythonFiles: document.getElementById('settingConvertPythonFiles'),
     transferModal: document.getElementById('transferModal'),
     transferTableBody: document.getElementById('transferTableBody'),
     transferOverwriteAll: document.getElementById('transferOverwriteAll'),
@@ -2746,7 +2749,8 @@ function loadSettings() {
             calcModel: String(parsed.calcModel ?? SETTINGS_DEFAULTS.calcModel),
             cableTimeout: Number(parsed.cableTimeout ?? SETTINGS_DEFAULTS.cableTimeout),
             cableDelay: Number(parsed.cableDelay ?? SETTINGS_DEFAULTS.cableDelay),
-            language: normalizeLanguageCode(parsed.language) || 'auto'
+            language: normalizeLanguageCode(parsed.language) || 'auto',
+            convertPythonFiles: parsed.convertPythonFiles !== false
         };
     } catch (err) {
         console.warn('[WebTILP] Failed to load settings', err);
@@ -2908,6 +2912,7 @@ function applySettingsToModule() {
     const settings = state.settings;
     module._set_cable_timeout(settings.cableTimeout);
     module._set_cable_delay(settings.cableDelay);
+    module._set_convert_python_files(settings.convertPythonFiles ? 1 : 0);
 
     if (settings.cableModel === 'auto') {
         module._set_force_cable(0);
@@ -3206,6 +3211,7 @@ async function applyTranslations() {
     setTextContent(document.getElementById('settingTimeoutLabel'), t('cable_timeout'));
     setTextContent(document.getElementById('settingDelayLabel'), t('cable_delay'));
     setTextContent(document.getElementById('settingLanguageLabel'), t('language'));
+    setTextContent(document.getElementById('settingConvertPythonFilesLabel'), t('convert_python_files'));
     setTextContent(document.getElementById('settingsNote'), t('settings_note'));
     setTextContent(document.getElementById('offlineBannerText'), state.offlineUpdateShown ? t('offline_update_available') : t('offline_ready'));
     setTextContent(els.btnReloadOffline, `↻ ${t('reload_for_update')}`);
@@ -3281,6 +3287,9 @@ function seedSettingsForm() {
     els.settingDelay.value = state.settings.cableDelay;
     populateSelect(els.settingLanguage, LANGUAGE_OPTIONS);
     els.settingLanguage.value = state.settings.language || 'auto';
+    if (els.settingConvertPythonFiles) {
+        els.settingConvertPythonFiles.checked = state.settings.convertPythonFiles !== false;
+    }
     updateCalcHint(els.settingCableModel.value);
 }
 
@@ -3359,7 +3368,8 @@ async function saveSettingsFromModal() {
         calcModel: els.settingCalcModel.value,
         cableTimeout: Number(els.settingTimeout.value || SETTINGS_DEFAULTS.cableTimeout),
         cableDelay: Number(els.settingDelay.value || SETTINGS_DEFAULTS.cableDelay),
-        language: normalizeLanguageCode(els.settingLanguage.value) || 'auto'
+        language: normalizeLanguageCode(els.settingLanguage.value) || 'auto',
+        convertPythonFiles: els.settingConvertPythonFiles ? els.settingConvertPythonFiles.checked : SETTINGS_DEFAULTS.convertPythonFiles
     };
     if (JSON.stringify(state.settings) === JSON.stringify(nextSettings)) {
         closeSettingsModal();
@@ -3371,9 +3381,23 @@ async function saveSettingsFromModal() {
         && state.settings.calcModel === nextSettings.calcModel
         && Number(state.settings.cableTimeout) === Number(nextSettings.cableTimeout)
         && Number(state.settings.cableDelay) === Number(nextSettings.cableDelay)
+        && state.settings.convertPythonFiles === nextSettings.convertPythonFiles
         && state.settings.language !== nextSettings.language;
+    const conversionOnlyChange = state.settings
+        && state.settings.cableModel === nextSettings.cableModel
+        && state.settings.calcModel === nextSettings.calcModel
+        && Number(state.settings.cableTimeout) === Number(nextSettings.cableTimeout)
+        && Number(state.settings.cableDelay) === Number(nextSettings.cableDelay)
+        && state.settings.language === nextSettings.language
+        && state.settings.convertPythonFiles !== nextSettings.convertPythonFiles;
     state.settings = nextSettings;
     saveSettings();
+    if (conversionOnlyChange) {
+        applySettingsToModule();
+        closeSettingsModal();
+        log('Python file conversion setting updated.');
+        return;
+    }
     if (languageOnlyChange) {
         try {
             await applyTranslations();
@@ -5746,6 +5770,29 @@ async function buildTransferPlan(files, module) {
         const data = new Uint8Array(await file.arrayBuffer());
         const path = `/uploads/${file.name}`;
         module.FS.writeFile(path, data);
+        if (state.settings?.convertPythonFiles !== false && /\.py$/i.test(file.name)) {
+            try {
+                const convertedPath = await ccallAsync(
+                    module,
+                    'convert_python_source_for_calc',
+                    'string',
+                    ['string', 'string'],
+                    [path, '/uploads'],
+                    { timeoutMs: 12000 }
+                );
+                if (convertedPath && convertedPath !== path) {
+                    try {
+                        module.FS.unlink(path);
+                    } catch {
+                        // ignore
+                    }
+                    uploadPaths.push(convertedPath);
+                    continue;
+                }
+            } catch (err) {
+                console.warn('[WebTILP] Failed to convert Python source file', err);
+            }
+        }
         uploadPaths.push(path);
     }
 
