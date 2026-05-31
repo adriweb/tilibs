@@ -205,7 +205,7 @@ const state = {
     dirlist: [],
     selectedFiles: [],
     logLines: [],
-    sort: { key: 'name', dir: 'asc' },
+    sort: { key: 'name', dir: 'asc', userDefined: false },
     settings: null,
     lastProgressTs: 0,
     progressHooked: false,
@@ -4711,6 +4711,10 @@ function renderDirlist(entries) {
     updateSelectionActionButtons();
 }
 
+function calcSupportsFolders() {
+    return (state.features & FEATURE_FLAGS.FTS_FOLDER) !== 0;
+}
+
 function renderTableView(entries, filter) {
     const selectionKeys = getSelectedVarKeys();
     els.varTableBody.innerHTML = '';
@@ -4828,9 +4832,13 @@ function renderTableView(entries, filter) {
     const sortNodes = (nodes) => {
         const key = state.sort.key;
         const dir = state.sort.dir;
+        const useDefaultFlatSort = !state.sort.userDefined && !calcSupportsFolders();
         return [...nodes].sort((a, b) => {
             const entryA = a.entry || buildSyntheticFolderEntry(a);
             const entryB = b.entry || buildSyntheticFolderEntry(b);
+            if (useDefaultFlatSort) {
+                return compareEntriesByDefaultFlatOrder(entryA, entryB);
+            }
             return compareEntries(entryA, entryB, key, dir);
         });
     };
@@ -4911,6 +4919,50 @@ function renderTableView(entries, filter) {
         renderTableNode(node, 0, false);
     });
     applySelectionKeys(selectionKeys, els.varTableBody);
+}
+
+function getVariableTypeSortRank(entry) {
+    if (entry.kind === 'app') {
+        return 8;
+    }
+    const typeName = String(entry.type_name || '').toLowerCase();
+    if (typeName.includes('program')) {
+        return 0;
+    }
+    if (typeName.includes('python')) {
+        return 1;
+    }
+    if (typeName.includes('list')) {
+        return 2;
+    }
+    if (typeName.includes('matrix')) {
+        return 3;
+    }
+    if (typeName.includes('equation')) {
+        return 4;
+    }
+    if (typeName.includes('app var') || typeName.includes('appvar')) {
+        return 5;
+    }
+    if (typeName.includes('real')) {
+        return 6;
+    }
+    if (typeName.includes('string')) {
+        return 7;
+    }
+    return 100;
+}
+
+function compareEntriesByDefaultFlatOrder(a, b) {
+    const rankDiff = getVariableTypeSortRank(a) - getVariableTypeSortRank(b);
+    if (rankDiff !== 0) {
+        return rankDiff;
+    }
+    const nameDiff = String(a.name || '').localeCompare(String(b.name || ''));
+    if (nameDiff !== 0) {
+        return nameDiff;
+    }
+    return (Number(a.size) || 0) - (Number(b.size) || 0);
 }
 
 function compareEntries(a, b, key, dir) {
@@ -7354,6 +7406,7 @@ function bindEvents() {
                 state.sort.key = key;
                 state.sort.dir = 'asc';
             }
+            state.sort.userDefined = true;
             document.querySelectorAll('th[data-sort]').forEach(th => th.classList.remove('sorted-asc', 'sorted-desc'));
             header.classList.add(state.sort.dir === 'asc' ? 'sorted-asc' : 'sorted-desc');
             renderDirlist(state.dirlist);
