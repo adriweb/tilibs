@@ -4038,9 +4038,16 @@ async function ensureHandle() {
         let attempts = 0;
         while (!handle && attempts < 3) {
             attempts += 1;
-            handle = module._create_handle();
-            if (handle && typeof handle.then === 'function') {
-                handle = await handle;
+            try {
+                handle = module._create_handle();
+                if (handle && typeof handle.then === 'function') {
+                    handle = await handle;
+                }
+            } catch (err) {
+                if (isFatalWasmRuntimeError(err)) {
+                    handleFatalWasmRuntimeError(err);
+                }
+                throw err;
             }
             if (!handle) {
                 await sleep(CREATE_HANDLE_RETRY_DELAY_MS);
