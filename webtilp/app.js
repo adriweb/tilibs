@@ -4715,6 +4715,32 @@ function calcSupportsFolders() {
     return (state.features & FEATURE_FLAGS.FTS_FOLDER) !== 0;
 }
 
+function isListEntry(entry) {
+    return String(entry.type_name || '').toLowerCase().includes('list');
+}
+
+function isMatrixEntry(entry) {
+    return String(entry.type_name || '').toLowerCase().includes('matrix');
+}
+
+function isBuiltInListName(name) {
+    return /^L(?:[1-6]|[₁₂₃₄₅₆])$/i.test(name);
+}
+
+function formatVariableDisplayName(entry) {
+    const name = entry.name || '';
+    if (calcSupportsFolders() || entry.is_folder === 1) {
+        return name;
+    }
+    if (isListEntry(entry) && !isBuiltInListName(name)) {
+        return `ʟ${name}`;
+    }
+    if (isMatrixEntry(entry)) {
+        return /^\[.*\]$/.test(name) ? name : `[${name}]`;
+    }
+    return name;
+}
+
 function renderTableView(entries, filter) {
     const selectionKeys = getSelectedVarKeys();
     els.varTableBody.innerHTML = '';
@@ -4784,7 +4810,7 @@ function renderTableView(entries, filter) {
         const sizeHtml = options.sizeLabel ? options.sizeLabel : escapeHtml(sizeLabel);
         const row = document.createElement('tr');
         const normalizedFolderPath = normalizeFolderPath(getEntryFolderPath(entry));
-        const safeName = escapeHtml(entry.name || '');
+        const safeName = escapeHtml(formatVariableDisplayName(entry));
         const safeFolderPath = escapeHtml(normalizedFolderPath);
         row.dataset.folderTarget = normalizedFolderPath;
         row.dataset.isFolder = isFolder ? '1' : '0';
