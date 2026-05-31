@@ -163,12 +163,40 @@ static void tigl_get_product(char * string, unsigned int maxlen, struct libusb_d
 	struct libusb_device_descriptor desc;
 	int r = libusb_get_device_descriptor(dev, &desc);
 
+	if (maxlen == 0)
+	{
+		return;
+	}
 	string[0] = 0;
 
 	if (r < 0)
 	{
 		ticables_critical("failed to get device descriptor");
+		return;
 	}
+
+#if defined(__EMSCRIPTEN__)
+	// WebUSB can reject descriptor control transfers while Nspire devices are
+	// reopening / changing interface state. Avoid opening those devices during
+	// enumeration; their PID is enough for our USB variant detection.
+	switch (desc.idProduct)
+	{
+		case PID_NSPIRE:
+			snprintf(string, maxlen, "%s", "TI-Nspire(tm) Handheld");
+			string[maxlen - 1] = 0;
+			return;
+		case PID_NSPIRE_CRADLE:
+			snprintf(string, maxlen, "%s", "TI-Nspire Cradle");
+			string[maxlen - 1] = 0;
+			return;
+		case PID_NSPIRE_CXII:
+			snprintf(string, maxlen, "%s", "TI-Nspire(tm) CX II Handheld");
+			string[maxlen - 1] = 0;
+			return;
+		default:
+			break;
+	}
+#endif
 
 	if (desc.iProduct)
 	{
@@ -253,7 +281,18 @@ static int tigl_find(void)
 	}
 	if (j < MAX_CABLES)
 	{
+#if defined(__EMSCRIPTEN__)
+		// Keep WebUSB and WebSerial discovery separated while a real WebUSB
+		// device is present. Mixing an opportunistic WebSerial Evo entry into
+		// Nspire/DirectLink probing can interleave Asyncify/embind operations
+		// from two browser transport APIs and leave deleted JS vals behind.
+		if (j == 0)
+		{
+			j = evo_serial_add_devices(tigl_devices, j, MAX_CABLES, VID_TI, PID_TI84EVO);
+		}
+#else
 		j = evo_serial_add_devices(tigl_devices, j, MAX_CABLES, VID_TI, PID_TI84EVO);
+#endif
 		tigl_n_devices = j;
 	}
 	return j;
