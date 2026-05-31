@@ -969,6 +969,10 @@ tr:focus-within .row-actions {
     gap: 10px;
 }
 
+.modal-footer.modal-footer-split > .modal-footer-actions:last-child {
+    margin-left: auto;
+}
+
 a {
     color: var(--accent-2);
 }
@@ -1034,6 +1038,16 @@ a {
     gap: 12px;
     border-top: 1px solid var(--border);
     background: rgba(15, 17, 23, 0.6);
+}
+
+.modal-footer.modal-footer-split {
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+}
+
+.modal-footer-actions.hidden {
+    display: none;
 }
 
 .modal-overlay {

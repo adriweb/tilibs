@@ -352,6 +352,8 @@ const I18N_EN = {
     "transfer_options": "Transfer Options",
     "transfer_note": "Location/folder options depend on calculator capabilities. Existing variables are overwritten only if confirmed.",
     "transfer_overwrite_all": "Overwrite all existing items (no per-file confirmation)",
+    "transfer_all_ram": "All RAM",
+    "transfer_all_archive": "All Archive",
     "file": "File",
     "variable": "Variable",
     "cancel": "Cancel",
@@ -2570,6 +2572,9 @@ const els = {
     transferModal: document.getElementById('transferModal'),
     transferTableBody: document.getElementById('transferTableBody'),
     transferOverwriteAll: document.getElementById('transferOverwriteAll'),
+    transferBulkLocationActions: document.getElementById('transferBulkLocationActions'),
+    btnTransferAllRam: document.getElementById('btnTransferAllRam'),
+    btnTransferAllArchive: document.getElementById('btnTransferAllArchive'),
     btnCloseTransfer: document.getElementById('btnCloseTransfer'),
     newFolderName: document.getElementById('newFolderName'),
     newFolderParent: document.getElementById('newFolderParent'),
@@ -3217,6 +3222,8 @@ async function applyTranslations() {
     setTextContent(document.getElementById('transferHeaderFolder'), t('folder'));
     setTextContent(document.getElementById('transferNote'), t('transfer_note'));
     setTextContent(document.getElementById('transferOverwriteAllLabel'), t('transfer_overwrite_all'));
+    setTextContent(els.btnTransferAllRam, t('transfer_all_ram'));
+    setTextContent(els.btnTransferAllArchive, t('transfer_all_archive'));
     setTextContent(els.btnCancelTransfer, t('cancel'));
     setTextContent(els.btnConfirmTransfer, `🚀 ${t('start_transfer')}`);
 
@@ -6066,13 +6073,29 @@ function openTransferModal(plan, options) {
         }
     });
 
+    const hasBulkLocationTargets = plan.length > 1
+        && options.hasArchive
+        && plan.some(item => isVarFileClass(item.fileClass) && (item.locationMask ?? 3) === 3);
+    els.transferBulkLocationActions?.classList.toggle('hidden', !hasBulkLocationTargets);
+
     els.transferModal.classList.remove('hidden');
 
     return new Promise(resolve => {
+        const setAllLocations = (location) => {
+            els.transferTableBody.querySelectorAll('select[data-field="location"]').forEach(select => {
+                if (Array.from(select.options).some(option => option.value === location)) {
+                    select.value = location;
+                }
+            });
+        };
+        const onAllRam = () => setAllLocations('ram');
+        const onAllArchive = () => setAllLocations('archive');
         const cleanup = () => {
             els.btnConfirmTransfer.removeEventListener('click', onConfirm);
             els.btnCancelTransfer.removeEventListener('click', onCancel);
             els.btnCloseTransfer.removeEventListener('click', onCancel);
+            els.btnTransferAllRam?.removeEventListener('click', onAllRam);
+            els.btnTransferAllArchive?.removeEventListener('click', onAllArchive);
         };
         const onCancel = () => {
             cleanup();
@@ -6118,6 +6141,8 @@ function openTransferModal(plan, options) {
                 overwriteAll: Boolean(els.transferOverwriteAll?.checked)
             });
         };
+        els.btnTransferAllRam?.addEventListener('click', onAllRam);
+        els.btnTransferAllArchive?.addEventListener('click', onAllArchive);
         els.btnConfirmTransfer.addEventListener('click', onConfirm);
         els.btnCancelTransfer.addEventListener('click', onCancel);
         els.btnCloseTransfer.addEventListener('click', onCancel);
