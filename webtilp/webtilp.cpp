@@ -41,6 +41,8 @@ enum {
     WEBTILP_EVO_TYPE_RCL_WINDOW = 13
 };
 
+static constexpr uint32_t WEBTILP_EVO_PYTHON_SCRIPT_HEADER = 0x113;
+
 static CableModel g_cable_model = CABLE_USB;
 static CalcModel g_calc_model;
 static CalcHandle* g_calc_handle = nullptr;
@@ -51,6 +53,7 @@ static int g_force_cable = 0;
 static int g_force_calc = 0;
 static int g_cable_timeout = 50;
 static int g_cable_delay = 10;
+static int g_convert_python_files = 1;
 static int g_cable_reopen_needed = 0;
 static CalcModel g_last_model_from = CALC_NONE;
 static CalcModel g_last_model_to = CALC_NONE;
@@ -599,6 +602,772 @@ static int write_last_path(const char* path)
     return 0;
 }
 
+static int is_ce_python_model(CalcModel model)
+{
+    return model == CALC_TI83PCE_USB
+        || model == CALC_TI84PCE_USB
+        || model == CALC_TI82AEP_USB;
+}
+
+static int read_file_bytes(const char* path, uint8_t** data, size_t* size)
+{
+    *data = nullptr;
+    *size = 0;
+    FILE* fp = fopen(path, "rb");
+    if (!fp) {
+        return -1;
+    }
+    if (fseek(fp, 0, SEEK_END) != 0) {
+        fclose(fp);
+        return -1;
+    }
+    const long length = ftell(fp);
+    if (length < 0 || fseek(fp, 0, SEEK_SET) != 0) {
+        fclose(fp);
+        return -1;
+    }
+    uint8_t* buffer = (uint8_t*)g_malloc(length ? (size_t)length : 1);
+    if (!buffer) {
+        fclose(fp);
+        return -1;
+    }
+    if (length > 0 && fread(buffer, 1, (size_t)length, fp) != (size_t)length) {
+        g_free(buffer);
+        fclose(fp);
+        return -1;
+    }
+    fclose(fp);
+    *data = buffer;
+    *size = (size_t)length;
+    return 0;
+}
+
+static int write_file_bytes(const char* path, const uint8_t* data, size_t size)
+{
+    FILE* fp = fopen(path, "wb");
+    if (!fp) {
+        return -1;
+    }
+    const int ok = size == 0 || fwrite(data, 1, size, fp) == size;
+    fclose(fp);
+    return ok ? 0 : -1;
+}
+
+static uint8_t* strip_utf8_bom_copy(const uint8_t* data, size_t size, size_t* out_size)
+{
+    size_t offset = 0;
+    if (size >= 3 && data[0] == 0xEF && data[1] == 0xBB && data[2] == 0xBF) {
+        offset = 3;
+    }
+    *out_size = size - offset;
+    uint8_t* out = (uint8_t*)g_malloc(*out_size ? *out_size : 1);
+    if (!out) {
+        *out_size = 0;
+        return nullptr;
+    }
+    if (*out_size) {
+        memcpy(out, data + offset, *out_size);
+    }
+    return out;
+}
+
+static uint8_t* normalize_python_text_for_download(const uint8_t* data, size_t size, size_t* out_size)
+{
+    size_t offset = 0;
+    if (size >= 3 && data[0] == 0xEF && data[1] == 0xBB && data[2] == 0xBF) {
+        offset = 3;
+    }
+    GByteArray* out = g_byte_array_sized_new(size - offset);
+    if (!out) {
+        return nullptr;
+    }
+    for (size_t i = offset; i < size; i++) {
+        if (data[i] == '\r') {
+            if (i + 1 < size && data[i + 1] == '\n') {
+                i++;
+            }
+            const uint8_t lf = '\n';
+            g_byte_array_append(out, &lf, 1);
+        } else {
+            g_byte_array_append(out, data + i, 1);
+        }
+    }
+    *out_size = out->len;
+    return g_byte_array_free(out, FALSE);
+}
+
+static void sanitize_python_var_name(const char* raw, int uppercase, size_t max_len, char* out, size_t out_size)
+{
+    size_t pos = 0;
+    if (!raw || !*raw || out_size == 0) {
+        return;
+    }
+    for (const unsigned char* p = (const unsigned char*)raw; *p && pos + 1 < out_size && pos < max_len; p++) {
+        unsigned char c = *p;
+        if (g_ascii_isalnum(c)) {
+            out[pos++] = uppercase ? (char)g_ascii_toupper(c) : (char)c;
+        } else if (c == '_') {
+            out[pos++] = '_';
+        }
+    }
+    if (pos == 0) {
+        const char* fallback = uppercase ? "PYTHON" : "python";
+        g_strlcpy(out, fallback, out_size);
+    } else {
+        out[pos] = '\0';
+    }
+}
+
+static char* basename_without_extension(const char* path)
+{
+    char* base = g_path_get_basename(path);
+    if (!base) {
+        return nullptr;
+    }
+    char* dot = strrchr(base, '.');
+    if (dot) {
+        *dot = '\0';
+    }
+    return base;
+}
+
+static int append_python_metadata_length(GByteArray* out, size_t value)
+{
+    if (value == 0 || value > 0x3FFF) {
+        return -1;
+    }
+    do {
+        uint8_t byte = (uint8_t)(value & 0x7F);
+        value >>= 7;
+        if (value) {
+            byte |= 0x80;
+        }
+        g_byte_array_append(out, &byte, 1);
+    } while (value);
+    return 0;
+}
+
+static int ce_python_data_to_script(const uint8_t* data, size_t size, const uint8_t** script, size_t* script_size)
+{
+    *script = nullptr;
+    *script_size = 0;
+    if (!data || size < 7) {
+        return -1;
+    }
+    const size_t payload_size = (size_t)data[0] | ((size_t)data[1] << 8);
+    if (payload_size != size - 2) {
+        return -1;
+    }
+    if (memcmp(data + 2, "PYCD", 4) != 0 && memcmp(data + 2, "PYSC", 4) != 0) {
+        return -1;
+    }
+    size_t pos = 6;
+    while (pos < size) {
+        if (data[pos] == 0x00) {
+            pos++;
+            *script = data + pos;
+            *script_size = size - pos;
+            return 0;
+        }
+        size_t record_length = 0;
+        int shift = 0;
+        int length_bytes = 0;
+        while (pos < size) {
+            const uint8_t byte = data[pos++];
+            record_length |= (size_t)(byte & 0x7F) << shift;
+            length_bytes++;
+            if ((byte & 0x80) == 0) {
+                break;
+            }
+            shift += 7;
+            if (length_bytes >= 2) {
+                return -1;
+            }
+        }
+        if (record_length == 0 || pos + record_length > size) {
+            return -1;
+        }
+        pos += record_length;
+    }
+    return -1;
+}
+
+static GByteArray* build_ce_python_appvar_data(const uint8_t* source, size_t source_size, const char* filename)
+{
+    size_t script_size = 0;
+    uint8_t* script = strip_utf8_bom_copy(source, source_size, &script_size);
+    if (!script) {
+        return nullptr;
+    }
+
+    GByteArray* payload = g_byte_array_new();
+    if (!payload) {
+        g_free(script);
+        return nullptr;
+    }
+    const uint8_t magic[] = { 'P', 'Y', 'C', 'D' };
+    g_byte_array_append(payload, magic, sizeof(magic));
+    if (filename && *filename) {
+        const size_t filename_len = strlen(filename);
+        if (append_python_metadata_length(payload, filename_len + 1) == 0) {
+            const uint8_t filename_type = 0x01;
+            g_byte_array_append(payload, &filename_type, 1);
+            g_byte_array_append(payload, (const uint8_t*)filename, filename_len);
+        }
+    }
+    const uint8_t terminator = 0x00;
+    g_byte_array_append(payload, &terminator, 1);
+
+    const size_t max_payload_size = 65512;
+    if (payload->len > max_payload_size) {
+        g_byte_array_free(payload, TRUE);
+        g_free(script);
+        return nullptr;
+    }
+    if (script_size > max_payload_size - payload->len) {
+        script_size = max_payload_size - payload->len;
+    }
+    g_byte_array_append(payload, script, script_size);
+    g_free(script);
+
+    GByteArray* out = g_byte_array_sized_new(payload->len + 2);
+    if (!out) {
+        g_byte_array_free(payload, TRUE);
+        return nullptr;
+    }
+    const uint8_t length_bytes[] = {
+        (uint8_t)(payload->len & 0xFF),
+        (uint8_t)((payload->len >> 8) & 0xFF)
+    };
+    g_byte_array_append(out, length_bytes, sizeof(length_bytes));
+    g_byte_array_append(out, payload->data, payload->len);
+    g_byte_array_free(payload, TRUE);
+    return out;
+}
+
+static uint16_t evo_python_checksum(const uint8_t* body, size_t body_len)
+{
+    if (body_len < 3) {
+        return 0;
+    }
+    size_t adjusted = body_len - 3;
+    size_t word_count = adjusted >> 1;
+    if ((adjusted & 1U) != 0 && word_count > 0) {
+        word_count--;
+    }
+    uint16_t checksum = 0;
+    for (size_t i = 0; i < word_count; i++) {
+        checksum ^= (uint16_t)(body[i * 2] | (body[i * 2 + 1] << 8));
+    }
+    return checksum;
+}
+
+static void append_cbor_uint(GByteArray* out, uint32_t value)
+{
+    if (value < 24) {
+        const uint8_t b = (uint8_t)value;
+        g_byte_array_append(out, &b, 1);
+    } else if (value <= 0xFF) {
+        const uint8_t b[] = { 0x18, (uint8_t)value };
+        g_byte_array_append(out, b, sizeof(b));
+    } else if (value <= 0xFFFF) {
+        const uint8_t b[] = { 0x19, (uint8_t)(value >> 8), (uint8_t)(value & 0xFF) };
+        g_byte_array_append(out, b, sizeof(b));
+    } else {
+        const uint8_t b[] = { 0x1A, (uint8_t)(value >> 24), (uint8_t)(value >> 16), (uint8_t)(value >> 8), (uint8_t)value };
+        g_byte_array_append(out, b, sizeof(b));
+    }
+}
+
+static void append_cbor_text(GByteArray* out, const char* text)
+{
+    const size_t len = strlen(text);
+    if (len < 24) {
+        const uint8_t b = (uint8_t)(0x60 | len);
+        g_byte_array_append(out, &b, 1);
+    } else {
+        const uint8_t b[] = { 0x78, (uint8_t)len };
+        g_byte_array_append(out, b, sizeof(b));
+    }
+    g_byte_array_append(out, (const uint8_t*)text, len);
+}
+
+static void append_cbor_bytes(GByteArray* out, const uint8_t* bytes, size_t len)
+{
+    if (len < 24) {
+        const uint8_t b = (uint8_t)(0x40 | len);
+        g_byte_array_append(out, &b, 1);
+    } else if (len <= 0xFF) {
+        const uint8_t b[] = { 0x58, (uint8_t)len };
+        g_byte_array_append(out, b, sizeof(b));
+    } else {
+        const uint8_t b[] = { 0x59, (uint8_t)(len >> 8), (uint8_t)(len & 0xFF) };
+        g_byte_array_append(out, b, sizeof(b));
+    }
+    if (len) {
+        g_byte_array_append(out, bytes, len);
+    }
+}
+
+static void append_cbor_key_uint(GByteArray* out, const char* key, uint32_t value)
+{
+    append_cbor_text(out, key);
+    append_cbor_uint(out, value);
+}
+
+static void append_evo_name_word(GByteArray* out, uint16_t word)
+{
+    const uint8_t b[] = { (uint8_t)(word & 0xFF), (uint8_t)(word >> 8) };
+    g_byte_array_append(out, b, sizeof(b));
+}
+
+static GByteArray* encode_evo_python_var_name(const char* name)
+{
+    GByteArray* out = g_byte_array_new();
+    if (!out) {
+        return nullptr;
+    }
+    for (const unsigned char* p = (const unsigned char*)name; p && *p; p++) {
+        const unsigned char c = *p;
+        if (c >= 'A' && c <= 'Z') {
+            append_evo_name_word(out, (uint16_t)(0xE800 + (c - 'A')));
+        } else if (c >= '0' && c <= '9') {
+            append_evo_name_word(out, (uint16_t)(0xE401 + (c - '0')));
+        } else if (c >= 'a' && c <= 'z') {
+            append_evo_name_word(out, c);
+        } else if (c == '_') {
+            append_evo_name_word(out, 0xE400);
+        }
+    }
+    append_evo_name_word(out, 0);
+    return out;
+}
+
+static GByteArray* build_evo_python_script_payload(const uint8_t* source, size_t source_size, const char* filename)
+{
+    size_t script_size = 0;
+    uint8_t* script = strip_utf8_bom_copy(source, source_size, &script_size);
+    if (!script) {
+        return nullptr;
+    }
+    if (script_size > 0xFFFF) {
+        script_size = 0xFFFF;
+    }
+    GByteArray* payload = g_byte_array_new();
+    if (!payload) {
+        g_free(script);
+        return nullptr;
+    }
+    const size_t filename_len = strlen(filename);
+    const uint32_t data_len = (uint32_t)(12 + filename_len + 1 + 4 + script_size + 1);
+    const uint8_t length_header[] = {
+        (uint8_t)(WEBTILP_EVO_PYTHON_SCRIPT_HEADER & 0xFF),
+        (uint8_t)((WEBTILP_EVO_PYTHON_SCRIPT_HEADER >> 8) & 0xFF),
+        (uint8_t)((WEBTILP_EVO_PYTHON_SCRIPT_HEADER >> 16) & 0xFF),
+        (uint8_t)((WEBTILP_EVO_PYTHON_SCRIPT_HEADER >> 24) & 0xFF),
+        (uint8_t)(data_len & 0xFF),
+        (uint8_t)((data_len >> 8) & 0xFF),
+        (uint8_t)((data_len >> 16) & 0xFF),
+        (uint8_t)((data_len >> 24) & 0xFF)
+    };
+    g_byte_array_append(payload, length_header, sizeof(length_header));
+    const uint8_t name_len[] = {
+        (uint8_t)(filename_len & 0xFF),
+        (uint8_t)((filename_len >> 8) & 0xFF),
+        (uint8_t)((filename_len >> 16) & 0xFF),
+        (uint8_t)((filename_len >> 24) & 0xFF)
+    };
+    g_byte_array_append(payload, name_len, sizeof(name_len));
+    g_byte_array_append(payload, (const uint8_t*)filename, filename_len);
+    const uint8_t nul = 0x00;
+    g_byte_array_append(payload, &nul, 1);
+    const uint8_t script_len[] = { (uint8_t)(script_size & 0xFF), (uint8_t)((script_size >> 8) & 0xFF) };
+    g_byte_array_append(payload, script_len, sizeof(script_len));
+    const uint8_t script_type[] = { 0x00, 0x02 };
+    g_byte_array_append(payload, script_type, sizeof(script_type));
+    g_byte_array_append(payload, script, script_size);
+    g_byte_array_append(payload, &nul, 1);
+    g_free(script);
+    return payload;
+}
+
+static GByteArray* build_evo_python_file_data(const uint8_t* source, size_t source_size, const char* var_name, const char* script_name)
+{
+    GByteArray* payload = build_evo_python_script_payload(source, source_size, script_name);
+    GByteArray* encoded_name = encode_evo_python_var_name(var_name);
+    GByteArray* body = g_byte_array_new();
+    if (!payload || !encoded_name || !body) {
+        if (payload) g_byte_array_free(payload, TRUE);
+        if (encoded_name) g_byte_array_free(encoded_name, TRUE);
+        if (body) g_byte_array_free(body, TRUE);
+        return nullptr;
+    }
+
+    const uint8_t map = 0xBF;
+    const uint8_t end = 0xFF;
+    g_byte_array_append(body, &map, 1);
+    append_cbor_text(body, "metaData");
+    g_byte_array_append(body, &map, 1);
+    append_cbor_key_uint(body, "type", 15);
+    append_cbor_key_uint(body, "version", 1);
+    append_cbor_key_uint(body, "flags", 1);
+    append_cbor_text(body, "name");
+    append_cbor_bytes(body, encoded_name->data, encoded_name->len);
+    g_byte_array_append(body, &end, 1);
+    append_cbor_key_uint(body, "version", 1);
+    append_cbor_key_uint(body, "size", payload->len);
+    append_cbor_text(body, "data");
+    append_cbor_bytes(body, payload->data, payload->len);
+    g_byte_array_append(body, &end, 1);
+    g_byte_array_free(payload, TRUE);
+    g_byte_array_free(encoded_name, TRUE);
+
+    const uint16_t checksum = evo_python_checksum(body->data, body->len);
+    const uint8_t checksum_bytes[] = { (uint8_t)(checksum >> 8), (uint8_t)(checksum & 0xFF) };
+    g_byte_array_append(body, checksum_bytes, sizeof(checksum_bytes));
+    return body;
+}
+
+static int read_cbor_uint_arg(const uint8_t* data, size_t size, size_t* pos, uint8_t additional, size_t* value)
+{
+    if (additional < 24) {
+        *value = additional;
+        return 0;
+    }
+    if (additional == 24 && *pos < size) {
+        *value = data[(*pos)++];
+        return 0;
+    }
+    if (additional == 25 && *pos + 1 < size) {
+        *value = ((size_t)data[*pos] << 8) | data[*pos + 1];
+        *pos += 2;
+        return 0;
+    }
+    if (additional == 26 && *pos + 3 < size) {
+        *value = ((size_t)data[*pos] << 24) | ((size_t)data[*pos + 1] << 16) | ((size_t)data[*pos + 2] << 8) | data[*pos + 3];
+        *pos += 4;
+        return 0;
+    }
+    return -1;
+}
+
+static int skip_cbor_value(const uint8_t* data, size_t size, size_t* pos)
+{
+    if (*pos >= size) {
+        return -1;
+    }
+    const uint8_t initial = data[(*pos)++];
+    if (initial == 0xFF) {
+        return 0;
+    }
+    const uint8_t major = initial >> 5;
+    const uint8_t additional = initial & 0x1F;
+    size_t count = 0;
+    if (major == 0) {
+        return read_cbor_uint_arg(data, size, pos, additional, &count);
+    }
+    if (major == 2 || major == 3) {
+        if (read_cbor_uint_arg(data, size, pos, additional, &count) != 0 || *pos + count > size) {
+            return -1;
+        }
+        *pos += count;
+        return 0;
+    }
+    if (major == 4) {
+        if (additional == 31) {
+            while (*pos < size && data[*pos] != 0xFF) {
+                if (skip_cbor_value(data, size, pos) != 0) return -1;
+            }
+            if (*pos >= size) return -1;
+            (*pos)++;
+            return 0;
+        }
+        if (read_cbor_uint_arg(data, size, pos, additional, &count) != 0) return -1;
+        for (size_t i = 0; i < count; i++) {
+            if (skip_cbor_value(data, size, pos) != 0) return -1;
+        }
+        return 0;
+    }
+    if (major == 5) {
+        if (additional == 31) {
+            while (*pos < size && data[*pos] != 0xFF) {
+                if (skip_cbor_value(data, size, pos) != 0 || skip_cbor_value(data, size, pos) != 0) return -1;
+            }
+            if (*pos >= size) return -1;
+            (*pos)++;
+            return 0;
+        }
+        if (read_cbor_uint_arg(data, size, pos, additional, &count) != 0) return -1;
+        for (size_t i = 0; i < count; i++) {
+            if (skip_cbor_value(data, size, pos) != 0 || skip_cbor_value(data, size, pos) != 0) return -1;
+        }
+        return 0;
+    }
+    if (major == 7) {
+        if (additional == 24) {
+            if (*pos >= size) return -1;
+            (*pos)++;
+        } else if (additional == 25) {
+            if (*pos + 1 >= size) return -1;
+            *pos += 2;
+        } else if (additional == 26) {
+            if (*pos + 3 >= size) return -1;
+            *pos += 4;
+        }
+        return 0;
+    }
+    return -1;
+}
+
+static int evo_file_data_to_python_payload(const uint8_t* data, size_t size, const uint8_t** payload, size_t* payload_size)
+{
+    *payload = nullptr;
+    *payload_size = 0;
+    if (!data || size < 5 || data[0] != 0xBF) {
+        return -1;
+    }
+    const uint16_t stored = (uint16_t)((data[size - 2] << 8) | data[size - 1]);
+    if (stored != evo_python_checksum(data, size - 2)) {
+        return -1;
+    }
+    const size_t body_size = size - 2;
+    size_t pos = 1;
+    while (pos < body_size) {
+        if (data[pos] == 0xFF) {
+            return -1;
+        }
+        const uint8_t key_initial = data[pos++];
+        if ((key_initial >> 5) != 3) {
+            return -1;
+        }
+        size_t key_len = 0;
+        if (read_cbor_uint_arg(data, body_size, &pos, key_initial & 0x1F, &key_len) != 0 || pos + key_len > body_size) {
+            return -1;
+        }
+        const char* key = (const char*)data + pos;
+        pos += key_len;
+        if (key_len == 4 && memcmp(key, "data", 4) == 0) {
+            if (pos >= body_size) return -1;
+            const uint8_t value_initial = data[pos++];
+            if ((value_initial >> 5) != 2) return -1;
+            size_t value_len = 0;
+            if (read_cbor_uint_arg(data, body_size, &pos, value_initial & 0x1F, &value_len) != 0 || pos + value_len > body_size) {
+                return -1;
+            }
+            *payload = data + pos;
+            *payload_size = value_len;
+            return 0;
+        }
+        if (skip_cbor_value(data, body_size, &pos) != 0) {
+            return -1;
+        }
+    }
+    return -1;
+}
+
+static int evo_python_payload_to_script(const uint8_t* data, size_t size, const uint8_t** script, size_t* script_size)
+{
+    *script = nullptr;
+    *script_size = 0;
+    if (!data || size < 18) {
+        return -1;
+    }
+    const uint32_t script_header = (uint32_t)data[0] | ((uint32_t)data[1] << 8) | ((uint32_t)data[2] << 16) | ((uint32_t)data[3] << 24);
+    const uint32_t data_len = (uint32_t)data[4] | ((uint32_t)data[5] << 8) | ((uint32_t)data[6] << 16) | ((uint32_t)data[7] << 24);
+    const uint32_t name_len = (uint32_t)data[8] | ((uint32_t)data[9] << 8) | ((uint32_t)data[10] << 16) | ((uint32_t)data[11] << 24);
+    if (name_len == 0 || name_len > 255 || 12U + name_len + 1U + 4U > size) {
+        return -1;
+    }
+    if (data_len > size) {
+        return -1;
+    }
+    const size_t after_name = 12 + name_len;
+    if (data[after_name] != 0) {
+        return -1;
+    }
+    const size_t len_pos = after_name + 1;
+    const uint16_t body_len = (uint16_t)(data[len_pos] | (data[len_pos + 1] << 8));
+    const size_t body_pos = len_pos + 4;
+    if (script_header != WEBTILP_EVO_PYTHON_SCRIPT_HEADER) {
+        return -1;
+    }
+    if (body_pos + body_len > data_len) {
+        return -1;
+    }
+    *script = data + body_pos;
+    *script_size = body_len;
+    return 0;
+}
+
+static int convert_ti_python_file_to_py(const char* ti_path, const char* out_dir, char** out_path)
+{
+    *out_path = nullptr;
+    if (!ti_path || !*ti_path || !out_dir || !*out_dir || !tifiles_file_is_ti(ti_path)) {
+        return -1;
+    }
+
+    CalcModel parse_model = tifiles_file_get_model(ti_path);
+    if (parse_model == CALC_NONE) {
+        parse_model = g_calc_model;
+    }
+    FileContent* content = tifiles_content_create_regular(parse_model);
+    if (!content) {
+        return -1;
+    }
+    if (tifiles_file_read_regular(ti_path, content) != 0 || content->num_entries == 0 || !content->entries || !content->entries[0]) {
+        tifiles_content_delete_regular(content);
+        return -1;
+    }
+
+    VarEntry* ve = content->entries[0];
+    const uint8_t* script = nullptr;
+    size_t script_size = 0;
+    int ok = -1;
+    if (ticonv_model_is_tievo(content->model) && ve->type == 15) {
+        const uint8_t* payload = nullptr;
+        size_t payload_size = 0;
+        if (evo_file_data_to_python_payload(ve->data, ve->size, &payload, &payload_size) == 0) {
+            ok = evo_python_payload_to_script(payload, payload_size, &script, &script_size);
+        }
+    } else if (ve->type == TI84p_APPV) {
+        ok = ce_python_data_to_script(ve->data, ve->size, &script, &script_size);
+    }
+    if (ok != 0) {
+        tifiles_content_delete_regular(content);
+        return -1;
+    }
+
+    size_t py_size = 0;
+    uint8_t* py = normalize_python_text_for_download(script, script_size, &py_size);
+    if (!py) {
+        tifiles_content_delete_regular(content);
+        return -1;
+    }
+    char* base = basename_without_extension(ti_path);
+    char safe_name[96] = {};
+    sanitize_python_var_name(base, 0, 64, safe_name, sizeof(safe_name));
+    g_free(base);
+    char* path = g_strdup_printf("%s/%s.py", out_dir, safe_name);
+    if (!path) {
+        g_free(py);
+        tifiles_content_delete_regular(content);
+        return -1;
+    }
+    ok = write_file_bytes(path, py, py_size);
+    g_free(py);
+    tifiles_content_delete_regular(content);
+    if (ok != 0) {
+        g_free(path);
+        return -1;
+    }
+    *out_path = path;
+    return 0;
+}
+
+EMSCRIPTEN_KEEPALIVE
+const char* convert_python_source_for_calc(const char* py_path, const char* out_dir)
+{
+    static char* result_path = nullptr;
+    g_free(result_path);
+    result_path = nullptr;
+
+    if (!py_path || !*py_path || !out_dir || !*out_dir || !g_convert_python_files) {
+        return "";
+    }
+    const char* ext = strrchr(py_path, '.');
+    if (!ext || g_ascii_strcasecmp(ext + 1, "py") != 0) {
+        return "";
+    }
+    if (!is_ce_python_model(g_calc_model) && !ticonv_model_is_tievo(g_calc_model)) {
+        return "";
+    }
+
+    uint8_t* source = nullptr;
+    size_t source_size = 0;
+    if (read_file_bytes(py_path, &source, &source_size) != 0) {
+        return "";
+    }
+    char* base = basename_without_extension(py_path);
+    char var_name[96] = {};
+    sanitize_python_var_name(base, !ticonv_model_is_tievo(g_calc_model), ticonv_model_is_tievo(g_calc_model) ? 64 : 8, var_name, sizeof(var_name));
+    char* ce_filename = g_strdup_printf("%s.py", var_name[0] ? var_name : "python");
+
+    int ok = -1;
+    if (ticonv_model_is_tievo(g_calc_model)) {
+        GByteArray* data = build_evo_python_file_data(source, source_size, var_name, var_name[0] ? var_name : "python");
+        if (data) {
+            result_path = g_strdup_printf("%s/%s.8xpy2", out_dir, var_name);
+            ok = result_path ? write_file_bytes(result_path, data->data, data->len) : -1;
+            g_byte_array_free(data, TRUE);
+        }
+    } else {
+        GByteArray* data = build_ce_python_appvar_data(source, source_size, ce_filename);
+        if (data) {
+            FileContent* content = tifiles_content_create_regular(g_calc_model);
+            VarEntry* ve = tifiles_ve_create();
+            VarEntry** entries = tifiles_ve_create_array(1);
+            if (content && ve && entries) {
+                ve->type = TI84p_APPV;
+                ve->version = 0;
+                ve->attr = ATTRB_NONE;
+                ve->size = data->len;
+                ve->data = (uint8_t*)tifiles_ve_alloc_data(data->len ? data->len : 1);
+                if (ve->data) {
+                    memcpy(ve->data, data->data, data->len);
+                    char* raw_name = ticonv_varname_tokenize(g_calc_model, var_name, ve->type);
+                    if (raw_name) {
+                        g_strlcpy(ve->name, raw_name, sizeof(ve->name));
+                        ticonv_varname_free(raw_name);
+                    } else {
+                        g_strlcpy(ve->name, var_name, sizeof(ve->name));
+                    }
+                    content->num_entries = 1;
+                    content->entries = entries;
+                    content->entries[0] = ve;
+                    ve = nullptr;
+                    entries = nullptr;
+                    result_path = g_strdup_printf("%s/%s.8xv", out_dir, var_name);
+                    ok = result_path ? tifiles_file_write_regular(result_path, content, nullptr) : -1;
+                }
+            }
+            if (entries) {
+                g_free(entries);
+            }
+            if (ve) {
+                tifiles_ve_delete(ve);
+            }
+            if (content) {
+                tifiles_content_delete_regular(content);
+            }
+            g_byte_array_free(data, TRUE);
+        }
+    }
+    g_free(source);
+    g_free(base);
+    g_free(ce_filename);
+    if (ok != 0) {
+        g_free(result_path);
+        result_path = nullptr;
+        return "";
+    }
+    return result_path;
+}
+
+static const char* maybe_convert_received_python_file(const char* ti_path, const char* out_dir)
+{
+    static char* converted_path = nullptr;
+    g_free(converted_path);
+    converted_path = nullptr;
+    if (!g_convert_python_files) {
+        return ti_path;
+    }
+    if (convert_ti_python_file_to_py(ti_path, out_dir, &converted_path) != 0 || !converted_path) {
+        return ti_path;
+    }
+    remove(ti_path);
+    return converted_path;
+}
+
 EMSCRIPTEN_KEEPALIVE
 int init() {
     printf("Initializing tilibs...\n");
@@ -793,6 +1562,11 @@ void set_cable_delay(int delay) {
             ticables_options_set_delay(g_cable_handle, g_cable_delay);
         }
     }
+}
+
+EMSCRIPTEN_KEEPALIVE
+void set_convert_python_files(int enabled) {
+    g_convert_python_files = enabled ? 1 : 0;
 }
 
 EMSCRIPTEN_KEEPALIVE
@@ -1488,7 +2262,8 @@ int calc_recv_var(CableHandle* cable_handle, const char* folder, const char* nam
 
     const int result = ticalcs_calc_recv_var2(g_calc_handle, MODE_NORMAL, full_path, &req);
     if (result == 0) {
-        write_last_path(full_path);
+        const char* download_path = maybe_convert_received_python_file(full_path, dir);
+        write_last_path(download_path);
     }
     free(full_path);
     return result;

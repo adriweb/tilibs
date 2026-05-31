@@ -1194,6 +1194,16 @@ a {
     font-weight: 600;
 }
 
+.form-field .form-option {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-height: 40px;
+    text-transform: none;
+    letter-spacing: 0;
+    color: var(--text);
+}
+
 .form-input {
     padding: 10px 12px;
     border-radius: 10px;
