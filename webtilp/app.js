@@ -2984,7 +2984,7 @@ function getActiveCalcModelString() {
 }
 
 function resolveDeviceModelName(infoProductName) {
-    let calcModelLabel = getActiveCalcModelString();
+    let calcModelLabel = getActiveCalcModelString() || '';
     if (hasSilverlinkConnected()) {
         const calcModel = state.settings?.calcModel ?? 'auto';
         if (calcModel !== 'auto') {
