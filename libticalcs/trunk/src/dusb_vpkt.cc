@@ -280,10 +280,10 @@ int TICALL dusb_recv_buf_size_alloc(CalcHandle* handle, uint32_t *size)
 			ticalcs_critical("Clamping overly large buffer size allocation to %u bytes", (unsigned int)sizeof(raw.data));
 			tmp = sizeof(raw.data);
 		}
-		if (   (handle->model == CALC_TI83PCE_USB || handle->model == CALC_TI84PCE_USB)
+		if (   (handle->model == CALC_TI83PCE_USB || handle->model == CALC_TI84PCE_USB || handle->model == CALC_TI82AEP_USB)
 		    && tmp > 1018)
 		{
-			ticalcs_info("The 83PCE/84+CE allocate more than they support. Clamping buffer size to 1018");
+			ticalcs_info("The 83PCE/84+CE/82AEP allocate more than they support. Clamping buffer size to 1018");
 			tmp = 1018;
 		}
 		if (size)
