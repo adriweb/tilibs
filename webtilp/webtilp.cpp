@@ -381,8 +381,9 @@ static int ensure_calc_handle_attached(CableHandle* cable_handle)
     }
 
     if (g_calc_model == CALC_NONE && !g_force_calc) {
-        if (g_force_cable && g_cable_model == CABLE_SLV) {
-            printf("ERROR: SilverLink requires manual calculator model selection\n");
+        if (g_force_cable && (g_cable_model == CABLE_SLV || g_cable_model == CABLE_GRY)) {
+            printf("ERROR: %s requires manual calculator model selection\n",
+                   g_cable_model == CABLE_GRY ? "GrayLink" : "SilverLink");
             return -2;
         }
         printf("Calculator model unknown, probing...\n");
