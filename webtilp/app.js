@@ -1,6 +1,7 @@
 /* global TILibsModule */
 
 const TI_VENDOR_ID = 0x0451; // Texas Instruments
+const PID_TI84_EVO_SERIAL = 0xE018;
 
 // Known TI USB devices
 const TI_USB_DEVICES = [
@@ -13,6 +14,7 @@ const TI_USB_DEVICES = [
     { productId: 0xE012, name: "TI-Nspire Hand-Held" },
  // { productId: 0xE013, name: "Network Bridge" },                          // not for us
  // { productId: 0xE016, name: "TI Bluetooth Adapter" },                    // not for us
+    { productId: 0xE018, name: "TI-84 Evo / Evo-T" },                        // CDC serial: selected through WebUSB, data through WebSerial
     { productId: 0xE01C, name: "Data Collection Sled [Nspire Lab Cradle, Nspire Datatracker Cradle]" },
  // { productId: 0xE01E, name: "Nspire CX Navigator Access Point" },        // not for us
  // { productId: 0xE01F, name: "Python Adapter (firmware install mode)" },  // not for us
@@ -80,6 +82,114 @@ async function getAuthorizedDevices() {
         console.error("Failed to get authorized devices:", error);
         return [];
     }
+}
+
+function isEvoUsbDevice(device) {
+    return device
+        && device.vendorId === TI_VENDOR_ID
+        && device.productId === PID_TI84_EVO_SERIAL;
+}
+
+function serialPortToDevice(port, usbDevice = null) {
+    const info = port?.getInfo ? port.getInfo() : {};
+    return {
+        transport: 'serial',
+        serialPort: port,
+        vendorId: info.usbVendorId || TI_VENDOR_ID,
+        productId: info.usbProductId || PID_TI84_EVO_SERIAL,
+        productName: usbDevice?.productName || 'TI-84 Evo / Evo-T',
+        reset: async () => {},
+        forget: async () => {
+            if (port?.forget) {
+                await port.forget();
+            }
+        }
+    };
+}
+
+function isSerialDevice(device = state.authorizedDevice) {
+    return device?.transport === 'serial';
+}
+
+function isEvoSerialDeviceInfo(info) {
+    return info
+        && info.usbVendorId === TI_VENDOR_ID
+        && info.usbProductId === PID_TI84_EVO_SERIAL;
+}
+
+async function requestTIEvoSerialDevice() {
+    if (!navigator.serial) {
+        throw new Error('WebSerial is not supported in this browser.');
+    }
+    if (!self.isSecureContext) {
+        throw new Error('WebSerial requires HTTPS or localhost.');
+    }
+    try {
+        const port = await navigator.serial.requestPort({
+            filters: [{ usbVendorId: TI_VENDOR_ID, usbProductId: PID_TI84_EVO_SERIAL }]
+        });
+        return serialPortToDevice(port);
+    } catch (error) {
+        if (error && error.name === 'NotFoundError') {
+            console.warn('No TI-84 Evo serial device was selected');
+            return null;
+        }
+        console.error('WebSerial device selection failed:', error);
+        throw error;
+    }
+}
+
+async function getAuthorizedSerialDevices() {
+    if (!navigator.serial) {
+        return [];
+    }
+    try {
+        const ports = await navigator.serial.getPorts();
+        return ports
+            .filter(port => isEvoSerialDeviceInfo(port.getInfo ? port.getInfo() : {}))
+            .map(serialPortToDevice);
+    } catch (error) {
+        console.error('Failed to get authorized serial devices:', error);
+        return [];
+    }
+}
+
+async function getAuthorizedEvoSerialDevice(usbDevice = null) {
+    const serialDevices = await getAuthorizedSerialDevices();
+    if (!serialDevices || !serialDevices.length) {
+        return null;
+    }
+    if (!usbDevice) {
+        return serialDevices[0];
+    }
+    return serialPortToDevice(serialDevices[0].serialPort, usbDevice);
+}
+
+async function requestEvoSerialForUsbDevice(usbDevice) {
+    if (!isEvoUsbDevice(usbDevice)) {
+        return usbDevice;
+    }
+    const authorizedSerial = await getAuthorizedEvoSerialDevice(usbDevice);
+    if (authorizedSerial) {
+        return authorizedSerial;
+    }
+    const serialDevice = await requestTIEvoSerialDevice();
+    if (!serialDevice) {
+        return null;
+    }
+    serialDevice.productName = usbDevice.productName || serialDevice.productName;
+    return serialDevice;
+}
+
+function bindEvoSerialPortToModule(module, device) {
+    if (!module || !isSerialDevice(device) || !device.serialPort) {
+        return;
+    }
+    const current = module.__ticablesWebSerial || {};
+    module.__ticablesWebSerial = {
+        ...current,
+        port: device.serialPort
+    };
 }
 
 const state = {
@@ -816,7 +926,7 @@ const CABLE_OPTIONS = [
 ];
 
 const SILVERLINK_CALC_VALUES = new Set([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 16, 17]);
-const DIRECTLINK_CALC_VALUES = new Set([13, 14, 15, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36]);
+const DIRECTLINK_CALC_VALUES = new Set([13, 14, 15, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 43, 44]);
 
 const CALC_MODEL_OPTIONS = [
     { value: 'auto', label: 'Auto' },
@@ -861,7 +971,9 @@ const CALC_MODEL_OPTIONS = [
     { value: 39, label: 'CBL2' },
     { value: 40, label: 'CBR2' },
     { value: 41, label: 'LabPro' },
-    { value: 42, label: 'TI Presenter' }
+    { value: 42, label: 'TI Presenter' },
+    { value: 43, label: 'TI-84 Evo' },
+    { value: 44, label: 'TI-84 Evo-T' }
 ];
 
 const PID_SILVERLINK = 0xe001;
@@ -871,6 +983,7 @@ const DIRECTLINK_PIDS = new Set([
     0xe004,
     0xe008,
     0xe012,
+    0xe018, // PID_TI84_EVO_SERIAL
     0xe01c,
     0xe022
 ]);
@@ -2791,6 +2904,17 @@ async function applyWebUsbDeviceCableHint(module, device) {
     if (!device || !module) {
         return;
     }
+    if (isSerialDevice(device)) {
+        bindEvoSerialPortToModule(module, device);
+        module._set_cable_model(5);
+        module._set_force_cable(1);
+        if (state.settings?.calcModel === 'auto') {
+            module._set_calc_model(getEvoCalcModelForDevice(device));
+            module._set_force_calc(0);
+        }
+        log('Cable hint applied: TI-84 Evo WebSerial');
+        return;
+    }
     if (state.settings && state.settings.cableModel !== 'auto') {
         return;
     }
@@ -2865,9 +2989,20 @@ function deviceMatches(a, b) {
     if (!a || !b) {
         return false;
     }
+    if (isSerialDevice(a) || isSerialDevice(b)) {
+        return isSerialDevice(a)
+            && isSerialDevice(b)
+            && a.vendorId === b.vendorId
+            && a.productId === b.productId;
+    }
     return a.vendorId === b.vendorId
         && a.productId === b.productId
         && (a.productName || '') === (b.productName || '');
+}
+
+function getEvoCalcModelForDevice(device) {
+    const name = `${device?.productName || ''} ${device?.deviceName || ''}`;
+    return /evo[-_ ]?t/i.test(name) ? 44 : 43;
 }
 
 function updateDeviceModelDisplay(infoProductName) {
@@ -3617,21 +3752,35 @@ async function initModule() {
 async function authorizeDevice(forcePrompt = false) {
     const module = await initModule();
     const mustPrompt = forcePrompt || state.needsReauthorize;
+    const selectedCalcModel = String(state.settings?.calcModel ?? '');
+    const wantsEvoSerial = selectedCalcModel === '43' || selectedCalcModel === '44';
     if (!mustPrompt && getAuthorizedDevices) {
         const devices = await getAuthorizedDevices();
         if (devices && devices.length) {
-            if (!deviceMatches(state.authorizedDevice, devices[0])) {
-                log(`Using authorized device: ${devices[0].productName || 'Unknown'}`);
+            const usbDevice = wantsEvoSerial
+                ? (devices.find(isEvoUsbDevice) || devices[0])
+                : devices[0];
+            const device = isEvoUsbDevice(usbDevice)
+                ? await getAuthorizedEvoSerialDevice(usbDevice)
+                : usbDevice;
+            if (!device) {
+                const cancelError = new Error('TI-84 Evo serial port authorization is required.');
+                cancelError.silent = true;
+                throw cancelError;
             }
-            state.authorizedDevice = devices[0];
+            if (!deviceMatches(state.authorizedDevice, device)) {
+                log(`Using authorized device: ${device.productName || 'Unknown'}`);
+            }
+            state.authorizedDevice = device;
             if (!hasSilverlinkConnected()) {
-                state.deviceModelName = devices[0].productName || state.deviceModelName;
+                state.deviceModelName = device.productName || state.deviceModelName;
             }
             updateDeviceModelDisplay();
-            return devices[0];
+            return device;
         }
     }
-    const device = await requestTICalculatorDevice();
+    let device = await requestTICalculatorDevice();
+    device = await requestEvoSerialForUsbDevice(device);
     if (!device) {
         const cancelError = new Error('No device selected.');
         cancelError.silent = true;
@@ -3666,7 +3815,16 @@ async function autoConnectIfAuthorized() {
         return;
     }
 
-    state.authorizedDevice = devices[0];
+    const usbDevice = devices[0];
+    if (isEvoUsbDevice(usbDevice)) {
+        const serialDevice = await getAuthorizedEvoSerialDevice(usbDevice);
+        if (!serialDevice) {
+            return;
+        }
+        state.authorizedDevice = serialDevice;
+    } else {
+        state.authorizedDevice = usbDevice;
+    }
 
     if (guardWinUsbNspireCX2(state.authorizedDevice)) {
         return;
@@ -5880,6 +6038,7 @@ async function performTransfers(plan, module, options) {
         ? configuredCableTimeout
         : 50;
     const archiveEntryTimeout = 250; // 25.0s (setting unit is 1/10s)
+    const osEntryTimeout = 600; // 60s; can take a while sometimes
 
     for (const item of plan) {
         if (!item.path) {
@@ -5982,7 +6141,9 @@ async function performTransfers(plan, module, options) {
                 || item.fileClass === 'flash'
                 || item.fileClass === 'os'
                 || (isVar && targetLocation === 'archive');
-            const entryCableTimeout = isArchiveOrFlashTransfer
+            const entryCableTimeout = item.fileClass === 'os'
+                ? Math.max(originalCableTimeout, osEntryTimeout)
+                : isArchiveOrFlashTransfer
                 ? Math.max(originalCableTimeout, archiveEntryTimeout)
                 : originalCableTimeout;
 
@@ -6043,14 +6204,14 @@ async function performTransfers(plan, module, options) {
                     });
                 }
             } else {
-                log(`Failed to send ${displayName} (${formatErrorResult(module, result)}).`);
+                log(`Failed to send ${displayName} (${formatErrorResult(module, result)}).${getNativeWarningSuffix()}`);
             }
         } catch (err) {
             if (err?.silent) {
                 throw err;
             }
             const label = item?.entryName ? `${item.file?.name || 'file'} (${item.entryName})` : (item.file?.name || 'file');
-            log(`Failed to send ${label} (${err?.message || 'unknown error'}).`);
+            log(`Failed to send ${label} (${err?.message || 'unknown error'}).${getNativeWarningSuffix()}`);
         }
     }
     return { successCount };
@@ -7313,38 +7474,46 @@ if ('serviceWorker' in navigator) {
         });
     });
 }
-if (navigator.usb) {
-    navigator.usb.addEventListener('disconnect', () => {
-        const silent = state.silentReconnectInProgress;
-        clearActiveOperations(silent ? undefined : 'Active operation cancelled due to disconnect.');
-        state.handle = 0;
-        state.cableOpen = false;
-        state.authorizedDevice = null;
-        state.connectInProgress = false;
-        state.handlePromise = null;
-        if (!silent) {
-            state.module = null;
-            state.needsReauthorize = false;
-            clearDeviceData();
-            setConnected(false);
-            setStatus('status_disconnected', false);
-            log('Device disconnected.');
-        }
-    });
-    navigator.usb.addEventListener('connect', () => {
-        if (state.silentReconnectInProgress) {
-            return;
-        }
-        state.handle = 0;
+function handleTransportDisconnect() {
+    const silent = state.silentReconnectInProgress;
+    clearActiveOperations(silent ? undefined : 'Active operation cancelled due to disconnect.');
+    state.handle = 0;
+    state.cableOpen = false;
+    state.authorizedDevice = null;
+    state.connectInProgress = false;
+    state.handlePromise = null;
+    if (!silent) {
         state.module = null;
-        state.cableOpen = false;
-        state.authorizedDevice = null;
-        state.connectInProgress = false;
-        setConnected(false);
-        setStatus('status_device_connected', false);
-        log('Device connected. Reinitialize to use it.');
+        state.needsReauthorize = false;
         clearDeviceData();
-    });
+        setConnected(false);
+        setStatus('status_disconnected', false);
+        log('Device disconnected.');
+    }
+}
+
+function handleTransportConnect() {
+    if (state.silentReconnectInProgress) {
+        return;
+    }
+    state.handle = 0;
+    state.module = null;
+    state.cableOpen = false;
+    state.authorizedDevice = null;
+    state.connectInProgress = false;
+    setConnected(false);
+    setStatus('status_device_connected', false);
+    log('Device connected. Reinitialize to use it.');
+    clearDeviceData();
+}
+
+if (navigator.usb) {
+    navigator.usb.addEventListener('disconnect', handleTransportDisconnect);
+    navigator.usb.addEventListener('connect', handleTransportConnect);
+}
+if (navigator.serial) {
+    navigator.serial.addEventListener('disconnect', handleTransportDisconnect);
+    navigator.serial.addEventListener('connect', handleTransportConnect);
 }
 if (!navigator.usb) {
     setStatus('status_webusb_unsupported', false);
