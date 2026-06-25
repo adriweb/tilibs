@@ -2,6 +2,11 @@
 
 const TI_VENDOR_ID = 0x0451; // Texas Instruments
 const PID_TI84_EVO_SERIAL = 0xE018;
+const SERIAL_KIND_EVO = 1;
+const SERIAL_KIND_GRAYLINK = 2;
+const CABLE_GRAYLINK = '1';
+const CABLE_SILVERLINK = '4';
+const CABLE_DIRECTLINK = '5';
 
 // Known TI USB devices
 const TI_USB_DEVICES = [
@@ -90,14 +95,24 @@ function isEvoUsbDevice(device) {
         && device.productId === PID_TI84_EVO_SERIAL;
 }
 
-function serialPortToDevice(port, usbDevice = null) {
+function serialPortToDevice(port, options = {}) {
+    const {
+        usbDevice = null,
+        serialKind = SERIAL_KIND_EVO,
+        productName = 'TI-83/84 Evo',
+        vendorId = TI_VENDOR_ID,
+        productId = PID_TI84_EVO_SERIAL
+    } = options;
     const info = port?.getInfo ? port.getInfo() : {};
+    const resolvedVendorId = info.usbVendorId || vendorId;
+    const resolvedProductId = info.usbProductId || productId;
     return {
         transport: 'serial',
+        serialKind,
         serialPort: port,
-        vendorId: info.usbVendorId || TI_VENDOR_ID,
-        productId: info.usbProductId || PID_TI84_EVO_SERIAL,
-        productName: usbDevice?.productName || 'TI-83/84 Evo',
+        vendorId: resolvedVendorId,
+        productId: resolvedProductId,
+        productName: usbDevice?.productName || productName,
         reset: async () => {},
         forget: async () => {
             if (port?.forget) {
@@ -109,6 +124,10 @@ function serialPortToDevice(port, usbDevice = null) {
 
 function isSerialDevice(device = state.authorizedDevice) {
     return device?.transport === 'serial';
+}
+
+function isGrayLinkSerialDevice(device = state.authorizedDevice) {
+    return isSerialDevice(device) && device.serialKind === SERIAL_KIND_GRAYLINK;
 }
 
 function isEvoSerialDeviceInfo(info) {
@@ -128,7 +147,7 @@ async function requestTIEvoSerialDevice() {
         const port = await navigator.serial.requestPort({
             filters: [{ usbVendorId: TI_VENDOR_ID, usbProductId: PID_TI84_EVO_SERIAL }]
         });
-        return serialPortToDevice(port);
+        return serialPortToDevice(port, { serialKind: SERIAL_KIND_EVO, productName: 'TI-83/84 Evo' });
     } catch (error) {
         if (error && error.name === 'NotFoundError') {
             console.warn('No TI-83/84 Evo serial device was selected');
@@ -147,7 +166,7 @@ async function getAuthorizedSerialDevices() {
         const ports = await navigator.serial.getPorts();
         return ports
             .filter(port => isEvoSerialDeviceInfo(port.getInfo ? port.getInfo() : {}))
-            .map(serialPortToDevice);
+            .map(port => serialPortToDevice(port, { serialKind: SERIAL_KIND_EVO, productName: 'TI-83/84 Evo' }));
     } catch (error) {
         console.error('Failed to get authorized serial devices:', error);
         return [];
@@ -162,7 +181,7 @@ async function getAuthorizedEvoSerialDevice(usbDevice = null) {
     if (!usbDevice) {
         return serialDevices[0];
     }
-    return serialPortToDevice(serialDevices[0].serialPort, usbDevice);
+    return serialPortToDevice(serialDevices[0].serialPort, { usbDevice, serialKind: SERIAL_KIND_EVO, productName: 'TI-83/84 Evo' });
 }
 
 async function requestEvoSerialForUsbDevice(usbDevice) {
@@ -181,15 +200,45 @@ async function requestEvoSerialForUsbDevice(usbDevice) {
     return serialDevice;
 }
 
-function bindEvoSerialPortToModule(module, device) {
+async function requestGrayLinkSerialDevice() {
+    if (!navigator.serial) {
+        throw new Error('WebSerial is not supported in this browser.');
+    }
+    if (!self.isSecureContext) {
+        throw new Error('WebSerial requires HTTPS or localhost.');
+    }
+    try {
+        const port = await navigator.serial.requestPort();
+        return serialPortToDevice(port, {
+            serialKind: SERIAL_KIND_GRAYLINK,
+            productName: 'GrayLink serial (RS232)',
+            vendorId: 0,
+            productId: 0
+        });
+    } catch (error) {
+        if (error && error.name === 'NotFoundError') {
+            console.warn('No GrayLink serial port was selected');
+            return null;
+        }
+        console.error('WebSerial GrayLink selection failed:', error);
+        throw error;
+    }
+}
+
+function bindSerialPortToModule(module, device) {
     if (!module || !isSerialDevice(device) || !device.serialPort) {
         return;
     }
     const current = module.__ticablesWebSerial || {};
     module.__ticablesWebSerial = {
         ...current,
+        kind: device.serialKind || SERIAL_KIND_EVO,
         port: device.serialPort
     };
+}
+
+function bindEvoSerialPortToModule(module, device) {
+    bindSerialPortToModule(module, device);
 }
 
 const state = {
@@ -295,8 +344,8 @@ const I18N_EN = {
     "welcome_text": "Plug in your TI graphing calculator, then click \"Connect Calculator\" to get started.",
     "webusb_unavailable_title": "WebUSB is not available in this browser.",
     "webusb_unavailable_text": "Please use a WebUSB-compatible browser like Chrome, Edge, or Brave.",
-    "webserial_only_title": "WebUSB is not available; TI-83/84 Evo support only.",
-    "webserial_only_text": "This browser supports WebSerial, so WebTILP can connect to TI-83/84 Evo calculators only. Use a WebUSB-enabled browser for all supported calculators.",
+    "webserial_only_title": "WebUSB is not available; WebSerial support only.",
+    "webserial_only_text": "This browser supports WebSerial, so WebTILP can connect to TI-83/84 Evo calculators or an explicitly selected GrayLink serial cable. Use a WebUSB-enabled browser for all USB calculators.",
     "device": "Device",
     "model": "Model",
     "free_memory": "Free Memory",
@@ -338,6 +387,7 @@ const I18N_EN = {
     "calculator_model": "Calculator model",
     "auto_probe_hint": "Auto uses probing to detect the model.",
     "silverlink_hint": "SilverLink requires manual model selection.",
+    "graylink_hint": "GrayLink requires manual model selection and a WebSerial RS232 adapter.",
     "cable_timeout": "Cable timeout (1/10s)",
     "cable_delay": "Cable delay (us)",
     "language": "Language",
@@ -408,6 +458,7 @@ const I18N_EN = {
     "alert_unknown_theme_param": "Unknown theme URL parameter: {value}",
     "alert_silverlink_model_required": "SilverLink detected. Please choose a calculator model in Settings before connecting.",
     "alert_silverlink_choose_model": "SilverLink requires choosing a calculator model.",
+    "alert_graylink_model_required": "GrayLink requires choosing a calculator model in Settings before connecting.",
     "alert_bundle_only_files": "Please transfer bundle files by themselves.",
     "alert_bundle_one_at_a_time": "Please transfer one bundle file at a time.",
     "alert_bundle_ce_only": "This bundle can only be installed on TI-84 Plus CE / TI-83 Premium CE calculators.",
@@ -941,8 +992,9 @@ const SETTINGS_DEFAULTS = {
 
 const CABLE_OPTIONS = [
     { value: 'auto', label: 'Auto' },
-    { value: '5', label: 'DirectLink USB' },
-    { value: '4', label: 'SilverLink (Graph Link USB)' }
+    { value: CABLE_DIRECTLINK, label: 'DirectLink USB' },
+    { value: CABLE_SILVERLINK, label: 'SilverLink (Graph Link USB)' },
+    { value: CABLE_GRAYLINK, label: 'GrayLink serial (RS232)' }
 ];
 
 const SILVERLINK_CALC_VALUES = new Set([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 16, 17]);
@@ -2792,11 +2844,14 @@ function resolveCableParam(rawValue) {
     if (normalized === 'auto') {
         return 'auto';
     }
+    if (normalized === 'graylink' || normalized === 'greylink' || normalized === 'gry' || normalized === 'rs232') {
+        return CABLE_GRAYLINK;
+    }
     if (normalized === 'silverlink' || normalized === 'dbus') {
-        return '4';
+        return CABLE_SILVERLINK;
     }
     if (normalized === 'directlink' || normalized === 'dusb') {
-        return '5';
+        return CABLE_DIRECTLINK;
     }
     return resolveOptionValue(CABLE_OPTIONS, rawValue);
 }
@@ -2842,8 +2897,9 @@ function applyUrlOverrides() {
                         els.settingCalcModel.value = state.settings.calcModel;
                         updateCalcHint(els.settingCableModel?.value || state.settings.cableModel);
                     }
-                    const isSilverlink = String(state.settings.cableModel) === '4';
-                    if (isSilverlink && !SILVERLINK_CALC_VALUES.has(model)) {
+                    const isDbusSerialCable = String(state.settings.cableModel) === CABLE_SILVERLINK
+                        || String(state.settings.cableModel) === CABLE_GRAYLINK;
+                    if (isDbusSerialCable && !SILVERLINK_CALC_VALUES.has(model)) {
                         shouldOpenSettings = true;
                         openSettingsModal();
                     }
@@ -2870,11 +2926,12 @@ function applyUrlOverrides() {
     }
     state.settings = nextSettings;
 
-    const isSilverlink = String(state.settings.cableModel) === '4';
+    const isDbusSerialCable = String(state.settings.cableModel) === CABLE_SILVERLINK
+        || String(state.settings.cableModel) === CABLE_GRAYLINK;
     const calcModelValue = String(state.settings.calcModel || '');
     const isCalcAuto = !calcParam || calcModelValue === 'auto';
-    const isCalcValidForSilverlink = SILVERLINK_CALC_VALUES.has(Number(calcModelValue));
-    if (isSilverlink && (isCalcAuto || !isCalcValidForSilverlink)) {
+    const isCalcValidForDbusSerial = SILVERLINK_CALC_VALUES.has(Number(calcModelValue));
+    if (isDbusSerialCable && (isCalcAuto || !isCalcValidForDbusSerial)) {
         shouldOpenSettings = true;
     }
 
@@ -2936,8 +2993,14 @@ async function applyWebUsbDeviceCableHint(module, device) {
         return;
     }
     if (isSerialDevice(device)) {
-        bindEvoSerialPortToModule(module, device);
-        module._set_cable_model(5);
+        bindSerialPortToModule(module, device);
+        if (isGrayLinkSerialDevice(device)) {
+            module._set_cable_model(Number(CABLE_GRAYLINK));
+            module._set_force_cable(1);
+            log('Cable hint applied: GrayLink WebSerial');
+            return;
+        }
+        module._set_cable_model(Number(CABLE_DIRECTLINK));
         module._set_force_cable(1);
         const calcSetting = String(state.settings?.calcModel ?? 'auto');
         if (calcSetting === 'auto' || (!navigator.usb && calcSetting !== '43' && calcSetting !== '44' && calcSetting !== '45')) {
@@ -2955,14 +3018,14 @@ async function applyWebUsbDeviceCableHint(module, device) {
     }
 
     if (device.productId === PID_SILVERLINK) {
-        module._set_cable_model(4);
+        module._set_cable_model(Number(CABLE_SILVERLINK));
         module._set_force_cable(1);
         log('Cable hint applied: SilverLink USB');
         return;
     }
 
     if (DIRECTLINK_PIDS.has(device.productId)) {
-        module._set_cable_model(5);
+        module._set_cable_model(Number(CABLE_DIRECTLINK));
         module._set_force_cable(1);
         log('Cable hint applied: DirectLink USB');
     }
@@ -2970,6 +3033,10 @@ async function applyWebUsbDeviceCableHint(module, device) {
 
 function hasSilverlinkConnected() {
     return state.authorizedDevice && state.authorizedDevice.productId === PID_SILVERLINK;
+}
+
+function isGrayLinkSelected() {
+    return String(state.settings?.cableModel ?? 'auto') === CABLE_GRAYLINK || isGrayLinkSerialDevice();
 }
 
 function isTi92Selected() {
@@ -3024,6 +3091,7 @@ function deviceMatches(a, b) {
     if (isSerialDevice(a) || isSerialDevice(b)) {
         return isSerialDevice(a)
             && isSerialDevice(b)
+            && a.serialKind === b.serialKind
             && a.vendorId === b.vendorId
             && a.productId === b.productId;
     }
@@ -3065,13 +3133,13 @@ function promptCableMismatchResolution() {
     const isSilverlinkDevice = pid === PID_SILVERLINK;
     const isDirectlinkDevice = DIRECTLINK_PIDS.has(pid);
     const forcedCable = state.settings?.cableModel ?? 'auto';
-    const forcedSilverlink = forcedCable === '4';
-    const forcedDirectlink = forcedCable === '5';
+    const forcedSilverlink = forcedCable === CABLE_SILVERLINK;
+    const forcedDirectlink = forcedCable === CABLE_DIRECTLINK;
 
     if (isSilverlinkDevice && forcedDirectlink) {
         const confirmSwitch = confirm(t('confirm_switch_to_silverlink'));
         if (confirmSwitch) {
-            state.settings.cableModel = '4';
+            state.settings.cableModel = CABLE_SILVERLINK;
             state.settings.calcModel = 'auto';
             saveSettings();
             openSettingsModal();
@@ -3082,7 +3150,7 @@ function promptCableMismatchResolution() {
     if (isDirectlinkDevice && forcedSilverlink) {
         const confirmSwitch = confirm(t('confirm_switch_to_directlink'));
         if (confirmSwitch) {
-            state.settings.cableModel = '5';
+            state.settings.cableModel = CABLE_DIRECTLINK;
             state.settings.calcModel = 'auto';
             saveSettings();
             window.location.reload();
@@ -3106,6 +3174,19 @@ function ensureSilverlinkModelSelected() {
     return false;
 }
 
+function ensureGrayLinkModelSelected() {
+    if (!isGrayLinkSelected()) {
+        return true;
+    }
+    const calcModel = state.settings?.calcModel ?? 'auto';
+    if (calcModel !== 'auto') {
+        return true;
+    }
+    alert(t('alert_graylink_model_required'));
+    openSettingsModal();
+    return false;
+}
+
 function populateSelect(select, options) {
     select.innerHTML = '';
     options.forEach(option => {
@@ -3125,10 +3206,10 @@ function sortCalcOptions(options) {
 }
 
 function getCalcOptionsForCable(cableModel) {
-    if (String(cableModel) === '4') {
+    if (String(cableModel) === CABLE_SILVERLINK || String(cableModel) === CABLE_GRAYLINK) {
         return sortCalcOptions(CALC_MODEL_OPTIONS.filter(option => option.value === 'auto' || SILVERLINK_CALC_VALUES.has(Number(option.value))));
     }
-    if (String(cableModel) === '5') {
+    if (String(cableModel) === CABLE_DIRECTLINK) {
         return sortCalcOptions(CALC_MODEL_OPTIONS.filter(option => option.value === 'auto' || DIRECTLINK_CALC_VALUES.has(Number(option.value))));
     }
     return sortCalcOptions(CALC_MODEL_OPTIONS);
@@ -3138,8 +3219,12 @@ function updateCalcHint(cableModel) {
     if (!els.settingCalcHint) {
         return;
     }
-    if (String(cableModel) === '4') {
+    if (String(cableModel) === CABLE_SILVERLINK) {
         els.settingCalcHint.textContent = t('silverlink_hint');
+        return;
+    }
+    if (String(cableModel) === CABLE_GRAYLINK) {
+        els.settingCalcHint.textContent = t('graylink_hint');
         return;
     }
     els.settingCalcHint.textContent = t('auto_probe_hint');
@@ -3359,8 +3444,12 @@ function resetSettings() {
 }
 
 async function saveSettingsFromModal() {
-    if (els.settingCableModel.value === '4' && els.settingCalcModel.value === 'auto') {
+    if (els.settingCableModel.value === CABLE_SILVERLINK && els.settingCalcModel.value === 'auto') {
         alert(t('alert_silverlink_choose_model'));
+        return;
+    }
+    if (els.settingCableModel.value === CABLE_GRAYLINK && els.settingCalcModel.value === 'auto') {
+        alert(t('alert_graylink_model_required'));
         return;
     }
     const nextSettings = {
@@ -3855,7 +3944,7 @@ function ensureSupportedTransport() {
         throw new Error('WebUSB/WebSerial requires HTTPS or localhost.');
     }
     if (!navigator.usb && !navigator.serial) {
-        throw new Error('WebUSB is not supported in this browser, and WebSerial is not available for TI-83/84 Evo.');
+        throw new Error('WebUSB is not supported in this browser, and WebSerial is not available.');
     }
 }
 
@@ -3891,7 +3980,37 @@ async function authorizeDevice(forcePrompt = false) {
     const module = await initModule();
     const mustPrompt = forcePrompt || state.needsReauthorize;
     const selectedCalcModel = String(state.settings?.calcModel ?? '');
+    const selectedCableModel = String(state.settings?.cableModel ?? 'auto');
+    const wantsGrayLink = selectedCableModel === CABLE_GRAYLINK;
     const wantsEvoSerial = selectedCalcModel === '43' || selectedCalcModel === '44' || selectedCalcModel === '45';
+    if (wantsGrayLink) {
+        if (!ensureGrayLinkModelSelected()) {
+            const modelError = new Error('GrayLink requires a calculator model selection.');
+            modelError.silent = true;
+            throw modelError;
+        }
+        let device = !mustPrompt && isGrayLinkSerialDevice(state.authorizedDevice)
+            ? state.authorizedDevice
+            : null;
+        if (!device) {
+            device = await requestGrayLinkSerialDevice();
+        }
+        if (!device) {
+            const cancelError = new Error('No GrayLink serial port selected.');
+            cancelError.silent = true;
+            throw cancelError;
+        }
+        bindSerialPortToModule(module, device);
+        state.authorizedDevice = device;
+        state.deviceModelName = device.productName || state.deviceModelName;
+        updateDeviceModelDisplay();
+        if (state.needsReauthorize) {
+            state.needsReauthorize = false;
+            state.silentReconnectInProgress = false;
+            setStatus('status_connected', true);
+        }
+        return device;
+    }
     if (!navigator.usb) {
         let device = null;
         if (!mustPrompt) {
@@ -3905,7 +4024,7 @@ async function authorizeDevice(forcePrompt = false) {
             cancelError.silent = true;
             throw cancelError;
         }
-        bindEvoSerialPortToModule(module, device);
+        bindSerialPortToModule(module, device);
         state.authorizedDevice = device;
         state.deviceModelName = device.productName || state.deviceModelName;
         updateDeviceModelDisplay();
@@ -3965,6 +4084,9 @@ async function autoConnectIfAuthorized() {
     if (!hasAnySupportedTransport()) {
         return;
     }
+    if (String(state.settings?.cableModel ?? 'auto') === CABLE_GRAYLINK) {
+        return;
+    }
     if (state.connectInProgress) {
         return;
     }
@@ -4011,8 +4133,8 @@ async function autoConnectIfAuthorized() {
     const pid = state.authorizedDevice.productId;
     const cableSetting = state.settings?.cableModel ?? 'auto';
     const calcSetting = state.settings?.calcModel ?? 'auto';
-    const canAutoConnectDirect = DIRECTLINK_PIDS.has(pid) && (cableSetting === '5' || cableSetting === 'auto');
-    const canAutoConnectSilver = pid === PID_SILVERLINK && cableSetting === '4' && calcSetting !== 'auto';
+    const canAutoConnectDirect = DIRECTLINK_PIDS.has(pid) && (cableSetting === CABLE_DIRECTLINK || cableSetting === 'auto');
+    const canAutoConnectSilver = pid === PID_SILVERLINK && cableSetting === CABLE_SILVERLINK && calcSetting !== 'auto';
 
     if (!canAutoConnectDirect && !canAutoConnectSilver) {
         return;
@@ -4057,6 +4179,9 @@ async function ensureHandle() {
         }
         if (!ensureSilverlinkModelSelected()) {
             throw new Error('SilverLink requires a calculator model selection.');
+        }
+        if (!ensureGrayLinkModelSelected()) {
+            throw new Error('GrayLink requires a calculator model selection.');
         }
         let handle = 0;
         let attempts = 0;
@@ -7830,7 +7955,7 @@ if (!self.isSecureContext) {
     setStatus('idle', false);
 } else if (navigator.serial) {
     setStatus('status_webserial_only', false);
-    log('WebUSB is not available in this browser. WebSerial-only mode supports TI-83/84 Evo calculators only.');
+    log('WebUSB is not available in this browser. WebSerial-only mode supports TI-83/84 Evo calculators and explicitly selected GrayLink serial cables.');
 } else {
     setStatus('status_webusb_unsupported', false);
     log('WebUSB is not available in this browser. Use a WebUSB-compatible browser for full calculator support.');
