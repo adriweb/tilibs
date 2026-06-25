@@ -37,6 +37,10 @@ enum{
     LOC_ARCHIVE = 2
 };
 
+enum {
+    WEBTILP_EVO_TYPE_RCL_WINDOW = 13
+};
+
 static CableModel g_cable_model = CABLE_USB;
 static CalcModel g_calc_model;
 static CalcHandle* g_calc_handle = nullptr;
@@ -96,6 +100,21 @@ static void install_log_handlers(void)
     g_log_set_handler("ticalcs", G_LOG_LEVEL_WARNING, webtilp_log_handler, nullptr);
     g_log_set_handler("tifiles", G_LOG_LEVEL_WARNING, webtilp_log_handler, nullptr);
     g_log_handlers_installed = 1;
+}
+
+static int model_supports_rclwindw_leave_exam(CalcModel model)
+{
+    return model == CALC_TI84PCE_USB
+        || model == CALC_TI83PCE_USB
+        || model == CALC_TI84PT_USB
+        || model == CALC_TI82A_USB
+        || model == CALC_TI82AEP_USB
+        || ticonv_model_is_tievo(model);
+}
+
+static uint8_t rclwindw_type_for_model(CalcModel model)
+{
+    return ticonv_model_is_tievo(model) ? WEBTILP_EVO_TYPE_RCL_WINDOW : TI84p_ZSTO;
 }
 
 static void reset_calc_handle_state(void)
@@ -669,6 +688,7 @@ EMSCRIPTEN_KEEPALIVE
 void notify_usb_disconnect(void) {
     reset_calc_handle_state();
     if (g_cable_handle) {
+        ticables_cable_close(g_cable_handle);
         ticables_handle_del(g_cable_handle);
         g_cable_handle = nullptr;
     }
@@ -1361,12 +1381,12 @@ int calc_leave_exam_mode(CableHandle* cable_handle) {
         return ready_result;
     }
 
-    if (g_calc_model == CALC_TI84PCE_USB || g_calc_model == CALC_TI83PCE_USB || g_calc_model == CALC_TI84PT_USB || g_calc_model == CALC_TI82A_USB || g_calc_model == CALC_TI82AEP_USB) {
+    if (model_supports_rclwindw_leave_exam(g_calc_model)) {
         VarRequest vr{};
         VarEntry ve{};
 
         strncpy(vr.name, "RclWindw", sizeof(vr.name));
-        vr.type = TI84p_ZSTO;
+        vr.type = rclwindw_type_for_model(g_calc_model);
         strncpy(ve.name, vr.name, sizeof(ve.name));
         ve.type = vr.type;
 
@@ -1409,7 +1429,7 @@ int calc_leave_exam_mode(CableHandle* cable_handle) {
         return ret;
     }
 
-    printf("ERROR: Leave exam mode is only supported on TI-Nspire or CE models\n");
+    printf("ERROR: Leave exam mode is only supported on TI-Nspire, CE or Evo models\n");
     return -2;
 }
 
@@ -1418,7 +1438,7 @@ int calc_leave_exam_mode_supported(void) {
     if (ticonv_model_is_tinspire(g_calc_model)) {
         return 1;
     }
-    return (g_calc_model == CALC_TI84PCE_USB || g_calc_model == CALC_TI83PCE_USB || g_calc_model == CALC_TI84PT_USB || g_calc_model == CALC_TI82A_USB || g_calc_model == CALC_TI82AEP_USB) ? 1 : 0;
+    return model_supports_rclwindw_leave_exam(g_calc_model) ? 1 : 0;
 }
 
 EMSCRIPTEN_KEEPALIVE
