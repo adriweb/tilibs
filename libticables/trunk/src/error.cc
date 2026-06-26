@@ -271,6 +271,22 @@ int TICALL ticables_error_get(int number, char **message)
 			NULL);
 		break;
 
+		case ERR_SERIAL_OPEN:
+			*message = g_strconcat(
+			_("Msg: unable to open serial device."),
+			"\n",
+			_("Cause: check that the serial device exists, that you have permissions to access it, and that it is not locked by another application."),
+			NULL);
+		break;
+
+		case ERR_SERIAL_IOCTL:
+			*message = g_strconcat(
+			_("Msg: unable to configure serial device."),
+			"\n",
+			_("Cause: check that the serial device is still connected and not locked by another application."),
+			NULL);
+		break;
+
 		case ERR_LIBUSB_OPEN:
 		case ERR_LIBUSB_CLAIM:
 		case ERR_LIBUSB_CONFIG:
