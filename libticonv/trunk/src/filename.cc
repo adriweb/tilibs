@@ -122,7 +122,7 @@ char* TICALL ticonv_utf16_to_gfe(CalcModel model, const unsigned short *src)
 		}
 		*q = '\0';
 	}
-	else if ((ticonv_model_is_tiz80(model) || ticonv_model_is_tiez80(model)) && !is_utf8)
+	else if ((ticonv_model_is_tiz80(model) || ticonv_model_is_tiez80(model) || ticonv_model_is_tievo(model)) && !is_utf8)
 	{
 		while (*p)
 		{

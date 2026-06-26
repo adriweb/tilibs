@@ -82,6 +82,9 @@ typedef enum
 	CALC_TI82AEP_USB, // 36
 	CALC_TIPRESENTER, CALC_CBL, CALC_CBR, CALC_CBL2, CALC_CBR2, CALC_LABPRO, // 42
 	CALC_LABPRO_USB, CALC_EASYTEMP_GOTEMP_USB, CALC_EASYLINK_GOLINK_USB, CALC_CBR2_GOMOTION_USB, CALC_GODIRECT_USB, // 47
+	CALC_TI84EVO_USB, // 48
+	CALC_TI84EVOT_USB, // 49
+	CALC_TI83EVO_USB, // 50
 	CALC_MAX
 } CalcModel;
 
@@ -116,7 +119,11 @@ typedef enum
         PRODUCT_ID_TI84PCE = 0x13,
         // No known calculators or lab equipments use 0x14.
         PRODUCT_ID_TI82AEP = 0x15,
-        // No known calculators or lab equipments use 0x16-0x1A.
+        // No known calculators or lab equipments use 0x16.
+        PRODUCT_ID_TI84EVO = 0x17,
+        PRODUCT_ID_TI83EVO = 0x18,
+        PRODUCT_ID_TI84EVOT = 0x19,
+        // No known calculators or lab equipments use 0x1A.
         PRODUCT_ID_TI84PT = 0x1B,
         PRODUCT_ID_NSPIRE_CXII_CAS = 0x1C,
         PRODUCT_ID_NSPIRE_CXII = 0x1D,
@@ -187,6 +194,7 @@ typedef struct
 	TIEXPORT4 int TICALL ticonv_model_uses_utf8(CalcModel model);
 	TIEXPORT4 int TICALL ticonv_model_is_tiz80(CalcModel model);
 	TIEXPORT4 int TICALL ticonv_model_is_tiez80(CalcModel model);
+	TIEXPORT4 int TICALL ticonv_model_is_tievo(CalcModel model);
 	TIEXPORT4 int TICALL ticonv_model_is_ti68k(CalcModel model);
 	TIEXPORT4 int TICALL ticonv_model_is_tinspire(CalcModel model);
 	TIEXPORT4 int TICALL ticonv_model_is_lab_equipment(CalcModel model);
