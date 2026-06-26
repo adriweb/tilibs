@@ -34,6 +34,124 @@
 /* Calculator independent types */
 /********************************/
 
+static const char *evo_byte2type(uint8_t data)
+{
+	switch (data)
+	{
+	case 0: return "REAL";
+	case 1: return "LIST";
+	case 2: return "PRGM";
+	case 3: return "GDB";
+	case 4: return "PIC";
+	case 5: return "IMAGE";
+	case 6: return "MAT";
+	case 7: return "EQU";
+	case 8: return "APPV";
+	case 9: return "GRP";
+	case 10: return "STR";
+	case 11: return "APPL";
+	case 12: return "WINDW";
+	case 13: return "ZSTO";
+	case 14: return "TABLE";
+	case 15: return "PYTHON";
+	default: return "";
+	}
+}
+
+static uint8_t evo_type2byte(const char *s)
+{
+	if (s == nullptr) return 0;
+	if (!g_ascii_strcasecmp(s, "REAL") || !g_ascii_strcasecmp(s, "CPLX")) return 0;
+	if (!g_ascii_strcasecmp(s, "LIST")) return 1;
+	if (!g_ascii_strcasecmp(s, "PRGM")) return 2;
+	if (!g_ascii_strcasecmp(s, "GDB")) return 3;
+	if (!g_ascii_strcasecmp(s, "PIC")) return 4;
+	if (!g_ascii_strcasecmp(s, "IMAGE")) return 5;
+	if (!g_ascii_strcasecmp(s, "MAT")) return 6;
+	if (!g_ascii_strcasecmp(s, "EQU")) return 7;
+	if (!g_ascii_strcasecmp(s, "APPV")) return 8;
+	if (!g_ascii_strcasecmp(s, "GRP")) return 9;
+	if (!g_ascii_strcasecmp(s, "STR")) return 10;
+	if (!g_ascii_strcasecmp(s, "APPL")) return 11;
+	if (!g_ascii_strcasecmp(s, "WINDW")) return 12;
+	if (!g_ascii_strcasecmp(s, "ZSTO")) return 13;
+	if (!g_ascii_strcasecmp(s, "TABLE")) return 14;
+	if (!g_ascii_strcasecmp(s, "PYTHON")) return 15;
+	return 8;
+}
+
+static const char *evo_byte2fext(uint8_t data)
+{
+	switch (data)
+	{
+	case 0: return "8xn2";
+	case 1: return "8xl2";
+	case 2: return "8xp2";
+	case 3: return "8xd2";
+	case 4: return "8ci2";
+	case 5: return "8ca2";
+	case 6: return "8xm2";
+	case 7: return "8xy2";
+	case 8: return "8xv2";
+	case 9: return "8xg2";
+	case 10: return "8xs2";
+	case 11: return "8ek2";
+	case 12: return "8xw2";
+	case 13: return "8xz2";
+	case 14: return "8xt2";
+	case 15: return "8xpy2";
+	default: return "8x?2";
+	}
+}
+
+static uint8_t evo_fext2byte(const char *s)
+{
+	if (s == nullptr) return 8;
+	if (!g_ascii_strcasecmp(s, "8xn2")) return 0;
+	if (!g_ascii_strcasecmp(s, "8xl2")) return 1;
+	if (!g_ascii_strcasecmp(s, "8xp2")) return 2;
+	if (!g_ascii_strcasecmp(s, "8xd2")) return 3;
+	if (!g_ascii_strcasecmp(s, "8ci2")) return 4;
+	if (!g_ascii_strcasecmp(s, "8ca2")) return 5;
+	if (!g_ascii_strcasecmp(s, "8xm2")) return 6;
+	if (!g_ascii_strcasecmp(s, "8xy2")) return 7;
+	if (!g_ascii_strcasecmp(s, "8xv2")) return 8;
+	if (!g_ascii_strcasecmp(s, "8xg2")) return 9;
+	if (!g_ascii_strcasecmp(s, "8xs2")) return 10;
+	if (!g_ascii_strcasecmp(s, "8ek2")) return 11;
+	if (!g_ascii_strcasecmp(s, "8xw2")) return 12;
+	if (!g_ascii_strcasecmp(s, "8xz2")) return 13;
+	if (!g_ascii_strcasecmp(s, "8xt2")) return 14;
+	if (!g_ascii_strcasecmp(s, "8xpy2")) return 15;
+	return 8;
+}
+
+static const char *evo_byte2desc(uint8_t data)
+{
+	switch (data)
+	{
+	case 0: return N_("Real");
+	case 1: return N_("List");
+	case 2: return N_("Program");
+	case 3: return N_("GDB");
+	case 4: return N_("Picture");
+	case 5: return N_("Image");
+	case 6: return N_("Matrix");
+	case 7: return N_("Equation");
+	case 8: return N_("App Var");
+	case 9: return N_("Group Var");
+	case 10: return N_("String");
+	case 11: return N_("Application");
+	case 12: return N_("Window Setup");
+	case 13: return N_("Zoom");
+	case 14: return N_("Table Setup");
+	case 15: return N_("Python Script");
+	default: return N_("Unknown");
+	}
+}
+
+#define evo_byte2icon evo_byte2type
+
 /**
  * tifiles_vartype2string:
  * @model: a calculator model.
@@ -77,6 +195,10 @@ const char *TICALL tifiles_vartype2string(CalcModel model, uint8_t data)
     return ti84pce_byte2type(data);
   case CALC_TI82AEP_USB:
     return ti82aep_byte2type(data);
+  case CALC_TI84EVO_USB:
+  case CALC_TI83EVO_USB:
+  case CALC_TI84EVOT_USB:
+    return evo_byte2type(data);
   case CALC_TI85:
     return tixx_byte2type(TI85_CONST, TI85_MAXTYPES, data);
   case CALC_TI86:
@@ -169,6 +291,10 @@ uint8_t TICALL tifiles_string2vartype(CalcModel model, const char *s)
     return ti84pce_type2byte(s);
   case CALC_TI82AEP_USB:
     return ti82aep_type2byte(s);
+  case CALC_TI84EVO_USB:
+  case CALC_TI83EVO_USB:
+  case CALC_TI84EVOT_USB:
+    return evo_type2byte(s);
   case CALC_TI85:
     return tixx_type2byte(TI85_CONST, TI85_MAXTYPES, s);
   case CALC_TI86:
@@ -255,6 +381,10 @@ const char *TICALL tifiles_vartype2fext(CalcModel model, uint8_t data)
     return ti84pce_byte2fext(data);
   case CALC_TI82AEP_USB:
     return ti82aep_byte2fext(data);
+  case CALC_TI84EVO_USB:
+  case CALC_TI83EVO_USB:
+  case CALC_TI84EVOT_USB:
+    return evo_byte2fext(data);
   case CALC_TI85:
     return tixx_byte2fext(TI85_CONST, TI85_MAXTYPES, data, "85?");
   case CALC_TI86:
@@ -347,6 +477,10 @@ uint8_t TICALL tifiles_fext2vartype(CalcModel model, const char *s)
     return ti84pce_fext2byte(s);
   case CALC_TI82AEP_USB:
     return ti82aep_fext2byte(s);
+  case CALC_TI84EVO_USB:
+  case CALC_TI83EVO_USB:
+  case CALC_TI84EVOT_USB:
+    return evo_fext2byte(s);
   case CALC_TI85:
     return tixx_fext2byte(TI85_CONST, TI85_MAXTYPES, s);
   case CALC_TI86:
@@ -434,6 +568,10 @@ const char *TICALL tifiles_vartype2type(CalcModel model, uint8_t vartype)
     return ti84pce_byte2desc(vartype);
   case CALC_TI82AEP_USB:
     return ti82aep_byte2desc(vartype);
+  case CALC_TI84EVO_USB:
+  case CALC_TI83EVO_USB:
+  case CALC_TI84EVOT_USB:
+    return evo_byte2desc(vartype);
   case CALC_TI85:
     return tixx_byte2desc(TI85_CONST, TI85_MAXTYPES, vartype);
   case CALC_TI86:
@@ -521,6 +659,10 @@ const char *TICALL tifiles_vartype2icon(CalcModel model, uint8_t vartype)
     return ti84pce_byte2icon(vartype);
   case CALC_TI82AEP_USB:
     return ti82aep_byte2icon(vartype);
+  case CALC_TI84EVO_USB:
+  case CALC_TI83EVO_USB:
+  case CALC_TI84EVOT_USB:
+    return evo_byte2icon(vartype);
   case CALC_TI85:
     return tixx_byte2icon(TI85_CONST, TI85_MAXTYPES, vartype);
   case CALC_TI86:
@@ -605,6 +747,10 @@ uint8_t TICALL tifiles_folder_type(CalcModel model)
   case CALC_CBR2: // Dubious
   case CALC_LABPRO: // Dubious
     return TI83p_DIR;
+  case CALC_TI84EVO_USB:
+  case CALC_TI83EVO_USB:
+  case CALC_TI84EVOT_USB:
+    return -1;
   case CALC_TI85:
     return -1;
   case CALC_TI86:
@@ -685,6 +831,9 @@ uint8_t TICALL tifiles_flash_type(CalcModel model)
   case CALC_TI82A_USB:
   case CALC_TI84PT_USB:
   case CALC_TI82AEP_USB:
+  case CALC_TI84EVO_USB:
+  case CALC_TI83EVO_USB:
+  case CALC_TI84EVOT_USB:
     return -1;
   case CALC_TI85:
     return -1;
@@ -765,6 +914,10 @@ uint8_t TICALL tifiles_idlist_type(CalcModel model)
   case CALC_TI84PT_USB:
   case CALC_TI82AEP_USB:
     return TI83p_IDLIST;
+  case CALC_TI84EVO_USB:
+  case CALC_TI83EVO_USB:
+  case CALC_TI84EVOT_USB:
+    return -1;
   case CALC_TI85:
     return -1;
   case CALC_TI86:
@@ -850,6 +1003,10 @@ const char *TICALL tifiles_calctype2signature(CalcModel model)
   case CALC_CBR2: // Dubious
   case CALC_LABPRO: // Dubious
     return "**TI83F*";
+  case CALC_TI84EVO_USB:
+  case CALC_TI83EVO_USB:
+  case CALC_TI84EVOT_USB:
+    return "";
   case CALC_TI85:
     return "**TI85**";
   case CALC_TI86:
