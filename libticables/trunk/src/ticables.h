@@ -93,6 +93,7 @@ typedef enum
 	PID_TI84P         = 0xE003,
 	PID_TI84P_SE      = 0xE008,
 	PID_NSPIRE        = 0xE012,
+	PID_TI84EVO       = 0xE018,
 	PID_NSPIRE_CRADLE = 0xE01C,
 	PID_NSPIRE_CXII   = 0xE022,
 } UsbPid;
@@ -166,7 +167,8 @@ typedef enum
 	CABLE_FAMILY_USB_TI9X,          /* Direct USB for TI-89 Titanium */
 	CABLE_FAMILY_USB_NSPIRE,        /* Direct USB for TI-Nspire series */
 	CABLE_FAMILY_USB_NSPIRE_CRADLE, /* Direct USB for TI-Nspire Lab / DataTracker Cradle */
-	CABLE_FAMILY_USB_NSPIRE_CXII    /* Direct USB for TI-Nspire CX II */
+	CABLE_FAMILY_USB_NSPIRE_CXII,   /* Direct USB for TI-Nspire CX II */
+	CABLE_FAMILY_USB_EVO            /* USB CDC serial for TI-84 Evo series */
 } CableFamily;
 
 /**
@@ -194,7 +196,11 @@ typedef enum
 	CABLE_VARIANT_NSPIRE_CRADLE,      /* CABLE_FAMILY_USB_NSPIRE_CRADLE */
 // The CX II series doesn't seem to make it possible to distinguish its four members (three product IDs and OS versions) at the USB level.
 	CABLE_VARIANT_NSPIRE_CXII,        /* CABLE_FAMILY_USB_NSPIRE_CXII */
-	CABLE_VARIANT_TI82AEP             /* CABLE_FAMILY_USB_TI8X */
+	CABLE_VARIANT_TI82AEP,            /* CABLE_FAMILY_USB_TI8X */
+// The Evo models seem to only differ by the exposed product name
+	CABLE_VARIANT_TI84EVO,            /* CABLE_FAMILY_USB_EVO */
+	CABLE_VARIANT_TI84EVOT,           /* CABLE_FAMILY_USB_EVO */
+	CABLE_VARIANT_TI83EVO             /* CABLE_FAMILY_USB_EVO */
 } CableVariant;
 
 /**

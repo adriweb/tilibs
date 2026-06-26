@@ -198,7 +198,10 @@ char* TICALL ticonv_charset_utf16_to_ti_s(CalcModel model, const unsigned short 
 			case CALC_TI84PCE_USB:
 			case CALC_TI82A_USB:
 			case CALC_TI84PT_USB:
-			case CALC_TI82AEP_USB: return ticonv_utf16_to_ti84pusb(utf16, ti); break;
+			case CALC_TI82AEP_USB:
+			case CALC_TI84EVO_USB:
+			case CALC_TI83EVO_USB:
+			case CALC_TI84EVOT_USB: return ticonv_utf16_to_ti84pusb(utf16, ti); break;
 			case CALC_TI89T_USB: return ticonv_utf16_to_ti89tusb(utf16, ti); break;
 			case CALC_NSPIRE:
 			case CALC_NSPIRE_CRADLE:
@@ -322,7 +325,10 @@ unsigned short* TICALL ticonv_charset_ti_to_utf16_s(CalcModel model, const char 
 			case CALC_TI84PCE_USB:
 			case CALC_TI82A_USB:
 			case CALC_TI84PT_USB:
-			case CALC_TI82AEP_USB: return ticonv_ti84pusb_to_utf16(ti, utf16); break;
+			case CALC_TI82AEP_USB:
+			case CALC_TI84EVO_USB:
+			case CALC_TI83EVO_USB:
+			case CALC_TI84EVOT_USB: return ticonv_ti84pusb_to_utf16(ti, utf16); break;
 			case CALC_TI89T_USB: return ticonv_ti89tusb_to_utf16(ti, utf16); break;
 			case CALC_NSPIRE:
 			case CALC_NSPIRE_CRADLE:
@@ -772,8 +778,12 @@ char* TICALL ticonv_varname_to_tifile(CalcModel model, const char *src, unsigned
 		return nullptr;
 	}
 
+	if (ticonv_model_is_tievo(model))
+	{
+		dst = g_strdup(src);
+	}
 	// Do TI-UTF-8 -> UTF-16,UTF-16 -> TI-8x/9x charset
-	if (model == CALC_TI84P_USB || model == CALC_TI82A_USB || model == CALC_TI84PT_USB)
+	else if (model == CALC_TI84P_USB || model == CALC_TI82A_USB || model == CALC_TI84PT_USB)
 	{
 		utf16 = ticonv_charset_ti_to_utf16(CALC_TI84P_USB, src);
 
@@ -912,7 +922,11 @@ char* TICALL ticonv_varname_from_tifile(CalcModel model, const char *src, unsign
 		return nullptr;
 	}
 
-	if (model == CALC_TI84P_USB || model == CALC_TI82A_USB || model == CALC_TI84PT_USB)
+	if (ticonv_model_is_tievo(model))
+	{
+		dst = g_strdup(src);
+	}
+	else if (model == CALC_TI84P_USB || model == CALC_TI82A_USB || model == CALC_TI84PT_USB)
 	{
 		ti = ticonv_varname_detokenize(CALC_TI84P, src, type);
 
@@ -1025,6 +1039,19 @@ int TICALL ticonv_model_is_tiez80(CalcModel model)
 }
 
 /**
+ * ticonv_model_is_tievo:
+ * @model: a calculator model taken in #CalcModel.
+ *
+ * Returns whether the given calculator model is a TI-Evo family calculator.
+ *
+ * Return value: nonzero if the calculator is a TI-Evo family calculator, zero if it doesn't.
+ */
+int TICALL ticonv_model_is_tievo(CalcModel model)
+{
+	return model == CALC_TI84EVO_USB || model == CALC_TI83EVO_USB || model == CALC_TI84EVOT_USB;
+}
+
+/**
  * ticonv_model_is_ti68k:
  * @model: a calculator model taken in #CalcModel.
  *
@@ -1128,6 +1155,9 @@ int TICALL ticonv_model_has_usb_ioport(CalcModel model)
 	            || model == CALC_TI82A_USB
 	            || model == CALC_TI84PT_USB
 	            || model == CALC_TI82AEP_USB
+	            || model == CALC_TI84EVO_USB
+	            || model == CALC_TI83EVO_USB
+	            || model == CALC_TI84EVOT_USB
 	            || ticonv_model_is_tinspire(model)
 	            || model == CALC_CBR2
 	            || model == CALC_LABPRO)); // NOTE: the LabPro's USB port is B, not mini-B, and it's known to speak a protocol other than DUSB/CARS on that interface, at least in some conditions.
@@ -1231,6 +1261,9 @@ int TICALL ticonv_model_has_color_screen(CalcModel model)
 	            || model == CALC_TI83PCE_USB
 	            || model == CALC_TI84PCE_USB
 	            || model == CALC_TI82AEP_USB
+	            || model == CALC_TI84EVO_USB
+	            || model == CALC_TI83EVO_USB
+	            || model == CALC_TI84EVOT_USB
 	            || (model >= CALC_NSPIRE_CX && model <= CALC_NSPIRE_CXIIT_CAS)));
 }
 
@@ -1269,6 +1302,9 @@ CalcProductIDs TICALL ticonv_model_to_product_id(CalcModel model)
 		case CALC_TI82A_USB:           return PRODUCT_ID_TI82A;
 		case CALC_TI84PT_USB:          return PRODUCT_ID_TI84PT;
 		case CALC_TI82AEP_USB:         return PRODUCT_ID_TI82AEP;
+		case CALC_TI84EVO_USB:         return PRODUCT_ID_TI84EVO;
+		case CALC_TI83EVO_USB:         return PRODUCT_ID_TI83EVO;
+		case CALC_TI84EVOT_USB:        return PRODUCT_ID_TI84EVOT;
 		case CALC_NSPIRE_CRADLE:       return PRODUCT_ID_LABCRADLE;
 		case CALC_NSPIRE_CLICKPAD:     return PRODUCT_ID_NSPIRE;
 		case CALC_NSPIRE_CLICKPAD_CAS: return PRODUCT_ID_NSPIRE_CAS;

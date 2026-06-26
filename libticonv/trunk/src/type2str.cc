@@ -60,6 +60,9 @@ const char * TICALL ticonv_model_to_string(CalcModel model)
 	case CALC_TI84PCE_USB: return "TI-84 Plus CE";
 	case CALC_TI82A_USB: return "TI-82 Advanced";
 	case CALC_TI82AEP_USB: return "TI-82 Advanced Edition Python";
+	case CALC_TI84EVO_USB: return "TI-84 Evo";
+	case CALC_TI84EVOT_USB: return "TI-84 Evo-T";
+	case CALC_TI83EVO_USB: return "TI-83 Evo";
 	case CALC_TI84PT_USB: return "TI-84 Plus T";
 	case CALC_NSPIRE_CRADLE: return "TI-Nspire Cradle";
 	case CALC_NSPIRE_CLICKPAD: return "TI-Nspire Clickpad";
@@ -278,6 +281,39 @@ CalcModel TICALL ticonv_string_to_model(const char *str)
 		         || !g_ascii_strcasecmp(str, "82 Advanced Edition Python")
 		        )
 			return CALC_TI82AEP_USB;
+		else if (   !g_ascii_strcasecmp(str, "TI-84 Evo USB")
+		         || !g_ascii_strcasecmp(str, "TI84 Evo USB")
+		         || !g_ascii_strcasecmp(str, "TI-84Evo USB")
+		         || !g_ascii_strcasecmp(str, "TI84Evo USB")
+		         || !g_ascii_strcasecmp(str, "TI-84 Evo")
+		         || !g_ascii_strcasecmp(str, "TI84 Evo")
+		         || !g_ascii_strcasecmp(str, "TI-84Evo")
+		         || !g_ascii_strcasecmp(str, "TI84Evo")
+		         || !g_ascii_strcasecmp(str, "84 Evo")
+		        )
+			return CALC_TI84EVO_USB;
+		else if (   !g_ascii_strcasecmp(str, "TI-84 Evo-T USB")
+		         || !g_ascii_strcasecmp(str, "TI84 Evo-T USB")
+		         || !g_ascii_strcasecmp(str, "TI-84EvoT USB")
+		         || !g_ascii_strcasecmp(str, "TI84EvoT USB")
+		         || !g_ascii_strcasecmp(str, "TI-84 Evo-T")
+		         || !g_ascii_strcasecmp(str, "TI84 Evo-T")
+		         || !g_ascii_strcasecmp(str, "TI-84EvoT")
+		         || !g_ascii_strcasecmp(str, "TI84EvoT")
+		         || !g_ascii_strcasecmp(str, "84 Evo-T")
+		        )
+			return CALC_TI84EVOT_USB;
+		else if (   !g_ascii_strcasecmp(str, "TI-83 Evo USB")
+		         || !g_ascii_strcasecmp(str, "TI83 Evo USB")
+		         || !g_ascii_strcasecmp(str, "TI-83Evo USB")
+		         || !g_ascii_strcasecmp(str, "TI83Evo USB")
+		         || !g_ascii_strcasecmp(str, "TI-83 Evo")
+		         || !g_ascii_strcasecmp(str, "TI83 Evo")
+		         || !g_ascii_strcasecmp(str, "TI-83Evo")
+		         || !g_ascii_strcasecmp(str, "TI83Evo")
+		         || !g_ascii_strcasecmp(str, "83 Evo")
+		        )
+			return CALC_TI83EVO_USB;
 		else if (   !g_ascii_strcasecmp(str, "TI-84+T USB")
 		         || !g_ascii_strcasecmp(str, "TI-84PT USB")
 		         || !g_ascii_strcasecmp(str, "TI84+T USB")

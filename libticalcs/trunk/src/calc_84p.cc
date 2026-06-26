@@ -2580,6 +2580,120 @@ extern const CalcFncts calc_84pce_usb =
 	&noop_recv_os,
 };
 
+#define EVO_AS_84PCE_COUNTERS \
+	{"",     /* is_ready */ \
+	 "",     /* send_key */ \
+	 "",     /* execute */ \
+	 "1P",   /* recv_screen */ \
+	 "1L",   /* get_dirlist */ \
+	 "",     /* get_memfree */ \
+	 "",     /* send_backup */ \
+	 "",     /* recv_backup */ \
+	 "2P1L", /* send_var */ \
+	 "1P1L", /* recv_var */ \
+	 "",     /* send_var_ns */ \
+	 "",     /* recv_var_ns */ \
+	 "2P1L", /* send_app */ \
+	 "2P1L", /* recv_app */ \
+	 "2P",   /* send_os */ \
+	 "1L",   /* recv_idlist */ \
+	 "2P",   /* dump_rom_1 */ \
+	 "2P",   /* dump_rom_2 */ \
+	 "",     /* set_clock */ \
+	 "",     /* get_clock */ \
+	 "1L",   /* del_var */ \
+	 "1L",   /* new_folder */ \
+	 "",     /* get_version */ \
+	 "1L",   /* send_cert */ \
+	 "1L",   /* recv_cert */ \
+	 "",     /* rename */ \
+	 "",     /* chattr */ \
+	 "2P",   /* send_all_vars_backup */ \
+	 "2P",   /* recv_all_vars_backup */ \
+	 "",     /* send_lab_equipment_data */ \
+	 "",     /* get_lab_equipment_data */ \
+	 "",     /* del_folder */ \
+	 "",     /* recv_os */ }
+
+#define EVO_AS_84PCE_FNCTS \
+	{ \
+		&is_ready, \
+		&send_key, \
+		&execute, \
+		&recv_screen, \
+		&get_dirlist, \
+		&get_memfree, \
+		&noop_send_backup, \
+		&noop_recv_backup, \
+		&send_var, \
+		&recv_var, \
+		&noop_send_var_ns, \
+		&noop_recv_var_ns, \
+		&send_flash_834pce, \
+		&recv_flash_834pce, \
+		&send_os_834pce, \
+		&recv_idlist, \
+		&dump_rom_1, \
+		&dump_rom_2, \
+		&set_clock, \
+		&get_clock, \
+		&del_var, \
+		&noop_new_folder, \
+		&get_version, \
+		&noop_send_cert, \
+		&noop_recv_cert, \
+		&noop_rename_var, \
+		&noop_change_attr, \
+		&send_all_vars_backup, \
+		&tixx_recv_all_vars_backup, \
+		&noop_send_lab_equipment_data, \
+		&noop_get_lab_equipment_data, \
+		&noop_del_folder, \
+		&noop_recv_os \
+	}
+
+extern const CalcFncts calc_84evo_usb =
+{
+	CALC_TI84EVO_USB,
+	"TI84Evo",
+	"TI-84 Evo",
+	N_("TI-84 Evo thru DirectLink"),
+	OPS_ISREADY | OPS_SCREEN | OPS_DIRLIST | OPS_VARS | OPS_FLASH | OPS_OS |
+	/*OPS_IDLIST |*/ OPS_ROMDUMP | OPS_CLOCK | OPS_DELVAR | OPS_VERSION | OPS_BACKUP | OPS_KEYS |
+	FTS_SILENT | FTS_MEMFREE | FTS_FLASH,
+	PRODUCT_ID_TI84EVO,
+	EVO_AS_84PCE_COUNTERS,
+	EVO_AS_84PCE_FNCTS
+};
+
+extern const CalcFncts calc_84evot_usb =
+{
+	CALC_TI84EVOT_USB,
+	"TI84EvoT",
+	"TI-84 Evo-T",
+	N_("TI-84 Evo-T thru DirectLink"),
+	OPS_ISREADY | OPS_SCREEN | OPS_DIRLIST | OPS_VARS | OPS_FLASH | OPS_OS |
+	/*OPS_IDLIST |*/ OPS_ROMDUMP | OPS_CLOCK | OPS_DELVAR | OPS_VERSION | OPS_BACKUP | OPS_KEYS |
+	FTS_SILENT | FTS_MEMFREE | FTS_FLASH,
+	PRODUCT_ID_TI84EVOT,
+	EVO_AS_84PCE_COUNTERS,
+	EVO_AS_84PCE_FNCTS
+};
+
+extern const CalcFncts calc_83evo_usb =
+{
+	CALC_TI83EVO_USB,
+	"TI83Evo",
+	"TI-83 Evo",
+	N_("TI-83 Evo thru DirectLink"),
+	OPS_ISREADY | OPS_SCREEN | OPS_DIRLIST | OPS_VARS | OPS_FLASH | OPS_OS |
+	/*OPS_IDLIST |*/ OPS_ROMDUMP | OPS_CLOCK | OPS_DELVAR | OPS_VERSION | OPS_BACKUP | OPS_KEYS |
+	FTS_SILENT | FTS_MEMFREE | FTS_FLASH,
+	PRODUCT_ID_TI83EVO,
+	EVO_AS_84PCE_COUNTERS,
+	EVO_AS_84PCE_FNCTS
+};
+
 extern const CalcFncts calc_82a_usb =
 {
 	CALC_TI82A_USB,

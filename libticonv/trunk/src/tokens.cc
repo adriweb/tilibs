@@ -570,6 +570,9 @@ char* TICALL ticonv_varname_detokenize(CalcModel model, const char *src, unsigne
 	case CALC_TI82A_USB:
 	case CALC_TI84PT_USB:
 	case CALC_TI82AEP_USB:
+	case CALC_TI84EVO_USB:
+	case CALC_TI83EVO_USB:
+	case CALC_TI84EVOT_USB:
 	case CALC_TI89T_USB:
 		return g_strdup(src);
 	case CALC_NSPIRE:
@@ -620,6 +623,11 @@ char* TICALL ticonv_varname_tokenize(CalcModel model, const char *src_, unsigned
 	if (src == nullptr)
 	{
 		return nullptr;
+	}
+
+	if (ticonv_model_is_tievo(model))
+	{
+		return g_strdup(src_);
 	}
 
 	switch(model)

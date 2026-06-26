@@ -102,6 +102,7 @@ static usb_infos tigl_infos[] =
 	{VID_TI, PID_TI89TM,        "TI-89 Titanium Hand-Held",    NULL},
 	{VID_TI, PID_TI84P_SE,      "TI-84 Plus Silver Hand-Held", NULL},
 	{VID_TI, PID_NSPIRE,        "TI-Nspire Hand-Held",         NULL},
+	{VID_TI, PID_TI84EVO,       "TI-84 Evo Hand-Held",         NULL},
 	{VID_TI, PID_NSPIRE_CRADLE, "TI-Nspire Cradle",            NULL},
 	{VID_TI, PID_NSPIRE_CXII,   "TI-Nspire CX II Hand-Held",   NULL},
 	{0,      0,                 NULL,                          NULL}
@@ -801,6 +802,7 @@ static int raw_probe(CableHandle *h)
 		if (tigl_devices[h->address].pid == PID_TI89TM ||
 		    tigl_devices[h->address].pid == PID_TI84P ||
 		    tigl_devices[h->address].pid == PID_TI84P_SE ||
+		    tigl_devices[h->address].pid == PID_TI84EVO ||
 		    tigl_devices[h->address].pid == PID_NSPIRE ||
 		    tigl_devices[h->address].pid == PID_NSPIRE_CRADLE ||
 		    tigl_devices[h->address].pid == PID_NSPIRE_CXII)

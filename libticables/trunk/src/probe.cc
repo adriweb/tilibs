@@ -405,6 +405,25 @@ void translate_usb_device_info(CableDeviceInfo *info, const USBCableInfo *usbinf
 			info->variant = CABLE_VARIANT_UNKNOWN;
 		}
 	}
+	else if (usbinfo->pid == PID_TI84EVO)
+	{
+		info->family = CABLE_FAMILY_USB_EVO;
+		if (strstr(usbinfo->product_str, "TI-83") != nullptr
+		 || strstr(usbinfo->product_str, "TI_83") != nullptr
+		 || strstr(usbinfo->product_str, "83 Evo") != nullptr
+		 || strstr(usbinfo->product_str, "83Evo") != nullptr)
+		{
+			info->variant = CABLE_VARIANT_TI83EVO;
+		}
+		else if (strstr(usbinfo->product_str, "Evo-T") != nullptr || strstr(usbinfo->product_str, "Evo_T") != nullptr)
+		{
+			info->variant = CABLE_VARIANT_TI84EVOT;
+		}
+		else
+		{
+			info->variant = CABLE_VARIANT_TI84EVO;
+		}
+	}
 	else if (usbinfo->pid == PID_NSPIRE_CRADLE)
 	{
 		info->family = CABLE_FAMILY_USB_NSPIRE_CRADLE;
