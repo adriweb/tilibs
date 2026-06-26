@@ -63,7 +63,7 @@ static uint8_t evo_type2byte(const char *s)
 	if (s == nullptr) return 0;
 	if (!g_ascii_strcasecmp(s, "REAL") || !g_ascii_strcasecmp(s, "CPLX")) return 0;
 	if (!g_ascii_strcasecmp(s, "LIST")) return 1;
-	if (!g_ascii_strcasecmp(s, "PRGM")) return 2;
+	if (!g_ascii_strcasecmp(s, "PRGM") || !g_ascii_strcasecmp(s, "PPRGM")) return 2;
 	if (!g_ascii_strcasecmp(s, "GDB")) return 3;
 	if (!g_ascii_strcasecmp(s, "PIC")) return 4;
 	if (!g_ascii_strcasecmp(s, "IMAGE")) return 5;

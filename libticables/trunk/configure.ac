@@ -111,12 +111,18 @@ if [test "x$cab_cv_use_libusb" != xno]; then
 fi
 
 if test "x$HAVE_LIBUSB10" = xyes; then
+  case $host_os in
+  *darwin*)
+    LIBUSB10_LIBS="$LIBUSB10_LIBS -framework IOKit -framework CoreFoundation"
+    ;;
+  esac
   AC_DEFINE([HAVE_LIBUSB_1_0], [1],
             [Define to 1 to enable EXPERIMENTAL libusb 1.0.x support.])
   TICABLES_LIBUSB_REQUIRES_PRIVATE="libusb-1.0"
 elif test "x$HAVE_LIBUSB" = xyes; then
   case $host_os in
   *mingw*|*cygwin*)
+    LIBUSB_LIBS="$LIBUSB_LIBS -lsetupapi -lcfgmgr32"
     ;;
   *)
     AC_DEFINE([HAVE_LIBUSB], [1], [Define to 1 to enable libusb 0.1.x support.])
