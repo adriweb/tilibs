@@ -32,7 +32,7 @@ libticables2_la_SOURCES = *.h \
 	type2str.cc \
 	none.cc
 
-EXTRA_DIST = bsd/* linux/* macos/* evo_serial_posix.cc win32/*.cc win32/*.h win32/dha.c win32/dha/* win32/usb/* win64/*.c win64/*.cc win64/*.h win64/rwp.c win64/rwp/*
+EXTRA_DIST = bsd/* emscripten/* linux/* macos/* evo_serial_posix.cc win32/*.cc win32/*.h win32/dha.c win32/dha/* win32/usb/* win64/*.c win64/*.cc win64/*.h win64/rwp.c win64/rwp/*
 
 if OS_WIN32
   libticables2_la_SOURCES += win32/libusb_dyn.cc
