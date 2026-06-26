@@ -115,7 +115,7 @@ endif()
 if(EMSCRIPTEN)
 # disable non-USB cables
     target_compile_definitions(ticables2 PUBLIC
-            NO_CABLE_GRY NO_CABLE_BLK NO_CABLE_PAR NO_CABLE_VTI NO_CABLE_TIE NO_CABLE_TCPS NO_CABLE_TCPC)
+            NO_CABLE_BLK NO_CABLE_PAR NO_CABLE_VTI NO_CABLE_TIE NO_CABLE_TCPS NO_CABLE_TCPC)
 # check includes for parallel and serial support
 elseif(LINUX)
     include(CheckIncludeFile)
