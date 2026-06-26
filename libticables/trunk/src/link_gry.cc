@@ -27,7 +27,10 @@
 
 #ifndef NO_CABLE_GRY
 
-#if defined(__LINUX__)
+#if defined(__EMSCRIPTEN__)
+#include "emscripten/link_gry.cc"
+
+#elif defined(__LINUX__)
 #include "linux/link_gry.cc"
 
 #elif defined(__BSD__)
