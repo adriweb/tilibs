@@ -94,6 +94,7 @@ typedef enum
 	PID_TI84P           = 0xE003,
 	PID_TI84P_SE        = 0xE008,
 	PID_NSPIRE          = 0xE012,
+	PID_TI84EVO         = 0xE018,
 	PID_NSPIRE_CRADLE   = 0xE01C,
 	PID_NSPIRE_CXII     = 0xE022,
 	// Vernier lab equipments (USB VID 0x08F7).
@@ -179,6 +180,7 @@ typedef enum
 	CABLE_FAMILY_USB_EASYLINK_GOLINK, /* Direct USB for Vernier EasyLink / Go! Link */
 	CABLE_FAMILY_USB_CBR2_GOMOTION,   /* Direct USB for Vernier CBR2 / Go! Motion */
 	CABLE_FAMILY_USB_GODIRECT,        /* Direct USB for Vernier Go! Direct devices */
+	CABLE_FAMILY_USB_EVO             /* USB CDC serial for TI-84 Evo series */
 } CableFamily;
 
 /**
@@ -211,7 +213,11 @@ typedef enum
 	CABLE_VARIANT_EASYTEMP_GOTEMP,    /* CABLE_FAMILY_USB_EASYTEMP_GOTEMP */
 	CABLE_VARIANT_EASYLINK_GOLINK,    /* CABLE_FAMILY_USB_EASYLINK_GOLINK */
 	CABLE_VARIANT_CBR2_GOMOTION,      /* CABLE_FAMILY_USB_CBR2_GOMOTION */
-	CABLE_VARIANT_GODIRECT            /* CABLE_FAMILY_USB_GODIRECT */
+	CABLE_VARIANT_GODIRECT,           /* CABLE_FAMILY_USB_GODIRECT */
+// The Evo models seem to only differ by the exposed product name
+	CABLE_VARIANT_TI84EVO,            /* CABLE_FAMILY_USB_EVO */
+	CABLE_VARIANT_TI84EVOT,           /* CABLE_FAMILY_USB_EVO */
+	CABLE_VARIANT_TI83EVO             /* CABLE_FAMILY_USB_EVO */
 } CableVariant;
 
 /**
