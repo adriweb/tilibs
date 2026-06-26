@@ -82,5 +82,8 @@ extern const CalcFncts calc_easytemp_gotemp_usb;
 extern const CalcFncts calc_easylink_golink_usb;
 extern const CalcFncts calc_cbr2_gomotion_usb;
 extern const CalcFncts calc_godirect_usb;
+extern const CalcFncts calc_84evo_usb;
+extern const CalcFncts calc_84evot_usb;
+extern const CalcFncts calc_83evo_usb;
 
 #endif
