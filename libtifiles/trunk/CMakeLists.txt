@@ -11,6 +11,7 @@ set(SRC_FILES
         src/comments.cc
         src/error.cc
         src/files8x.cc
+        src/files_evo.cc
         src/files9x.cc
         src/filesnsp.cc
         src/filesxx.cc
