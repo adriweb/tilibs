@@ -99,7 +99,10 @@ typedef enum
 	ERR_TCPC_OPEN,	//open
 	ERR_TCPC_CLOSE,
 	ERR_TCPS_OPEN,	//open
-	ERR_TCPS_CLOSE
+	ERR_TCPS_CLOSE,
+
+	ERR_SERIAL_OPEN,
+	ERR_SERIAL_IOCTL
 } CableError;
 
 #endif

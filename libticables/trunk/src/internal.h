@@ -22,6 +22,17 @@
 #ifndef __TICABLES_INTERNAL__
 #define __TICABLES_INTERNAL__
 
+#include <limits.h>
+#include <stdio.h>
+
+#ifndef PATH_MAX
+# ifdef MAX_PATH
+#  define PATH_MAX MAX_PATH
+# else
+#  define PATH_MAX 512
+# endif
+#endif
+
 #define VALIDATE_NONNULL(ptr) \
 	do \
 	{ \
@@ -85,6 +96,10 @@ static inline int ticables_validate_cablefncts(const CableFncts * cable)
 	return cable != nullptr;
 }
 
+#define ticables_slprintf(str, size, format, ...) \
+	snprintf(str, size - 1, format, ##__VA_ARGS__); \
+	(str)[size - 1] = 0;
+
 static inline void ticables_event_fill_header(CableHandle * handle, CableEventData * event, CableEventType type, int retval, CableFnctsIdx operation)
 {
 	event->version = 1;
@@ -139,6 +154,7 @@ typedef struct {
 	uint16_t    pid;
 	uint16_t    version;
 	char        product_str[65];
+	char        device_path[PATH_MAX];
 	void *dev;
 } USBCableInfo;
 
