@@ -22,6 +22,11 @@
 #ifndef __TICALCS_ERROR__
 #define __TICALCS_ERROR__
 
+#include <stddef.h>
+#include <stdint.h>
+
+#include "testable.h"
+
 /* Error codes must begin at 256 up to 511 */
 
 typedef enum
@@ -79,8 +84,16 @@ typedef enum
 
 	ERR_CALC_ERROR3 = 430,
 
+// --- 510 to 511 are reserved for Evo Kermit status
+
+	ERR_EVO_ERROR = 510,		// Evo Kermit E packet; details retained per thread
+
 // ---
 
 } CalcError;
+
+// Retain an Evo Kermit E-packet result for the normal error display APIs and
+// return the libticalcs error code that the caller should propagate.
+TICALCS_TESTABLE int ticalcs_evo_error_set(const uint8_t *data, size_t data_len);
 
 #endif

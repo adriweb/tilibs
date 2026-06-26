@@ -38,6 +38,81 @@
 
 extern int nsp_reset;
 
+typedef struct
+{
+	char code[3];
+	const char *description;
+} EvoResultInfo;
+
+static const EvoResultInfo evo_results[] = {
+	{ "OK", "Successful transfer" },
+	{ "ER", "Unknown error" },
+	{ "PM", "Bad parameter" },
+	{ "NP", "No port" },
+	{ "NM", "No memory" },
+	{ "FL", "Flash" },
+	{ "IN", "Invalid" },
+	{ "NC", "Not found (client)" },
+	{ "NF", "Not found (server)" },
+	{ "CN", "Cancel" },
+	{ "TO", "Timeout" },
+	{ "DI", "Disconnect" },
+	{ "UN", "Unsupported request" },
+	{ "NV", "Version too new" },
+	{ "VE", "Variable already exists" },
+	{ "DP", "Invalid data payload" },
+	{ "BZ", "Calculator is busy" },
+	{ "LB", "Low battery" },
+	{ "WT", "Wait for user action" },
+	{ "OW", "User overwrite" },
+	{ "OA", "User overwrite all" },
+	{ "OM", "User omit" },
+	{ "QU", "User quit" },
+	{ "NR", "User not in receive" },
+	{ "DR", "Defrag initiated" },
+};
+
+static thread_local int evo_result_index = -1;
+static thread_local char evo_result_wire[3] = { 0, 0, 0 };
+
+int ticalcs_evo_error_set(const uint8_t *data, size_t data_len)
+{
+	evo_result_index = -1;
+	evo_result_wire[0] = evo_result_wire[1] = evo_result_wire[2] = 0;
+
+	if (data != nullptr && data_len == 2 &&
+	    data[0] >= 0x20 && data[0] <= 0x7e &&
+	    data[1] >= 0x20 && data[1] <= 0x7e)
+	{
+		evo_result_wire[0] = (char)data[0];
+		evo_result_wire[1] = (char)data[1];
+		for (size_t i = 0; i < sizeof(evo_results) / sizeof(evo_results[0]); i++)
+		{
+			if (!memcmp(evo_result_wire, evo_results[i].code, 2))
+			{
+				evo_result_index = (int)i;
+				break;
+			}
+		}
+	}
+
+	if (evo_result_index >= 0)
+	{
+		const EvoResultInfo *info = &evo_results[evo_result_index];
+		ticalcs_warning("TI-Evo Kermit E packet: %s (%s)", info->code, info->description);
+	}
+	else if (evo_result_wire[0] != 0)
+	{
+		ticalcs_warning("TI-Evo Kermit E packet: unknown result %s", evo_result_wire);
+	}
+	else
+	{
+		ticalcs_warning("TI-Evo Kermit E packet without a two-letter result code");
+	}
+
+	return ERR_EVO_ERROR;
+}
+
 // must be synchronized with dusb_cmd.cc (DUSBErrorCodeInfo usb_errors)
 static const char *dusb_error_messages[] = {
 	_("Msg: unknown packet."),
@@ -129,6 +204,29 @@ int TICALL ticalcs_error_get(int number, char **message)
 	{
 		ticalcs_critical("ticalcs_error_get(NULL)\n");
 		return number;
+	}
+
+	if (number == ERR_EVO_ERROR)
+	{
+		if (evo_result_index >= 0)
+		{
+			const EvoResultInfo *info = &evo_results[evo_result_index];
+			*message = g_strdup_printf(
+				_("Msg: TI-Evo Kermit result %s (%s)."),
+				info->code, info->description);
+		}
+		else if (evo_result_wire[0] != 0)
+		{
+			*message = g_strdup_printf(
+				_("Msg: TI-Evo Kermit returned unknown result %s."),
+				evo_result_wire);
+		}
+		else
+		{
+			*message = g_strdup(
+				_("Msg: TI-Evo Kermit returned an error without a two-letter result code."));
+		}
+		return 0;
 	}
 
 	if (number > ERR_CALC_ERROR2 &&
@@ -482,7 +580,12 @@ int TICALL ticalcs_error_get_raw_protocol_code(int number, uint16_t *code)
 	VALIDATE_NONNULL(code);
 
 	uint16_t raw = 0;
-	if (number > ERR_CALC_ERROR2 && number <= ERR_CALC_ERROR2 + (int)ticalcs_dusb_error_count())
+	if (number == ERR_EVO_ERROR && evo_result_wire[0] != 0)
+	{
+		raw = (uint16_t)(((uint16_t)(uint8_t)evo_result_wire[0] << 8) |
+		                 (uint16_t)(uint8_t)evo_result_wire[1]);
+	}
+	else if (number > ERR_CALC_ERROR2 && number <= ERR_CALC_ERROR2 + (int)ticalcs_dusb_error_count())
 	{
 		raw = (uint16_t)ticalcs_dusb_error_code_from_index((unsigned int)(number - ERR_CALC_ERROR2 - 1));
 	}

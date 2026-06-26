@@ -37,8 +37,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <fcntl.h>
-#include <errno.h>
 #if defined(__BSD__) || defined(__MACOSX__) || defined(__EMSCRIPTEN__)
 #include <libusb.h>
 #else
@@ -63,6 +61,7 @@
 #include "../error.h"
 #include "../gettext.h"
 #include "../internal.h"
+#include "../evo_serial.h"
 #if defined(__WIN32__)
 #include "../win32/detect.h"
 #elif defined(__MACOSX__)
@@ -126,6 +125,7 @@ typedef struct
 	uint8_t  out_endpoint;
 	int      max_ps;
 	int      was_max_ps;
+	EvoSerial serial;
 } usb_struct;
 
 // variables for slv_check and slv_bulk_read
@@ -144,6 +144,8 @@ static int completed = 0;
 #define rBufPtr    (((usb_struct *)(h->priv2))->rBufPtr)
 #define uInEnd     (((usb_struct *)(h->priv2))->in_endpoint)
 #define uOutEnd    (((usb_struct *)(h->priv2))->out_endpoint)
+#define serial_obj (((usb_struct *)(h->priv2))->serial)
+#define serial_mode evo_serial_is_open(&serial_obj)
 
 #if !HAVE_LIBUSB10_STRERROR
 #error Please use a version of libusb 1.0 which provides libusb_strerror() (>= 1.0.16).
@@ -182,18 +184,27 @@ static int tigl_find(void)
 {
 	// discover devices
 	libusb_device **list;
-	ssize_t cnt = libusb_get_device_list(NULL, &list);
 	ssize_t i = 0;
 	int j = 0;
 	int k;
 
-	if (cnt <= 0)
-	{
-		return 0;
-	}
-
 	memset(tigl_devices, 0, sizeof(tigl_devices));
 	tigl_n_devices = 0;
+
+#if defined(__EMSCRIPTEN__)
+	if (evo_serial_has_bound_device())
+	{
+		tigl_n_devices = evo_serial_add_devices(tigl_devices, 0, MAX_CABLES, VID_TI, PID_TI84EVO);
+		return tigl_n_devices;
+	}
+#endif
+
+	ssize_t cnt = libusb_get_device_list(NULL, &list);
+	if (cnt <= 0)
+	{
+		tigl_n_devices = evo_serial_add_devices(tigl_devices, 0, MAX_CABLES, VID_TI, PID_TI84EVO);
+		return tigl_n_devices;
+	}
 
 	for (i = 0; i < cnt; i++)
 	{
@@ -215,6 +226,10 @@ static int tigl_find(void)
 					tigl_devices[j].pid = desc.idProduct;
 					tigl_devices[j].version = desc.bcdDevice;
 					tigl_get_product(tigl_devices[j].product_str, (unsigned int)sizeof(tigl_devices[j].product_str), device);
+					if (desc.idProduct == PID_TI84EVO)
+					{
+						evo_serial_find_path(tigl_devices[j].device_path, sizeof(tigl_devices[j].device_path), &tigl_devices[j]);
+					}
 					ticables_info(_(" found %s on #%i, version <%x.%02x>\n"),
 						      tigl_devices[j].product_str, j+1,
 						      desc.bcdDevice >> 8,
@@ -230,6 +245,11 @@ static int tigl_find(void)
 				}
 			}
 		}
+	}
+	if (j < MAX_CABLES)
+	{
+		j = evo_serial_add_devices(tigl_devices, j, MAX_CABLES, VID_TI, PID_TI84EVO);
+		tigl_n_devices = j;
 	}
 	return j;
 }
@@ -252,12 +272,6 @@ static int tigl_enum(void)
 static int tigl_open(int id, libusb_device_handle ** udh)
 {
 	int ret;
-
-	ret = tigl_enum();
-	if (ret)
-	{
-		return ret;
-	}
 
 	if (tigl_devices[id].dev == NULL)
 	{
@@ -375,9 +389,13 @@ static int slv_prepare(CableHandle *h)
 		}
 
 		h->address = h->port-1;
-		sprintf(str, "TiglUsb #%i", h->port);
+		snprintf(str, sizeof(str), "TiglUsb #%i", h->port);
 		h->device = strdup(str);
 		h->priv2 = (usb_struct *)calloc(1, sizeof(usb_struct));
+		if (h->priv2 != nullptr)
+		{
+			evo_serial_init(&serial_obj);
+		}
 	}
 
 	return ret;
@@ -392,6 +410,17 @@ static int slv_open(CableHandle *h)
 	const struct libusb_interface_descriptor *interface;
 	const struct libusb_endpoint_descriptor *endpoint;
 
+	ret = tigl_enum();
+	if (ret)
+	{
+		return ret;
+	}
+	cable_info = tigl_devices[h->address];
+	if (tigl_devices[h->address].pid == PID_TI84EVO)
+	{
+		return evo_serial_open(h, &serial_obj, &cable_info);
+	}
+
 	// open device
 	ret = tigl_open(h->address, &uHdl);
 	if (ret)
@@ -399,7 +428,6 @@ static int slv_open(CableHandle *h)
 		return ret;
 	}
 
-	cable_info = tigl_devices[h->address];
 	uDev = (libusb_device *)(tigl_devices[h->address].dev);
 	uInEnd  = 0x81;
 	uOutEnd = 0x02;
@@ -449,6 +477,11 @@ static int slv_open(CableHandle *h)
 
 static int slv_close(CableHandle *h)
 {
+	if (serial_mode)
+	{
+		evo_serial_close(&serial_obj);
+	}
+
 	if (uHdl != NULL)
 	{
 		tigl_close(&uHdl);
@@ -471,6 +504,11 @@ static int slv_get_device_info(CableHandle *h, CableDeviceInfo *info)
 static int slv_reset(CableHandle *h)
 {
 	int ret;
+
+	if (serial_mode)
+	{
+		return evo_serial_reset(&serial_obj);
+	}
 
 	/* Reset both endpoints (send an URB_FUNCTION_RESET_PIPE) */
 	ret = tigl_reset(h);
@@ -508,6 +546,10 @@ static int slv_reset(CableHandle *h)
 			if (!ret)
 			{
 				h->priv2 = (usb_struct *)calloc(1, sizeof(usb_struct));
+				if (h->priv2 != nullptr)
+				{
+					evo_serial_init(&serial_obj);
+				}
 				ret = slv_open(h);
 			}
 		}
@@ -520,6 +562,11 @@ static int slv_reset(CableHandle *h)
 static int send_block(CableHandle *h, uint8_t *data, int length)
 {
 	int ret, tmp;
+
+	if (serial_mode)
+	{
+		return evo_serial_send(h, &serial_obj, data, (uint32_t)length);
+	}
 
 	if (NULL == uHdl)
 	{
@@ -712,6 +759,11 @@ static int slv_get(CableHandle* h, uint8_t *data, uint32_t len)
 	int ret = 0;
 	int tmp;
 
+	if (serial_mode)
+	{
+		return evo_serial_recv(h, &serial_obj, data, len);
+	}
+
 	if (NULL == uHdl)
 	{
 		return ERR_READ_ERROR;
@@ -822,6 +874,11 @@ static int slv_check(CableHandle *h, int *status)
 
 	int r;
 	struct timeval tv;
+
+	if (serial_mode)
+	{
+		return evo_serial_check(h, &serial_obj, status);
+	}
 
 	if (nBytesRead > 0)
 	{
