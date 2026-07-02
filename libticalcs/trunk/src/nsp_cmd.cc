@@ -111,6 +111,34 @@ static int put_str(uint8_t *dst, const char *src)
 	return j;
 }
 
+static int copy_vtl_data(const NSPVirtualPacket *pkt, uint32_t *size, uint8_t **data)
+{
+	if (size)
+	{
+		*size = pkt->size;
+	}
+
+	if (data == nullptr)
+	{
+		return 0;
+	}
+
+	*data = nullptr;
+	if (pkt->size == 0)
+	{
+		return 0;
+	}
+
+	*data = (uint8_t *)g_malloc0(pkt->size);
+	if (*data == nullptr)
+	{
+		return ERR_MALLOC;
+	}
+	memcpy(*data, pkt->data, pkt->size);
+
+	return 0;
+}
+
 /////////////----------------
 
 int TICALL nsp_cmd_r_login(CalcHandle *handle)
@@ -164,14 +192,13 @@ int TICALL nsp_cmd_r_status(CalcHandle *handle, uint8_t *status)
 	retval = nsp_recv_data(handle, pkt);
 	if (!retval)
 	{
-		const uint8_t value = pkt->data[0];
-
-		if (pkt->cmd != NSP_CMD_STATUS)
+		if (pkt->cmd != NSP_CMD_STATUS || pkt->size < 1)
 		{
 			retval = ERR_INVALID_PACKET;
 			goto end;
 		}
 
+		const uint8_t value = pkt->data[0];
 		if (status)
 		{
 			*status = value;
@@ -226,16 +253,7 @@ int TICALL nsp_cmd_r_dev_infos(CalcHandle *handle, uint8_t *cmd, uint32_t *size,
 	if (!retval)
 	{
 		*cmd = pkt->cmd;
-		*data = (uint8_t *)g_malloc0(pkt->size);
-		*size = pkt->size;
-		if (nullptr != *data)
-		{
-			memcpy(*data, pkt->data, pkt->size);
-		}
-		else
-		{
-			retval = ERR_MALLOC;
-		}
+		retval = copy_vtl_data(pkt, size, data);
 	}
 
 	nsp_vtl_pkt_del(handle, pkt);
@@ -281,16 +299,7 @@ int TICALL nsp_cmd_r_screen_rle(CalcHandle *handle, uint8_t *cmd, uint32_t *size
 	if (!retval)
 	{
 		*cmd = pkt->cmd;
-		*size = pkt->size;
-		*data = (uint8_t *)g_malloc0(pkt->size);
-		if (nullptr != *data)
-		{
-			memcpy(*data, pkt->data, pkt->size);
-		}
-		else
-		{
-			retval = ERR_MALLOC;
-		}
+		retval = copy_vtl_data(pkt, size, data);
 	}
 
 	nsp_vtl_pkt_del(handle, pkt);
@@ -338,7 +347,12 @@ int TICALL nsp_cmd_r_dir_attributes(CalcHandle *handle, uint32_t *size, uint8_t 
 	{
 		if (pkt->cmd != NSP_CMD_FM_ATTRIBUTES)
 		{
-			retval = ERR_CALC_ERROR3 + err_code(pkt->data[0]);
+			retval = pkt->size >= 1 ? ERR_CALC_ERROR3 + err_code(pkt->data[0]) : ERR_INVALID_PACKET;
+			goto end;
+		}
+		if (pkt->size < 9)
+		{
+			retval = ERR_INVALID_PACKET;
 			goto end;
 		}
 
@@ -437,6 +451,11 @@ int TICALL nsp_cmd_r_dir_enum_next(CalcHandle *handle, char* name, uint32_t *siz
 	{
 		if (pkt->cmd != NSP_CMD_FM_DIRLIST_ENT)
 		{
+			if (pkt->size < 1)
+			{
+				retval = ERR_INVALID_PACKET;
+				goto end;
+			}
 			if (pkt->data[0] == NSP_ERR_NO_MORE_TO_LIST)
 			{
 				retval = ERR_EOT;
@@ -449,9 +468,25 @@ int TICALL nsp_cmd_r_dir_enum_next(CalcHandle *handle, char* name, uint32_t *siz
 			}
 		}
 
-		const uint8_t data_size = pkt->data[1] + 2;
-		ticalcs_strlcpy(name, (char *)pkt->data + 2, data_size + 1);
-		const int o = data_size - 10;
+		if (pkt->size < 12)
+		{
+			retval = ERR_INVALID_PACKET;
+			goto end;
+		}
+		const size_t data_size = (size_t)pkt->data[1] + 2;
+		if (data_size < 12 || data_size > pkt->size)
+		{
+			retval = ERR_INVALID_PACKET;
+			goto end;
+		}
+		const size_t o = data_size - 10;
+		const size_t name_size = o - 2;
+		if (name_size >= VARNAME_MAX)
+		{
+			retval = ERR_INVALID_PACKET;
+			goto end;
+		}
+		ticalcs_strlcpy(name, (char *)pkt->data + 2, name_size + 1);
 
 		if (size)
 		{
@@ -590,8 +625,13 @@ int TICALL nsp_cmd_r_get_file(CalcHandle *handle, uint32_t *size)
 
 	if (!retval)
 	{
+		if (pkt->cmd == NSP_CMD_STATUS)
+		{
+			retval = pkt->size >= 1 ? ERR_CALC_ERROR3 + err_code(pkt->data[0]) : ERR_INVALID_PACKET;
+			goto end;
+		}
 
-		if (pkt->cmd != NSP_CMD_FM_PUT_FILE)
+		if (pkt->cmd != NSP_CMD_FM_PUT_FILE || pkt->size < 14)
 		{
 			retval = ERR_INVALID_PACKET;
 			goto end;
@@ -794,7 +834,7 @@ int TICALL nsp_cmd_r_file_ok(CalcHandle *handle)
 	{
 		if (pkt->cmd != NSP_CMD_FM_OK)
 		{
-			if (pkt->cmd == NSP_CMD_STATUS)
+			if (pkt->cmd == NSP_CMD_STATUS && pkt->size >= 1)
 			{
 				retval = ERR_CALC_ERROR3 + err_code(pkt->data[0]);
 			}
@@ -851,9 +891,19 @@ int TICALL nsp_cmd_r_file_contents(CalcHandle *handle, uint32_t *size, uint8_t *
 
 	if (!retval)
 	{
-		*size = pkt->size;
-		*data = (uint8_t *)g_malloc0(pkt->size);
-		memcpy(*data, pkt->data, pkt->size);
+		const uint32_t expected_size = *size;
+		if (pkt->cmd == NSP_CMD_STATUS)
+		{
+			retval = pkt->size >= 1 ? ERR_CALC_ERROR3 + err_code(pkt->data[0]) : ERR_INVALID_PACKET;
+		}
+		else if (pkt->cmd != NSP_CMD_FM_CONTENTS || pkt->size != expected_size)
+		{
+			retval = ERR_INVALID_PACKET;
+		}
+		else
+		{
+			retval = copy_vtl_data(pkt, size, data);
+		}
 	}
 
 	nsp_vtl_pkt_del(handle, pkt);
@@ -948,36 +998,50 @@ int TICALL nsp_cmd_r_progress(CalcHandle *handle, uint8_t *value)
 		{
 			break;
 		}
-		*value = pkt->data[0];
 
 		switch(pkt->cmd)
 		{
 		case NSP_CMD_OS_PROGRESS:
-			ticalcs_info("  %i/100", *value);
-			return 0;
-		case NSP_CMD_STATUS:
-			retval = ticalcs_nsp_os_status_result(*value, value);
-			if (!retval)
+			if (pkt->size < 1)
 			{
-				ticalcs_info("  OS status OK, assuming 100/100");
+				retval = ERR_INVALID_PACKET;
+				goto end;
 			}
-			return retval;
+			*value = pkt->data[0];
+			ticalcs_info("  %i/100", *value);
+			goto end;
+		case NSP_CMD_STATUS:
+			if (pkt->size < 1)
+			{
+				retval = ERR_INVALID_PACKET;
+			}
+			else
+			{
+				retval = ticalcs_nsp_os_status_result(pkt->data[0], value);
+				if (!retval)
+				{
+					ticalcs_info("  OS status OK, assuming 100/100");
+				}
+			}
+			goto end;
 		default:
 			if (pkt->cmd == NSP_CMD_OS_OK)
 			{
 				*value = 100;
 				ticalcs_info("  OS OK received, assuming 100/100");
-				return 0;
+				goto end;
 			}
 			if (pkt->src_port == NSP_PORT_PKT_ACK2)
 			{
 				// Ignore stray acks during progress polling.
 				continue;
 			}
-			return ERR_INVALID_PACKET;
+			retval = ERR_INVALID_PACKET;
+			goto end;
 		}
 	}
 
+end:
 	nsp_vtl_pkt_del(handle, pkt);
 
 	return retval;
@@ -1018,22 +1082,9 @@ int TICALL nsp_cmd_r_generic_data(CalcHandle *handle, uint32_t *size, uint8_t **
 	ticalcs_info("  receiving generic data:");
 
 	retval = nsp_recv_data(handle, pkt);
-	if (size)
+	if (!retval)
 	{
-		*size = pkt->size;
-	}
-
-	if (data)
-	{
-		*data = (uint8_t *)g_malloc0(pkt->size);
-		if (*data)
-		{
-			memcpy(*data, pkt->data, pkt->size);
-		}
-		else
-		{
-			retval = ERR_MALLOC;
-		}
+		retval = copy_vtl_data(pkt, size, data);
 	}
 
 	nsp_vtl_pkt_del(handle, pkt);

@@ -34,6 +34,9 @@ TIEXPORT3 const char* TICALL nsp_addr2name(uint16_t id);
 TIEXPORT3 const char* TICALL nsp_sid2name(uint16_t id);
 TIEXPORT3 int TICALL nsp_dissect(CalcModel model, FILE * f, const uint8_t * data, uint32_t len, uint8_t ep);
 
+// Initialize a raw reply by clearing it and reversing the request endpoints.
+TIEXPORT3 void TICALL nsp_init_reply(NSPRawPacket *reply, const NSPRawPacket *request);
+
 #ifdef __cplusplus
 }
 #endif
