@@ -71,11 +71,11 @@ static gchar * build_path(CalcModel model, VarRequest * vr)
 
 	if (!strcmp(vr->folder, ""))
 	{
-		path = g_strconcat("/", vr->name, dot_if_any, fext_if_any, NULL);
+		path = g_strconcat("/", vr->name, dot_if_any, fext_if_any, nullptr);
 	}
 	else
 	{
-		path = g_strconcat("/", vr->folder, "/", vr->name, dot_if_any, fext_if_any, NULL);
+		path = g_strconcat("/", vr->folder, "/", vr->name, dot_if_any, fext_if_any, nullptr);
 	}
 
 	return path;
@@ -982,7 +982,7 @@ static int		new_folder  (CalcHandle* handle, VarRequest* vr)
 		return ret;
 	}
 
-	char* path = g_strconcat("/", vr->folder, NULL);
+	char* path = g_strconcat("/", vr->folder, nullptr);
 	char* utf8 = ticonv_varname_to_utf8(handle->model, path, -1);
 	ticalcs_slprintf(handle->updat->text, sizeof(handle->updat->text), _("Creating %s..."), utf8);
 	ticonv_utf8_free(utf8);
@@ -1234,7 +1234,7 @@ static int		del_folder  (CalcHandle* handle, VarRequest* vr)
 		return ret;
 	}
 
-	char* path = g_strconcat("/", vr->folder, NULL);
+	char* path = g_strconcat("/", vr->folder, nullptr);
 	char* utf8 = ticonv_varname_to_utf8(handle->model, path, -1);
 	ticalcs_slprintf(handle->updat->text, sizeof(handle->updat->text), _("Deleting %s..."), utf8);
 	ticonv_utf8_free(utf8);
