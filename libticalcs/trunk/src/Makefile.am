@@ -36,7 +36,7 @@ libticalcs2_la_SOURCES = *.h \
 	keys73.cc keys83.cc keys83p.cc keys86.cc keys89.cc keys92p.cc \
 	dbus_pkt.cc \
 	dusb_rpkt.cc dusb_vpkt.cc \
-	nsp_rpkt.cc nsp_vpkt.cc \
+	nsp_rpkt.cc nsp_vpkt.cc nsp_nnse.cc \
 	probe.cc \
 	romdump.cc \
 	screen.cc \

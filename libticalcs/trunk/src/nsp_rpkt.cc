@@ -30,6 +30,8 @@
 #include "ticalcs.h"
 #include "internal.h"
 #include "nsp_rpkt.h"
+#include "nsp_vpkt.h"
+#include "nsp_nnse.h"
 #include "logging.h"
 #include "error.h"
 
@@ -107,6 +109,20 @@ const char* TICALL nsp_sid2name(uint16_t id)
 	return "";
 }
 
+void TICALL nsp_init_reply(NSPRawPacket *reply, const NSPRawPacket *request)
+{
+	if (reply == nullptr || request == nullptr)
+	{
+		return;
+	}
+
+	memset(reply, 0, sizeof(*reply));
+	reply->src_addr = request->dst_addr;
+	reply->src_port = request->dst_port;
+	reply->dst_addr = request->src_addr;
+	reply->dst_port = request->src_port;
+}
+
 // CRC implementation from O. Armand (ExtendeD)
 static uint16_t compute_crc(uint8_t *data, uint32_t size)
 {
@@ -180,6 +196,69 @@ static int hexdump(uint8_t *data, uint32_t size)
 	return 0;
 }
 
+
+static void nsp_pack_raw_message(uint8_t *buf, const NSPRawPacket *pkt, const uint8_t *data, uint8_t data_size)
+{
+	uint16_t data_sum = compute_crc((uint8_t *)data, data_size);
+
+	buf[0] = 0x54;
+	buf[1] = 0xFD;
+	buf[2] = MSB(pkt->src_addr);
+	buf[3] = LSB(pkt->src_addr);
+	buf[4] = MSB(pkt->src_port);
+	buf[5] = LSB(pkt->src_port);
+	buf[6] = MSB(pkt->dst_addr);
+	buf[7] = LSB(pkt->dst_addr);
+	buf[8] = MSB(pkt->dst_port);
+	buf[9] = LSB(pkt->dst_port);
+	buf[10] = MSB(data_sum);
+	buf[11] = LSB(data_sum);
+	buf[12] = data_size;
+	buf[13] = pkt->ack;
+	buf[14] = pkt->seq;
+	buf[15] = tifiles_checksum(buf, NSP_HEADER_SIZE-1) & 0xff;
+
+	if (data_size)
+	{
+		memcpy(buf + NSP_HEADER_SIZE, data, data_size);
+	}
+}
+
+static int nsp_queue_nnse_split_packet(CalcHandle *handle, const NSPRawPacket *pkt, uint8_t cmd,
+                                       const uint8_t *data, uint32_t data_size)
+{
+	uint8_t raw[NSP_HEADER_SIZE + NSP_DATA_SIZE];
+	uint8_t chunk[NSP_DATA_SIZE];
+	uint32_t offset = 0;
+
+	while (offset < data_size)
+	{
+		const uint32_t chunk_data_size = MIN((uint32_t)(NSP_DATA_SIZE - 1), data_size - offset);
+		chunk[0] = cmd;
+		memcpy(chunk + 1, data + offset, chunk_data_size);
+		nsp_pack_raw_message(raw, pkt, chunk, (uint8_t)(chunk_data_size + 1));
+
+		int ret = nsp_nnse_queue_stream(handle, raw, NSP_HEADER_SIZE + chunk_data_size + 1);
+		if (ret)
+		{
+			return ret;
+		}
+
+		offset += chunk_data_size;
+	}
+
+	// If the last synthetic packet is full-sized and callers don't know the
+	// expected total size, give them a short terminator packet.
+	if (data_size > 0 && (data_size % (NSP_DATA_SIZE - 1)) == 0)
+	{
+		chunk[0] = cmd;
+		nsp_pack_raw_message(raw, pkt, chunk, 1);
+		return nsp_nnse_queue_stream(handle, raw, NSP_HEADER_SIZE + 1);
+	}
+
+	return 0;
+}
+
 int TICALL nsp_send(CalcHandle* handle, NSPRawPacket* pkt)
 {
 	uint8_t buf[sizeof(NSPRawPacket)] = { 0 };
@@ -189,6 +268,15 @@ int TICALL nsp_send(CalcHandle* handle, NSPRawPacket* pkt)
 	VALIDATE_NONNULL(pkt);
 
 	SET_HANDLE_BUSY_IF_NECESSARY(handle);
+
+	const int is_nnse = nsp_nnse_enabled(handle);
+	if (is_nnse && (pkt->src_port == 0x00fe || pkt->src_port == 0x00ff))
+	{
+		// NavNet-level acknowledgements are replaced by NNSE-level ones.
+		ticalcs_info("   NNSE: not sending NavNet-level ack");
+		CLEAR_HANDLE_BUSY_IF_NECESSARY(handle);
+		return 0;
+	}
 
 	ticalcs_event_fill_header(handle, &event, /* type */ CALC_EVENT_TYPE_BEFORE_SEND_NSP_RPKT, /* retval */ 0, /* operation */ CALC_FNCT_LAST);
 	ticalcs_event_fill_nsp_rpkt(&event, /* src_addr */ pkt->src_addr, /* src_port */ pkt->src_port, /* dst_addr */ pkt->dst_addr, /* dst_port */ pkt->dst_port,
@@ -204,6 +292,12 @@ int TICALL nsp_send(CalcHandle* handle, NSPRawPacket* pkt)
 		{
 			pkt->ack = 0x0a;
 			pkt->seq = handle->priv.nsp_seq;
+		}
+		else if (is_nnse)
+		{
+			// The NNSE layer carries its own sequence numbers; NavNet packets
+			// are sent with seq 0 on this transport, like libnspire does.
+			pkt->seq = 0;
 		}
 		else
 		{
@@ -242,7 +336,14 @@ int TICALL nsp_send(CalcHandle* handle, NSPRawPacket* pkt)
 		memcpy(buf + NSP_HEADER_SIZE, pkt->data, pkt->data_size);
 
 		ticables_progress_reset(handle->cable);
-		ret = ticables_cable_send(handle->cable, buf, size);
+		if (is_nnse)
+		{
+			ret = nsp_nnse_send_stream(handle, buf, size);
+		}
+		else
+		{
+			ret = ticables_cable_send(handle->cable, buf, size);
+		}
 		if (!ret)
 		{
 			if (size >= 128)
@@ -285,65 +386,198 @@ int TICALL nsp_recv(CalcHandle* handle, NSPRawPacket* pkt)
 	if (!ret)
 	{
 		ticables_progress_reset(handle->cable);
-		ret = ticables_cable_recv(handle->cable, buf, NSP_HEADER_SIZE);
-		while (!ret)
+		if (nsp_nnse_enabled(handle))
 		{
-			pkt->unused    = (((uint16_t)buf[0]) << 8) | buf[1];
-			pkt->src_addr  = (((uint16_t)buf[2]) << 8) | buf[3];
-			pkt->src_port  = (((uint16_t)buf[4]) << 8) | buf[5];
-			pkt->dst_addr  = (((uint16_t)buf[6]) << 8) | buf[7];
-			pkt->dst_port  = (((uint16_t)buf[8]) << 8) | buf[9];
-			pkt->data_sum  = (((uint16_t)buf[10]) << 8) | buf[11];
-			pkt->data_size = buf[12];
-			pkt->ack       = buf[13];
-			pkt->seq       = buf[14];
-			pkt->hdr_sum   = buf[15];
-			if (pkt->data_size > NSP_DATA_SIZE)
-			{
-				ticalcs_critical("%s: legacy NavNet data size %u exceeds the %u-byte packet buffer", __FUNCTION__, pkt->data_size, NSP_DATA_SIZE);
-				ret = ERR_INVALID_PACKET;
-				break;
-			}
+			uint8_t msg[NSP_NNSE_MAX_PAYLOAD];
+			uint32_t msg_size = 0;
 
-			if (pkt->src_port == 0x00fe || pkt->src_port == 0x00ff || pkt->src_port == 0x00d3)
+			ret = nsp_nnse_recv_stream(handle, msg, sizeof(msg), &msg_size);
+			while (!ret)
 			{
-				handle->priv.nsp_seq_pc++;
-			}
-			else
-			{
-				handle->priv.nsp_seq = pkt->seq;
-			}
-
-			// Next, follows data
-			if (pkt->data_size)
-			{
-				ret = ticables_cable_recv(handle->cable, pkt->data, pkt->data_size);
-				if (ret)
+				if (msg_size < NSP_HEADER_SIZE)
 				{
+					ticalcs_critical("%s: NNSE stream payload too small for a NavNet packet", __FUNCTION__);
+					ret = ERR_INVALID_PACKET;
 					break;
+				}
+
+				pkt->unused    = (((uint16_t)msg[0]) << 8) | msg[1];
+				pkt->src_addr  = (((uint16_t)msg[2]) << 8) | msg[3];
+				pkt->src_port  = (((uint16_t)msg[4]) << 8) | msg[5];
+				pkt->dst_addr  = (((uint16_t)msg[6]) << 8) | msg[7];
+				pkt->dst_port  = (((uint16_t)msg[8]) << 8) | msg[9];
+				pkt->data_sum  = (((uint16_t)msg[10]) << 8) | msg[11];
+				pkt->data_size = msg[12];
+				pkt->ack       = msg[13];
+				pkt->seq       = msg[14];
+				pkt->hdr_sum   = msg[15];
+
+				if (!nsp_nnse_port_matches(handle, pkt->dst_port))
+				{
+					ticalcs_debug("   NNSE: ignoring NavNet packet %04x->%04x while waiting on port %04x cmd=%02x data_size=%u data1=%02x",
+					             pkt->src_port, pkt->dst_port, handle->priv.nsp_src_port,
+					             pkt->data_size && msg_size > NSP_HEADER_SIZE ? msg[NSP_HEADER_SIZE] : 0, pkt->data_size,
+					             pkt->data_size > 1 && msg_size > NSP_HEADER_SIZE + 1 ? msg[NSP_HEADER_SIZE + 1] : 0);
+					nsp_nnse_drop_queued_streams(handle);
+					ret = nsp_nnse_recv_stream(handle, msg, sizeof(msg), &msg_size);
+					continue;
+				}
+
+				if (pkt->data_size == 0xFF)
+				{
+					if (msg_size < NSP_HEADER_SIZE + 4)
+					{
+						ticalcs_critical("%s: extended NavNet packet is missing its 32-bit size", __FUNCTION__);
+						ret = ERR_INVALID_PACKET;
+						break;
+					}
+
+					const uint32_t ext_size = (((uint32_t)msg[16]) << 24) | (((uint32_t)msg[17]) << 16) | (((uint32_t)msg[18]) << 8) | msg[19];
+					if (ext_size < 1 || ext_size + NSP_HEADER_SIZE + 4 > msg_size)
+					{
+						ticalcs_critical("%s: extended NavNet data size is incoherent with NNSE stream payload size", __FUNCTION__);
+						ret = ERR_INVALID_PACKET;
+						break;
+					}
+
+					const uint8_t cmd = msg[NSP_HEADER_SIZE + 4];
+					const uint8_t * ext_data = msg + NSP_HEADER_SIZE + 5;
+					const uint32_t ext_data_size = ext_size - 1;
+					const uint32_t first_data_size = MIN((uint32_t)(NSP_DATA_SIZE - 1), ext_data_size);
+
+					pkt->data[0] = cmd;
+					if (first_data_size)
+					{
+						memcpy(pkt->data + 1, ext_data, first_data_size);
+					}
+					pkt->data_size = (uint8_t)(first_data_size + 1);
+					pkt->data_sum = compute_crc(pkt->data, pkt->data_size);
+
+					if (ext_data_size > first_data_size)
+					{
+						ret = nsp_queue_nnse_split_packet(handle, pkt, cmd, ext_data + first_data_size, ext_data_size - first_data_size);
+						if (ret)
+						{
+							break;
+						}
+					}
+					else if (pkt->data_size == NSP_DATA_SIZE)
+					{
+						uint8_t terminator[1] = { cmd };
+						uint8_t raw[NSP_HEADER_SIZE + 1];
+						nsp_pack_raw_message(raw, pkt, terminator, 1);
+						ret = nsp_nnse_queue_stream(handle, raw, sizeof(raw));
+						if (ret)
+						{
+							break;
+						}
+					}
+				}
+				else if ((uint32_t)pkt->data_size + NSP_HEADER_SIZE > msg_size)
+				{
+					ticalcs_critical("%s: NavNet data size is incoherent with NNSE stream payload size", __FUNCTION__);
+					ret = ERR_INVALID_PACKET;
+					break;
+				}
+				else if (pkt->data_size)
+				{
+					memcpy(pkt->data, msg + NSP_HEADER_SIZE, pkt->data_size);
+				}
+
+				if (pkt->src_port == 0x00fe || pkt->src_port == 0x00ff || pkt->src_port == 0x00d3)
+				{
+					handle->priv.nsp_seq_pc++;
+				}
+				else
+				{
+					handle->priv.nsp_seq = pkt->seq;
 				}
 
 				if (pkt->data_size >= 128)
 				{
 					ticables_progress_get(handle->cable, nullptr, nullptr, &handle->updat->rate);
 				}
-			}
 
-			if (handle->updat->cancel)
-			{
-				ret = ERR_ABORT;
+				if (handle->updat->cancel)
+				{
+					ret = ERR_ABORT;
+					break;
+				}
+
+				ticalcs_info("   %04x:%04x->%04x:%04x AK=%02x SQ=%02x HC=%02x DC=%04x (%i bytes)",
+					     pkt->src_addr, pkt->src_port, pkt->dst_addr, pkt->dst_port,
+					     pkt->ack, pkt->seq, pkt->hdr_sum, pkt->data_sum, pkt->data_size);
+				if (pkt->data_size)
+				{
+					hexdump(pkt->data, pkt->data_size);
+				}
+
 				break;
 			}
 
-			ticalcs_info("   %04x:%04x->%04x:%04x AK=%02x SQ=%02x HC=%02x DC=%04x (%i bytes)",
-				     pkt->src_addr, pkt->src_port, pkt->dst_addr, pkt->dst_port,
-				     pkt->ack, pkt->seq, pkt->hdr_sum, pkt->data_sum, pkt->data_size);
-			if (pkt->data_size)
+		}
+		else
+		{
+			ret = ticables_cable_recv(handle->cable, buf, NSP_HEADER_SIZE);
+			while (!ret)
 			{
-				hexdump(pkt->data, pkt->data_size);
-			}
+				pkt->unused    = (((uint16_t)buf[0]) << 8) | buf[1];
+				pkt->src_addr  = (((uint16_t)buf[2]) << 8) | buf[3];
+				pkt->src_port  = (((uint16_t)buf[4]) << 8) | buf[5];
+				pkt->dst_addr  = (((uint16_t)buf[6]) << 8) | buf[7];
+				pkt->dst_port  = (((uint16_t)buf[8]) << 8) | buf[9];
+				pkt->data_sum  = (((uint16_t)buf[10]) << 8) | buf[11];
+				pkt->data_size = buf[12];
+				pkt->ack       = buf[13];
+				pkt->seq       = buf[14];
+				pkt->hdr_sum   = buf[15];
+				if (pkt->data_size > NSP_DATA_SIZE)
+				{
+					ticalcs_critical("%s: legacy NavNet data size %u exceeds the %u-byte packet buffer", __FUNCTION__, pkt->data_size, NSP_DATA_SIZE);
+					ret = ERR_INVALID_PACKET;
+					break;
+				}
 
-			break;
+				if (pkt->src_port == 0x00fe || pkt->src_port == 0x00ff || pkt->src_port == 0x00d3)
+				{
+					handle->priv.nsp_seq_pc++;
+				}
+				else
+				{
+					handle->priv.nsp_seq = pkt->seq;
+				}
+
+				// Next, follows data
+				if (pkt->data_size)
+				{
+					ret = ticables_cable_recv(handle->cable, pkt->data, pkt->data_size);
+					if (ret)
+					{
+						break;
+					}
+
+					if (pkt->data_size >= 128)
+					{
+						ticables_progress_get(handle->cable, nullptr, nullptr, &handle->updat->rate);
+					}
+				}
+
+				if (handle->updat->cancel)
+				{
+					ret = ERR_ABORT;
+					break;
+				}
+
+				ticalcs_info("   %04x:%04x->%04x:%04x AK=%02x SQ=%02x HC=%02x DC=%04x (%i bytes)",
+					     pkt->src_addr, pkt->src_port, pkt->dst_addr, pkt->dst_port,
+					     pkt->ack, pkt->seq, pkt->hdr_sum, pkt->data_sum, pkt->data_size);
+				if (pkt->data_size)
+				{
+					hexdump(pkt->data, pkt->data_size);
+				}
+
+				break;
+			}
 		}
 	}
 

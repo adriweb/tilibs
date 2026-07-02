@@ -83,6 +83,7 @@
 #define to           (100 * h->timeout)        // in ms
 
 #define DEFAULT_BULK_PACKET_SIZE 64
+#define NSP_CXII_READ_SIZE 4096
 
 /* Types */
 
@@ -122,7 +123,7 @@ typedef struct
 
 	USBCableInfo cable_info;
 	int      nBytesRead;
-	uint8_t  rBuf[512];
+	uint8_t  rBuf[NSP_CXII_READ_SIZE];
 	uint8_t* rBufPtr;
 	uint8_t  in_endpoint;
 	uint8_t  out_endpoint;
@@ -326,9 +327,23 @@ static int tigl_open(int id, libusb_device_handle ** udh)
 	{
 		/*
 		 * Most models have a single configuration: #1.
-		 * On the Nspire CX II, until NNSE support is implemented, use configuration #2.
+		 * The Nspire CX II exposes two: #1 speaks NNSE (its native protocol,
+		 * supported by libticalcs), #2 speaks legacy NavNet. #1 is the default
+		 * because it is the only one usable with WinUSB / WebUSB, which cannot
+		 * select configurations; #2 can be forced by setting the
+		 * TILIBS_NSPIRE_CXII_LEGACY_NAVNET environment variable (libticalcs
+		 * honors it as well).
 		 */
-		int configuration = tigl_devices[id].pid == PID_NSPIRE_CXII ? 2 : 1;
+		int configuration = 1;
+		if (tigl_devices[id].pid == PID_NSPIRE_CXII)
+		{
+			const char * env = getenv("TILIBS_NSPIRE_CXII_LEGACY_NAVNET");
+			if (env != NULL && env[0] != 0 && env[0] != '0')
+			{
+				ticables_info(_("using legacy NavNet configuration #2 for the Nspire CX II, as requested through TILIBS_NSPIRE_CXII_LEGACY_NAVNET.\n"));
+				configuration = 2;
+			}
+		}
 		ret = libusb_set_configuration(*udh, configuration);
 		if (ret)
 		{
@@ -650,6 +665,13 @@ static int slv_open(CableHandle *h)
 		}
 	}
 	#endif
+	if (tigl_devices[h->address].pid == PID_NSPIRE_CXII)
+	{
+		// nspireconnect requests 4 KiB reads. NNSE frames can carry ~1.4 KiB
+		// NavNet payloads, so endpoint-packet-sized reads make screenshots
+		// and transfers unnecessarily fragmented.
+		max_ps_in = NSP_CXII_READ_SIZE;
+	}
 
 	nBytesRead = 0;
 	was_max_ps = 0;
@@ -1046,12 +1068,13 @@ static int slv_get(CableHandle* h, uint8_t *data, uint32_t len)
 
 	if (!ret && was_max_ps != 0 && nBytesRead == 0)
 	{
-		// FIXME do Nspire CX II calculators also need this ?
-		if (   (tigl_devices[h->address].pid == PID_NSPIRE || tigl_devices[h->address].pid == PID_NSPIRE_CRADLE)
-		    || len == 0 && (   tigl_devices[h->address].pid == PID_TI89TM
-		                    || tigl_devices[h->address].pid == PID_TI84P
-		                    || tigl_devices[h->address].pid == PID_TI84P_SE
-		                   )
+		if (   (   tigl_devices[h->address].pid == PID_NSPIRE
+		        || tigl_devices[h->address].pid == PID_NSPIRE_CRADLE
+		       )
+		    || (len == 0 && (   tigl_devices[h->address].pid == PID_TI89TM
+		                     || tigl_devices[h->address].pid == PID_TI84P
+		                     || tigl_devices[h->address].pid == PID_TI84P_SE
+		                    ))
 		   )
 		{
 			ticables_info("XXX triggering an extra bulk read");

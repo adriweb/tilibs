@@ -993,6 +993,14 @@ struct _CalcHandle
 		uint8_t nsp_pending_status;
 		uint8_t nsp_has_pending_status;
 		uint8_t dusb_needs_mode_set; // DUSB protocol resync requested
+		uint8_t nsp_nnse_mode; // 0 = not determined yet, 1 = legacy NavNet framing, 2 = NNSE framing (Nspire CX II)
+		uint8_t nsp_nnse_handshake_done; // NNSE handshake (address + time requests) performed
+		uint16_t nsp_nnse_seqno; // NNSE-level sequence number
+		uint16_t nsp_nnse_last_stream_seqno; // last delivered incoming NNSE stream sequence number
+		uint16_t nsp_nnse_passive_port; // extra calculator-initiated service port accepted by a passive operation
+		uint8_t nsp_nnse_has_last_stream_seqno; // whether nsp_nnse_last_stream_seqno is valid
+		void * nsp_nnse_rx_buffer; // raw NNSE bytes already consumed from USB while resynchronizing
+		void * nsp_nnse_pending; // NNSE stream payloads received while waiting for NNSE-level acks
 	} priv;
 };
 

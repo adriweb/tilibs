@@ -10,6 +10,9 @@ add_executable(test_nsp_protocol test_nsp_protocol.cc)
 if(NOT WIN32) # not compatible for now
     add_executable(test_ticalcs_2 test_ticalcs_2.cc)
 endif()
+if(NOT WIN32 AND NOT EMSCRIPTEN) # manual CX II hardware smoke test
+    add_executable(nnse_transfer_smoke nnse_transfer_smoke.cc)
+endif()
 
 # external deps lookup
 if(WIN32)
@@ -25,6 +28,9 @@ else()
     target_link_libraries(test_evo_protocol PRIVATE PkgConfig::libusb)
     target_link_libraries(test_nsp_protocol PRIVATE PkgConfig::libusb)
     target_link_libraries(test_ticalcs_2 PRIVATE PkgConfig::libusb)
+    if(NOT EMSCRIPTEN)
+        target_link_libraries(nnse_transfer_smoke PRIVATE PkgConfig::libusb)
+    endif()
 endif()
 pkg_check_modules(glib REQUIRED IMPORTED_TARGET glib-2.0)
 pkg_check_modules(LibArchive REQUIRED IMPORTED_TARGET libarchive)
@@ -36,6 +42,9 @@ if(NOT EMSCRIPTEN)
     target_link_libraries(test_nsp_protocol PRIVATE ZLIB::ZLIB PkgConfig::glib PkgConfig::LibArchive)
     if(NOT WIN32) # not compatible for now
         target_link_libraries(test_ticalcs_2 PRIVATE ZLIB::ZLIB PkgConfig::glib PkgConfig::LibArchive)
+    endif()
+    if(NOT WIN32)
+        target_link_libraries(nnse_transfer_smoke PRIVATE ZLIB::ZLIB PkgConfig::glib PkgConfig::LibArchive)
     endif()
 else()
     set(ZLIB_FOUND TRUE)
@@ -55,9 +64,12 @@ if(USE_ICONV)
     add_compile_definitions(USE_ICONV)
 endif()
 
-foreach(tar torture_ticalcs test_evo_errors test_evo_protocol test_nsp_protocol test_ticalcs_2)
+foreach(tar torture_ticalcs test_evo_errors test_evo_protocol test_nsp_protocol test_ticalcs_2 nnse_transfer_smoke)
     if(tar STREQUAL test_ticalcs_2 AND WIN32)
         continue() # not compatible for now
+    endif ()
+    if(tar STREQUAL nnse_transfer_smoke AND (WIN32 OR EMSCRIPTEN))
+        continue() # manual native libusb hardware smoke test
     endif ()
 
     if(Iconv_FOUND AND NOT Iconv_IS_BUILT_IN)

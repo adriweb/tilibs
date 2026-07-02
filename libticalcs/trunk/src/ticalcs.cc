@@ -40,6 +40,7 @@
 #include "logging.h"
 #include "error.h"
 #include "calc_xx.h"
+#include "nsp_nnse.h"
 
 /*****************/
 /* Internal data */
@@ -702,6 +703,8 @@ int TICALL ticalcs_handle_del(CalcHandle* handle)
 		ticalcs_cable_detach(handle);
 	}
 
+	nsp_nnse_reset(handle);
+
 	if (handle->buffer2)
 	{
 		g_free(handle->buffer2);
@@ -777,6 +780,8 @@ int TICALL ticalcs_cable_attach(CalcHandle* handle, CableHandle* cable)
 		handle->cable = cable;
 		handle->attached = !0;
 
+		nsp_nnse_reset(handle);
+
 		ret = ticables_cable_open(cable);
 		if (!ret)
 		{
@@ -814,6 +819,8 @@ int TICALL ticalcs_cable_detach(CalcHandle* handle)
 
 			handle->attached = 0;
 			handle->cable = nullptr;
+
+			nsp_nnse_reset(handle);
 		}
 	}
 

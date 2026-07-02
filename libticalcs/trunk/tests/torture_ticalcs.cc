@@ -1,10 +1,12 @@
 #include <stdio.h>
+#include <stdlib.h>
 #include <assert.h>
 #include <ticalcs.h>
 #include <inttypes.h>
 #include <nsp_rpkt.h>
 #include <nsp_vpkt.h>
 #include <nsp_cmd.h>
+#include <nsp_nnse.h>
 #include <dusb_rpkt.h>
 #include <dusb_vpkt.h>
 #include <dusb_cmd.h>
@@ -985,6 +987,75 @@ static void dissect_functions_unit_test_3()
     assert(0 == nsp_dissect(CALC_NONE, stderr, nsp_good_keypress_home, sizeof(nsp_good_keypress_home), 0));
 }
 
+static void nnse_parser_unit_test()
+{
+#define NNSE_EXPECT(expr) do { \
+    if (!(expr)) { \
+        fprintf(stderr, "NNSE parser test failed: %s\n", #expr); \
+        abort(); \
+    } \
+} while (0)
+
+    static const uint8_t valid_normal_header_prefix_1[] = { 0x00 };
+    static const uint8_t valid_normal_header_prefix_2[] = { 0x00, 0x04 };
+    static const uint8_t valid_normal_header_prefix_4[] = { 0x00, 0x04, 0x01, 0xFE };
+    static const uint8_t valid_normal_header_prefix_8[] = { 0x00, 0x04, 0x01, 0xFE, 0x00, 0x01, 0x00, 0x0C };
+    static const uint8_t valid_retry_header_prefix_8[] = { 0x00, 0x04, 0x01, 0xFE, 0x00, 0x09, 0x00, 0x39 };
+    static const uint8_t valid_retry_ack_header_prefix_8[] = { 0x00, 0x84, 0x01, 0xFE, 0x00, 0x08, 0x00, 0x0C };
+    static const uint8_t valid_compact_header_prefix_7[] = { 0x08, 0x01, 0xFE, 0x00, 0x00, 0x00, 0x0C };
+    static const uint8_t stale_dir_entry_tail_1[] = { 0x00, 0x00, 0x0B, 0x69, 0x30, 0x00, 0x00, 0x01, 0xE4, 0x00, 0x00 };
+    static const uint8_t stale_dir_entry_tail_2[] = { 0x00, 0x00, 0x00, 0x21, 0x54, 0x00, 0x00, 0x45, 0x6B, 0x00, 0x00 };
+    static const uint8_t stale_single_byte[] = { 0x1C };
+    static const uint8_t bad_normal_reqack[] = { 0x00, 0x04, 0x01, 0xFE, 0x00, 0x03 };
+    static const uint8_t bad_normal_src[] = { 0x00, 0x04, 0x99 };
+    static const uint8_t bad_normal_dest[] = { 0x00, 0x04, 0x01, 0x99 };
+    static const uint8_t bad_compact_dest[] = { 0x08, 0x01, 0x99 };
+    static const uint8_t preserved_ack_header[] = { 0x00, 0x84, 0x01, 0xFE };
+    static const uint8_t short_stream[] = { 0x54, 0xFD };
+    uint8_t ack_with_stale_prefix[] = { 0x00, 0x00, 0x84, 0x01, 0xFE };
+    uint8_t stale_tail_copy[sizeof(stale_dir_entry_tail_1)];
+    uint32_t ack_size = sizeof(ack_with_stale_prefix);
+    uint32_t stale_tail_size = sizeof(stale_tail_copy);
+
+    NNSE_EXPECT(nsp_nnse_test_partial_header_possible(nullptr, 0));
+    NNSE_EXPECT(nsp_nnse_test_partial_header_possible(valid_normal_header_prefix_1, sizeof(valid_normal_header_prefix_1)));
+    NNSE_EXPECT(nsp_nnse_test_partial_header_possible(valid_normal_header_prefix_2, sizeof(valid_normal_header_prefix_2)));
+    NNSE_EXPECT(nsp_nnse_test_partial_header_possible(valid_normal_header_prefix_4, sizeof(valid_normal_header_prefix_4)));
+    NNSE_EXPECT(nsp_nnse_test_partial_header_possible(valid_normal_header_prefix_8, sizeof(valid_normal_header_prefix_8)));
+    NNSE_EXPECT(nsp_nnse_test_partial_header_possible(valid_retry_header_prefix_8, sizeof(valid_retry_header_prefix_8)));
+    NNSE_EXPECT(nsp_nnse_test_partial_header_possible(valid_retry_ack_header_prefix_8, sizeof(valid_retry_ack_header_prefix_8)));
+    NNSE_EXPECT(nsp_nnse_test_partial_header_possible(valid_compact_header_prefix_7, sizeof(valid_compact_header_prefix_7)));
+
+    NNSE_EXPECT(!nsp_nnse_test_partial_header_possible(stale_dir_entry_tail_1, sizeof(stale_dir_entry_tail_1)));
+    NNSE_EXPECT(!nsp_nnse_test_partial_header_possible(stale_dir_entry_tail_2, sizeof(stale_dir_entry_tail_2)));
+    NNSE_EXPECT(!nsp_nnse_test_partial_header_possible(stale_single_byte, sizeof(stale_single_byte)));
+    NNSE_EXPECT(!nsp_nnse_test_partial_header_possible(bad_normal_reqack, sizeof(bad_normal_reqack)));
+    NNSE_EXPECT(!nsp_nnse_test_partial_header_possible(bad_normal_src, sizeof(bad_normal_src)));
+    NNSE_EXPECT(!nsp_nnse_test_partial_header_possible(bad_normal_dest, sizeof(bad_normal_dest)));
+    NNSE_EXPECT(!nsp_nnse_test_partial_header_possible(bad_compact_dest, sizeof(bad_compact_dest)));
+
+    NNSE_EXPECT(nsp_nnse_test_discard_impossible_prefix(ack_with_stale_prefix, &ack_size) == 1);
+    NNSE_EXPECT(ack_size == sizeof(preserved_ack_header));
+    NNSE_EXPECT(memcmp(ack_with_stale_prefix, preserved_ack_header, sizeof(preserved_ack_header)) == 0);
+
+    memcpy(stale_tail_copy, stale_dir_entry_tail_1, sizeof(stale_tail_copy));
+    NNSE_EXPECT(nsp_nnse_test_discard_impossible_prefix(stale_tail_copy, &stale_tail_size) > 0);
+    NNSE_EXPECT(stale_tail_size < sizeof(stale_dir_entry_tail_1));
+    NNSE_EXPECT(stale_tail_size == 0 || nsp_nnse_test_partial_header_possible(stale_tail_copy, stale_tail_size));
+
+    NNSE_EXPECT(nsp_nnse_test_port_matches(0x8005, 0, 0x8005));
+    NNSE_EXPECT(nsp_nnse_test_port_matches(0x8005, 0, NSP_PORT_LOGIN));
+    NNSE_EXPECT(!nsp_nnse_test_port_matches(0x8005, 0, NSP_PORT_OS_INSTALL));
+    NNSE_EXPECT(nsp_nnse_test_port_matches(0x8005, NSP_PORT_OS_INSTALL, NSP_PORT_OS_INSTALL));
+    NNSE_EXPECT(!nsp_nnse_test_port_matches(0x8005, NSP_PORT_OS_INSTALL, NSP_PORT_KEYPRESSES));
+
+    NNSE_EXPECT(!nsp_nnse_test_stream_requires_ack(nsp_good_keypress_home, sizeof(nsp_good_keypress_home)));
+    NNSE_EXPECT(nsp_nnse_test_stream_requires_ack(nsp_good_device_address_request, sizeof(nsp_good_device_address_request)));
+    NNSE_EXPECT(nsp_nnse_test_stream_requires_ack(short_stream, sizeof(short_stream)));
+
+#undef NNSE_EXPECT
+}
+
 int main(int argc, char **argv)
 {
     ticalcs_library_init();
@@ -1000,6 +1071,7 @@ int main(int argc, char **argv)
     dissect_functions_unit_test_1();
     dissect_functions_unit_test_2();
     dissect_functions_unit_test_3();
+    nnse_parser_unit_test();
 
     ticalcs_library_exit();
 

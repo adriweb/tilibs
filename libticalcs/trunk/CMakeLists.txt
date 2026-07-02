@@ -36,6 +36,7 @@ set(SRC_FILES
         src/keys89.cc
         src/keys92p.cc
         src/nsp_cmd.cc
+        src/nsp_nnse.cc
         src/nsp_rpkt.cc
         src/nsp_vpkt.cc
         src/probe.cc
