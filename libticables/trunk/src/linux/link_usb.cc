@@ -417,9 +417,23 @@ static int tigl_open(int id, usb_dev_handle **udh)
 	{
 		/*
 		 * Most models have a single configuration: #1.
-		 * On the Nspire CX II, until NNSE support is implemented, use configuration #2.
+		 * The Nspire CX II exposes two: #1 speaks NNSE (its native protocol,
+		 * supported by libticalcs), #2 speaks legacy NavNet. #1 is the default
+		 * because it is the only one usable with WinUSB / WebUSB, which cannot
+		 * select configurations; #2 can be forced by setting the
+		 * TILIBS_NSPIRE_CXII_LEGACY_NAVNET environment variable (libticalcs
+		 * honors it as well).
 		 */
-		int configuration = tigl_devices[id].pid == PID_NSPIRE_CXII ? 2 : 1;
+		int configuration = 1;
+		if (tigl_devices[id].pid == PID_NSPIRE_CXII)
+		{
+			const char * env = getenv("TILIBS_NSPIRE_CXII_LEGACY_NAVNET");
+			if (env != NULL && env[0] != 0 && env[0] != '0')
+			{
+				ticables_info(_("using legacy NavNet configuration #2 for the Nspire CX II, as requested through TILIBS_NSPIRE_CXII_LEGACY_NAVNET.\n"));
+				configuration = 2;
+			}
+		}
 		ret = usb_set_configuration(*udh, configuration);
 		if (ret < 0)
 		{
