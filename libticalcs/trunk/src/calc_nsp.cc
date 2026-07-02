@@ -40,7 +40,9 @@
 #include "error.h"
 
 #include "nsp_vpkt.h"
+#include "nsp_rpkt.h"
 #include "nsp_cmd.h"
+#include "nsp_nnse.h"
 #include "nsp_limits.h"
 
 // Helper function for multiple functions below.
@@ -95,6 +97,23 @@ static gchar * build_path(CalcModel model, VarRequest * vr)
 			nsp_session_close(handle); \
 		} \
 	} while (0);
+
+static int nsp_nnse_reopen_session(CalcHandle *handle, uint16_t sid, const char *operation)
+{
+	ticalcs_warning("  NNSE: re-associating transport and reopening service session before retrying %s", operation);
+	nsp_session_close(handle);
+	nsp_nnse_reassociate_next(handle);
+	return nsp_session_open(handle, sid);
+}
+
+static void nsp_nnse_recover_after_failed_session(CalcHandle *handle, const char *operation)
+{
+	if (nsp_nnse_enabled(handle))
+	{
+		ticalcs_warning("  NNSE: re-associating transport after failed %s", operation);
+		nsp_nnse_reassociate_next(handle);
+	}
+}
 
 
 //int nsp_reset = 0;
@@ -246,9 +265,12 @@ static int		recv_screen	(CalcHandle* handle, CalcScreenCoord* sc, uint8_t** bitm
 		}
 
 		// Do screenshot
+		int retries = 0;
+
 		ret = nsp_session_open(handle, NSP_SID_SCREEN_RLE);
 		if (!ret)
 		{
+retry_screen:
 			ret = nsp_cmd_s_screen_rle(handle, 0);
 			if (!ret)
 			{
@@ -316,6 +338,16 @@ static int		recv_screen	(CalcHandle* handle, CalcScreenCoord* sc, uint8_t** bitm
 				}
 			}
 
+			if (ret == ERROR_READ_TIMEOUT && nsp_nnse_enabled(handle) && retries < 2)
+			{
+				retries++;
+				ret = nsp_nnse_reopen_session(handle, NSP_SID_SCREEN_RLE, "screenshot");
+				if (!ret)
+				{
+					goto retry_screen;
+				}
+			}
+
 			DO_CLOSE_SESSION(handle);
 		}
 	}
@@ -323,10 +355,40 @@ static int		recv_screen	(CalcHandle* handle, CalcScreenCoord* sc, uint8_t** bitm
 	return ret;
 }
 
-// Helper function for get_dirlist, it does the bulk of the work.
-static int enumerate_folder(CalcHandle* handle, GNode** vars, const char * folder_name)
+static gboolean free_dirlist_node_data(GNode *node, gpointer data)
 {
-	int ret;
+	(void)data;
+	if (node != nullptr && node->data != nullptr)
+	{
+		tifiles_ve_delete((VarEntry *)node->data);
+		node->data = nullptr;
+	}
+
+	return FALSE;
+}
+
+static void clear_dirlist_children(GNode *node)
+{
+	if (node == nullptr)
+	{
+		return;
+	}
+
+	while (node->children != nullptr)
+	{
+		GNode *child = node->children;
+		g_node_unlink(child);
+		g_node_traverse(child, G_POST_ORDER, G_TRAVERSE_ALL, -1, free_dirlist_node_data, nullptr);
+		g_node_destroy(child);
+	}
+}
+
+static int enumerate_folder_children(CalcHandle* handle, GNode** vars, const char * folder_name, int nnse_per_folder_sessions);
+
+static int enumerate_folder_entries(CalcHandle* handle, GNode** vars, const char * folder_name)
+{
+	int ret = 0;
+	int enum_init_sent = 0;
 
 	ticalcs_info("enumerate_folder<%s>\n", folder_name);
 	ticalcs_slprintf(handle->updat->text, sizeof(handle->updat->text), _("Listing %s..."), folder_name);
@@ -342,12 +404,12 @@ static int enumerate_folder(CalcHandle* handle, GNode** vars, const char * folde
 		{
 			break;
 		}
+		enum_init_sent = 1;
 		ret = nsp_cmd_r_dir_enum_init(handle);
 		if (ret)
 		{
 			break;
 		}
-
 		for (;;)
 		{
 			uint32_t varsize;
@@ -413,59 +475,129 @@ static int enumerate_folder(CalcHandle* handle, GNode** vars, const char * folde
 				fe->attr,
 				fe->size);
 		}
+	} while (0);
 
-		while (!ret)
+	if (enum_init_sent)
+	{
+		int close_ret;
+
+		if (ret == ERROR_READ_TIMEOUT && nsp_nnse_enabled(handle))
 		{
-			ret = nsp_cmd_s_dir_enum_done(handle);
-			if (ret)
+			ticalcs_warning("  NNSE: skipping directory listing cleanup after transport timeout");
+		}
+		else
+		{
+			close_ret = nsp_cmd_s_dir_enum_done(handle);
+			if (!close_ret)
 			{
-				break;
+				close_ret = nsp_cmd_r_dir_enum_done(handle);
 			}
-			ret = nsp_cmd_r_dir_enum_done(handle);
-			if (ret)
+
+			if (!ret)
 			{
-				break;
+				ret = close_ret;
 			}
-
-			// Enumerate elements of root folder.
-			for (int i = 0; i < (int)g_node_n_children(*vars); i++)
+			else if (close_ret)
 			{
-				char new_folder_name[FLDNAME_MAX + 4];
-				const char * separator_if_any;
-				GNode * folder = g_node_nth_child(*vars, i);
-				const uint8_t vartype = ((VarEntry *)(folder->data))->type;
-
-				// Don't recurse into regular files (type 0, TNS or e.g. themes.csv on OS 3.0+).
-				if (vartype == NSP_TNS)
-				{
-					ticalcs_info(_("Not enumerating documents in %s because it's not a folder\n"), ((VarEntry *)(folder->data))->name);
-					continue;
-				}
-
-				// Prevent names from starting with "//".
-				if (strcmp(folder_name, "/"))
-				{
-					separator_if_any = "/";
-				}
-				else
-				{
-					separator_if_any = "";
-				}
-
-				ticalcs_slprintf(new_folder_name, sizeof(new_folder_name), "%s%s%s", folder_name, separator_if_any, ((VarEntry *)(folder->data))->name);
-				new_folder_name[FLDNAME_MAX] = 0;
-
-				ticalcs_info(_("Directory listing in <%s>...\n"), new_folder_name);
-
-				ret = enumerate_folder(handle, &folder, new_folder_name);
-				if (ret)
-				{
-					break;
-				}
+				ticalcs_warning("  directory listing cleanup failed after prior error: %i", close_ret);
 			}
+		}
+	}
+
+	return ret;
+}
+
+static int enumerate_folder_legacy(CalcHandle* handle, GNode** vars, const char * folder_name)
+{
+	int ret = enumerate_folder_entries(handle, vars, folder_name);
+	if (ret)
+	{
+		return ret;
+	}
+
+	return enumerate_folder_children(handle, vars, folder_name, 0);
+}
+
+static int enumerate_folder_nnse(CalcHandle* handle, GNode** vars, const char * folder_name, int max_retries)
+{
+	int ret;
+	int retries = 0;
+
+retry:
+	if (retries > 0)
+	{
+		clear_dirlist_children(*vars);
+	}
+
+	ret = nsp_session_open(handle, NSP_SID_FILE_MGMT);
+	if (!ret)
+	{
+		ret = enumerate_folder_entries(handle, vars, folder_name);
+		DO_CLOSE_SESSION(handle);
+	}
+
+	if (ret == ERROR_READ_TIMEOUT && retries < max_retries)
+	{
+		retries++;
+		ticalcs_warning("  NNSE: re-associating transport before retrying directory listing");
+		nsp_nnse_reassociate_next(handle);
+		goto retry;
+	}
+	if (ret)
+	{
+		return ret;
+	}
+
+	return enumerate_folder_children(handle, vars, folder_name, 1);
+}
+
+static int enumerate_folder_children(CalcHandle* handle, GNode** vars, const char * folder_name, int nnse_per_folder_sessions)
+{
+	int ret = 0;
+
+	// Enumerate elements of current folder.
+	for (int i = 0; i < (int)g_node_n_children(*vars); i++)
+	{
+		char new_folder_name[FLDNAME_MAX + 4];
+		const char * separator_if_any;
+		GNode * folder = g_node_nth_child(*vars, i);
+		const uint8_t vartype = ((VarEntry *)(folder->data))->type;
+
+		// Don't recurse into regular files (type 0, TNS or e.g. themes.csv on OS 3.0+).
+		if (vartype == NSP_TNS)
+		{
+			ticalcs_debug(_("Not enumerating documents in %s because it's not a folder\n"), ((VarEntry *)(folder->data))->name);
+			continue;
+		}
+
+		// Prevent names from starting with "//".
+		if (strcmp(folder_name, "/"))
+		{
+			separator_if_any = "/";
+		}
+		else
+		{
+			separator_if_any = "";
+		}
+
+		ticalcs_slprintf(new_folder_name, sizeof(new_folder_name), "%s%s%s", folder_name, separator_if_any, ((VarEntry *)(folder->data))->name);
+		new_folder_name[FLDNAME_MAX] = 0;
+
+		ticalcs_info(_("Directory listing in <%s>...\n"), new_folder_name);
+
+		if (nnse_per_folder_sessions)
+		{
+			ret = enumerate_folder_nnse(handle, &folder, new_folder_name, 2);
+		}
+		else
+		{
+			ret = enumerate_folder_legacy(handle, &folder, new_folder_name);
+		}
+		if (ret)
+		{
 			break;
 		}
-	} while (0);
+	}
 
 	return ret;
 }
@@ -492,29 +624,34 @@ static int get_dirlist (CalcHandle* handle, GNode** vars, GNode** apps)
 	g_node_append(*apps, root);
 
 	ret = nsp_session_open(handle, NSP_SID_FILE_MGMT);
+	if (ret)
+	{
+		return ret;
+	}
+
+	ret = nsp_cmd_s_dir_attributes(handle, "/");
 	if (!ret)
 	{
-		ret = nsp_cmd_s_dir_attributes(handle, "/");
+		ret = nsp_cmd_r_dir_attributes(handle, nullptr, nullptr, nullptr);
+	}
+	DO_CLOSE_SESSION(handle);
+	if (ret)
+	{
+		return ret;
+	}
+
+	if (nsp_nnse_enabled(handle))
+	{
+		ret = enumerate_folder_nnse(handle, vars, "/", 2);
+	}
+	else
+	{
+		ret = nsp_session_open(handle, NSP_SID_FILE_MGMT);
 		if (!ret)
 		{
-			ret = nsp_cmd_r_dir_attributes(handle, nullptr, nullptr, nullptr);
-			if (!ret)
-			{
-				ret = nsp_session_close(handle);
-				if (!ret)
-				{
-					ret = nsp_session_open(handle, NSP_SID_FILE_MGMT);
-					if (!ret)
-					{
-						ret = enumerate_folder(handle, vars, "/");
-
-						// Fall through for closing session.
-					}
-				}
-			}
+			ret = enumerate_folder_legacy(handle, vars, "/");
+			DO_CLOSE_SESSION(handle);
 		}
-
-		DO_CLOSE_SESSION(handle);
 	}
 
 	return ret;
@@ -596,6 +733,7 @@ static int		send_var	(CalcHandle* handle, CalcMode mode, FileContent* content)
 	{
 		return ret;
 	}
+	int file_contents_started = 0;
 
 	gchar* path = build_path(handle->model, entry);
 
@@ -612,6 +750,7 @@ static int		send_var	(CalcHandle* handle, CalcMode mode, FileContent* content)
 			handle->updat->cnt1 = 0;
 			handle->updat->max1 = entry->size;
 			ticalcs_update_pbar(handle);
+			file_contents_started = 1;
 			ret = nsp_cmd_s_file_contents(handle, entry->size, entry->data);
 			if (!ret)
 			{
@@ -620,19 +759,39 @@ static int		send_var	(CalcHandle* handle, CalcMode mode, FileContent* content)
 		}
 	}
 
+	if (file_contents_started)
+	{
+		const int eot_ret = nsp_cmd_s_put_file_eot(handle);
+		if (!ret)
+		{
+			ret = eot_ret;
+		}
+		else if (eot_ret)
+		{
+			ticalcs_warning("  file send cleanup failed after prior error: %i", eot_ret);
+		}
+	}
+
 	DO_CLOSE_SESSION(handle);
+	if (ret && nsp_nnse_enabled(handle))
+	{
+		nsp_nnse_reassociate_next(handle);
+	}
 
 	return ret;
 }
 
 static int		recv_var	(CalcHandle* handle, CalcMode mode, FileContent* content, VarRequest* vr)
 {
+	int retries = 0;
+	int file_contents_started = 0;
 	int ret = nsp_session_open(handle, NSP_SID_FILE_MGMT);
 	if (ret)
 	{
 		return ret;
 	}
 
+retry_recv_var:
 	char* path = build_path(handle->model, vr);
 	ticonv_varname_to_utf8_sn(handle->model, path, handle->updat->text, sizeof(handle->updat->text), vr->type);
 	ticalcs_update_label(handle);
@@ -654,6 +813,7 @@ static int		recv_var	(CalcHandle* handle, CalcMode mode, FileContent* content, V
 					handle->updat->cnt1 = 0;
 					handle->updat->max1 = vr->size;
 					ticalcs_update_pbar(handle);
+					file_contents_started = 1;
 					ret = nsp_cmd_r_file_contents(handle, &(vr->size), &data);
 				}
 				if (!ret)
@@ -681,6 +841,25 @@ static int		recv_var	(CalcHandle* handle, CalcMode mode, FileContent* content, V
 		}
 	}
 
+	if (ret && file_contents_started && nsp_nnse_enabled(handle))
+	{
+		const int status_ret = nsp_cmd_s_status(handle, NSP_ERR_LIST_FAILED);
+		if (status_ret)
+		{
+			ticalcs_warning("  file receive cleanup failed after prior error: %i", status_ret);
+		}
+	}
+
+	if (ret == ERROR_READ_TIMEOUT && nsp_nnse_enabled(handle) && content->num_entries == 0 && !file_contents_started && retries < 2)
+	{
+		retries++;
+		ret = nsp_nnse_reopen_session(handle, NSP_SID_FILE_MGMT, "file receive");
+		if (!ret)
+		{
+			goto retry_recv_var;
+		}
+	}
+
 	// Close session at the end.
 	// XXX don't check the result of this call, to enable reception of variables from Nspires running OS >= 1.7.
 	// Those versions send a martian packet:
@@ -688,7 +867,16 @@ static int		recv_var	(CalcHandle* handle, CalcMode mode, FileContent* content, V
 	// * an improper dest port;
 	// * a 1-byte payload containing 02 (i.e. an invalid address for the next packet).
 	// * .ack = 0x00 (instead of 0x0A).
-	nsp_session_close(handle);
+	const int close_ret = nsp_session_close(handle);
+	if (close_ret && nsp_nnse_enabled(handle))
+	{
+		ticalcs_warning("  file receive service close failed after operation: %i", close_ret);
+		nsp_nnse_reassociate_next(handle);
+	}
+	if (ret && nsp_nnse_enabled(handle))
+	{
+		nsp_nnse_reassociate_next(handle);
+	}
 
 	return ret;
 }
@@ -885,27 +1073,25 @@ static int		dump_rom_2	(CalcHandle* handle, CalcDumpSize size, const char *filen
 
 static int nsp_send_ack_for_packet(CalcHandle* handle, const NSPRawPacket* packet)
 {
-	NSPRawPacket ack{};
+	NSPRawPacket ack;
 
+	nsp_init_reply(&ack, packet);
 	ack.data_size = 2;
-	ack.src_addr = NSP_SRC_ADDR;
 	ack.src_port = (packet->seq == 0 ? NSP_PORT_PKT_ACK1 : NSP_PORT_PKT_ACK2);
-	ack.dst_addr = NSP_DEV_ADDR;
-	ack.dst_port = packet->src_port;
 	ack.data[0] = MSB(packet->dst_port);
 	ack.data[1] = LSB(packet->dst_port);
 
 	return nsp_send(handle, &ack);
 }
 
-static int nsp_send_simple_cmd(CalcHandle* handle, uint16_t src_port, uint16_t dst_port, uint8_t cmd, const uint8_t* payload, uint8_t payload_size)
+static int nsp_send_simple_reply(CalcHandle* handle, const NSPRawPacket* request, uint16_t src_port, uint16_t dst_port,
+								 uint8_t cmd, const uint8_t* payload, uint8_t payload_size)
 {
-	NSPRawPacket pkt{};
+	NSPRawPacket pkt;
 
+	nsp_init_reply(&pkt, request);
 	pkt.data_size = payload_size + 1;
-	pkt.src_addr = NSP_SRC_ADDR;
 	pkt.src_port = src_port;
-	pkt.dst_addr = NSP_DEV_ADDR;
 	pkt.dst_port = dst_port;
 	pkt.data[0] = cmd;
 	if (payload_size && payload != nullptr)
@@ -916,7 +1102,7 @@ static int nsp_send_simple_cmd(CalcHandle* handle, uint16_t src_port, uint16_t d
 	return nsp_send(handle, &pkt);
 }
 
-static int nsp_send_device_info(CalcHandle* handle, uint16_t dst_port)
+static int nsp_send_device_info(CalcHandle* handle, const NSPRawPacket* request)
 {
 	// Static device-info reply blob captured from real handhelds
 	static const uint8_t info[] = {
@@ -929,23 +1115,24 @@ static int nsp_send_device_info(CalcHandle* handle, uint16_t dst_port)
 		0x32, 0x31, 0x46, 0x33, 0x43, 0x30, 0x36, 0x34, 0x34, 0x45, 0x30, 0x33, 0x30, 0x43, 0x00
 	};
 
-	return nsp_send_simple_cmd(handle, NSP_PORT_DEV_INFOS, dst_port, info[0], info + 1, (uint8_t)(sizeof(info) - 1));
+	return nsp_send_simple_reply(handle, request, NSP_PORT_DEV_INFOS, request->src_port,
+	                             info[0], info + 1, (uint8_t)(sizeof(info) - 1));
 }
 
 
-static int nsp_send_device_name(CalcHandle* handle, uint16_t dst_port)
+static int nsp_send_device_name(CalcHandle* handle, const NSPRawPacket* request)
 {
     const char name[] = "TI-Nspire(tm) Handheld";
 
-    return nsp_send_simple_cmd(handle, NSP_PORT_DEV_INFOS, dst_port, NSP_CMD_DI_MODEL,
+    return nsp_send_simple_reply(handle, request, NSP_PORT_DEV_INFOS, request->src_port, NSP_CMD_DI_MODEL,
                                (const uint8_t*)name, (uint8_t)sizeof(name));
 }
 
-static int nsp_send_supported_fext(CalcHandle* handle, uint16_t dst_port)
+static int nsp_send_supported_fext(CalcHandle* handle, const NSPRawPacket* request)
 {
     const char fext[] = "tnc";
 
-    return nsp_send_simple_cmd(handle, NSP_PORT_DEV_INFOS, dst_port, NSP_CMD_DI_FEXT,
+    return nsp_send_simple_reply(handle, request, NSP_PORT_DEV_INFOS, request->src_port, NSP_CMD_DI_FEXT,
                                (const uint8_t*)fext, (uint8_t)sizeof(fext));
 }
 
@@ -971,6 +1158,10 @@ static int		del_var		(CalcHandle* handle, VarRequest* vr)
 	}
 
 	DO_CLOSE_SESSION(handle);
+	if (ret)
+	{
+		nsp_nnse_recover_after_failed_session(handle, "file deletion");
+	}
 
 	return ret;
 }
@@ -997,12 +1188,19 @@ static int		new_folder  (CalcHandle* handle, VarRequest* vr)
 	}
 
 	DO_CLOSE_SESSION(handle);
+	if (ret)
+	{
+		nsp_nnse_recover_after_failed_session(handle, "folder creation");
+	}
 
 	return ret;
 }
 
 static int		get_version	(CalcHandle* handle, CalcInfos* infos)
 {
+	int retries = 0;
+
+retry_get_version:
 	int ret = nsp_session_open(handle, NSP_SID_DEV_INFOS);
 	if (ret)
 	{
@@ -1045,6 +1243,7 @@ static int		get_version	(CalcHandle* handle, CalcInfos* infos)
 		if (size < 110)
 		{
 			ret = ERR_INVALID_PACKET;
+			g_free(data);
 			break;
 		}
 
@@ -1193,6 +1392,17 @@ static int		get_version	(CalcHandle* handle, CalcInfos* infos)
 	} while (0);
 
 	DO_CLOSE_SESSION(handle);
+	if ((ret == ERROR_READ_TIMEOUT || ret == ERR_INVALID_PACKET || ret == ERR_CHECKSUM) && nsp_nnse_enabled(handle) && retries < 2)
+	{
+		retries++;
+		ticalcs_warning("  NNSE: re-associating transport before retrying device information");
+		nsp_nnse_reassociate_next(handle);
+		goto retry_get_version;
+	}
+	if (ret)
+	{
+		nsp_nnse_recover_after_failed_session(handle, "device information");
+	}
 
 	return ret;
 }
@@ -1223,6 +1433,10 @@ static int		rename_var	(CalcHandle* handle, VarRequest* oldname, VarRequest* new
 	}
 
 	DO_CLOSE_SESSION(handle);
+	if (ret)
+	{
+		nsp_nnse_recover_after_failed_session(handle, "file rename");
+	}
 
 	return ret;
 }
@@ -1249,6 +1463,10 @@ static int		del_folder  (CalcHandle* handle, VarRequest* vr)
 	}
 
 	DO_CLOSE_SESSION(handle);
+	if (ret)
+	{
+		nsp_nnse_recover_after_failed_session(handle, "folder deletion");
+	}
 
 	return ret;
 }
@@ -1256,6 +1474,7 @@ static int		del_folder  (CalcHandle* handle, VarRequest* vr)
 static int		recv_os    (CalcHandle* handle, FlashContent* content)
 {
 	int ret = 0;
+	const uint16_t old_nnse_passive_port = handle->priv.nsp_nnse_passive_port;
 	bool started = false;
 	bool sent_status = false;
 	bool completed = false;
@@ -1265,6 +1484,7 @@ static int		recv_os    (CalcHandle* handle, FlashContent* content)
 	{
 		return -1;
 	}
+	const bool is_nnse = nsp_nnse_enabled(handle);
 
 	content->data_length = 0;
 	content->data_part = nullptr;
@@ -1273,6 +1493,13 @@ static int		recv_os    (CalcHandle* handle, FlashContent* content)
 	handle->updat->cnt1 = 0;
 	handle->updat->max1 = 0;
 	ticalcs_update_pbar(handle);
+
+	if (is_nnse)
+	{
+		// Unlike normal request/response sessions, OS reception waits for the
+		// calculator to initiate traffic on the OS-install service port.
+		handle->priv.nsp_nnse_passive_port = NSP_PORT_OS_INSTALL;
+	}
 
 	while (!ret && !completed)
 	{
@@ -1324,16 +1551,16 @@ static int		recv_os    (CalcHandle* handle, FlashContent* content)
 				switch (pkt.data[0])
 				{
 					case NSP_CMD_DI_VERSION:
-						ret = nsp_send_device_info(handle, pkt.src_port);
+						ret = nsp_send_device_info(handle, &pkt);
 						break;
 					case NSP_CMD_DI_MODEL:
-						ret = nsp_send_device_name(handle, pkt.src_port);
+						ret = nsp_send_device_name(handle, &pkt);
 						break;
 					case NSP_CMD_DI_FEXT:
-						ret = nsp_send_supported_fext(handle, pkt.src_port);
+						ret = nsp_send_supported_fext(handle, &pkt);
 						break;
 					case 0x04:
-						ret = nsp_send_simple_cmd(handle, NSP_PORT_DEV_INFOS, pkt.src_port, pkt.data[0], nullptr, 0);
+						ret = nsp_send_simple_reply(handle, &pkt, NSP_PORT_DEV_INFOS, pkt.src_port, pkt.data[0], nullptr, 0);
 						break;
 					default:
 						break;
@@ -1400,7 +1627,7 @@ static int		recv_os    (CalcHandle* handle, FlashContent* content)
 					ticalcs_update_pbar(handle);
 				}
 
-				ret = nsp_send_simple_cmd(handle, NSP_PORT_OS_INSTALL, pkt.src_port, NSP_CMD_OS_OK, nullptr, 0);
+				ret = nsp_send_simple_reply(handle, &pkt, NSP_PORT_OS_INSTALL, pkt.src_port, NSP_CMD_OS_OK, nullptr, 0);
 				break;
 			}
 			case NSP_CMD_OS_CONTENTS:
@@ -1426,7 +1653,7 @@ static int		recv_os    (CalcHandle* handle, FlashContent* content)
 					handle->updat->pbar();
 				}
 
-				if (remaining > 0 && pkt.data_size < NSP_DATA_SIZE)
+				if (!nsp_os_receive_packet_boundary_valid(remaining, pkt.data_size < NSP_DATA_SIZE, is_nnse))
 				{
 					ret = ERR_INVALID_PACKET;
 					break;
@@ -1435,14 +1662,15 @@ static int		recv_os    (CalcHandle* handle, FlashContent* content)
 				if (!ret && !sent_status)
 				{
 					const uint8_t ok = 0x00;
-					ret = nsp_send_simple_cmd(handle, NSP_PORT_OS_INSTALL, pkt.src_port, NSP_CMD_STATUS, &ok, 1);
+					ret = nsp_send_simple_reply(handle, &pkt, NSP_PORT_OS_INSTALL, pkt.src_port, NSP_CMD_STATUS, &ok, 1);
 					sent_status = true;
 				}
 
 				if (!ret && remaining == 0)
 				{
 					const uint8_t progress = 0x64;
-					ret = nsp_send_simple_cmd(handle, NSP_PORT_OS_INSTALL, NSP_PORT_OS_INSTALL, NSP_CMD_OS_PROGRESS, &progress, 1);
+					ret = nsp_send_simple_reply(handle, &pkt, NSP_PORT_OS_INSTALL, NSP_PORT_OS_INSTALL,
+					                            NSP_CMD_OS_PROGRESS, &progress, 1);
 					if (!ret)
 					{
 						completed = true;
@@ -1455,6 +1683,7 @@ static int		recv_os    (CalcHandle* handle, FlashContent* content)
 		}
 	}
 
+	handle->priv.nsp_nnse_passive_port = old_nnse_passive_port;
 	return ret;
 }
 
