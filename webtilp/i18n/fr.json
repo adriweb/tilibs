@@ -144,9 +144,5 @@
   "transfer_overwrite_all": "Écraser tous les éléments existants (sans confirmation par fichier)",
   "transfer_all_ram": "Tout en RAM",
   "transfer_all_archive": "Tout en Archive",
-  "close": "Fermer",
-  "winusb_nspire_block_title": "Le TI-Nspire CX II n’est pas encore pris en charge sur cette configuration navigateur/OS",
-  "winusb_nspire_block_text": "Sous Windows, WebTILP ne peut pas encore se connecter au TI-Nspire CX II en raison de <a href=\"https://chromium.googlesource.com/chromium/src/+/ce1b7e514576f31c05/services/device/usb/usb_device_handle_win.cc#254\" target=\"_blank\">limitations techniques<\/a>. Nous y travaillons !",
-  "winusb_nspire_block_alternatives": "Alternatives :",
-  "log_winusb_nspire_blocked": "Connexion bloquée : le TI-Nspire CX II n’est pas pris en charge ici."
+  "close": "Fermer"
 }
