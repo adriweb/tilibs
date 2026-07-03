@@ -144,9 +144,5 @@
   "transfer_overwrite_all": "Skriv över alla befintliga objekt (utan bekräftelse per fil)",
   "transfer_all_ram": "Alla till RAM",
   "transfer_all_archive": "Alla till Arkiv",
-  "close": "Stäng",
-  "winusb_nspire_block_title": "TI-Nspire CX II stöds ännu inte i den här webbläsar-/OS-konfigurationen",
-  "winusb_nspire_block_text": "I Windows kan WebTILP ännu inte ansluta till TI-Nspire CX II på grund av <a href=\"https://chromium.googlesource.com/chromium/src/+/ce1b7e514576f31c05/services/device/usb/usb_device_handle_win.cc#254\" target=\"_blank\">tekniska begränsningar<\/a>. Vi arbetar på det!",
-  "winusb_nspire_block_alternatives": "Alternativ:",
-  "log_winusb_nspire_blocked": "Anslutning blockerad: TI-Nspire CX II stöds inte här."
+  "close": "Stäng"
 }
