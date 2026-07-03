@@ -144,9 +144,5 @@
   "transfer_overwrite_all": "覆盖所有已存在项目（不再逐文件确认）",
   "transfer_all_ram": "全部设为 RAM",
   "transfer_all_archive": "全部设为归档",
-  "close": "关闭",
-  "winusb_nspire_block_title": "在此浏览器/系统配置下暂不支持 TI-Nspire CX II",
-  "winusb_nspire_block_text": "在 Windows 上，由于<a href=\"https://chromium.googlesource.com/chromium/src/+/ce1b7e514576f31c05/services/device/usb/usb_device_handle_win.cc#254\" target=\"_blank\">技术限制<\/a>，WebTILP 目前还无法连接 TI-Nspire CX II。我们正在努力解决！",
-  "winusb_nspire_block_alternatives": "可用替代方案：",
-  "log_winusb_nspire_blocked": "连接已阻止：此环境不支持通过 TI-Nspire CX II。"
+  "close": "关闭"
 }

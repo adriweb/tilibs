@@ -482,11 +482,7 @@ const I18N_EN = {
     "prompt_rename_entry": "Rename {kind}:",
     "kind_folder": "folder",
     "kind_item": "item",
-    "close": "Close",
-    "winusb_nspire_block_title": "The TI-Nspire CX II is not supported on Windows here yet",
-    "winusb_nspire_block_text": "On Windows, WebTILP cannot connect to the TI-Nspire CX II yet due to <a href=\"https://chromium.googlesource.com/chromium/src/+/ce1b7e514576f31c05/services/device/usb/usb_device_handle_win.cc#254\" target=\"_blank\">technical limitations</a>. We're working on it!",
-    "winusb_nspire_block_alternatives": "Alternatives:",
-    "log_winusb_nspire_blocked": "Connection failure: TI-Nspire CX II is not supported here."
+    "close": "Close"
 };
 
 const LOCALE_CACHE = new Map([['en', I18N_EN]]);
@@ -1050,7 +1046,6 @@ const CALC_MODEL_OPTIONS = [
 ];
 
 const PID_SILVERLINK = 0xe001;
-const PID_NSPIRE_CXII = 0xe022;
 const DIRECTLINK_PIDS = new Set([
     0xe003,
     0xe004,
@@ -2650,8 +2645,6 @@ const els = {
     backupModalOverlay: document.getElementById('backupModalOverlay'),
     backupModalOverlayText: document.getElementById('backupModalOverlayText'),
     toastContainer: document.getElementById('toastContainer'),
-    winUsbNspireModal: document.getElementById('winUsbNspireModal'),
-    btnCloseWinUsbNspire: document.getElementById('btnCloseWinUsbNspire'),
     connectionHelpModal: document.getElementById('connectionHelpModal'),
     connectionHelpTitle: document.getElementById('connectionHelpTitle'),
     connectionHelpBody: document.getElementById('connectionHelpBody'),
@@ -3340,13 +3333,6 @@ async function applyTranslations() {
     setTextContent(document.getElementById('backupModalOverlayText'), t('loading_dirlist'));
     setTextContent(els.btnCancelBackup, t('cancel'));
     setTextContent(els.btnConfirmBackup, `📥 ${t('create_backup')}`);
-    setTextContent(document.getElementById('winUsbNspireTitle'), '⚠️ ' + t('winusb_nspire_block_title'));
-    const winUsbNspireBody = document.getElementById('winUsbNspireBody');
-    if (winUsbNspireBody) {
-        winUsbNspireBody.innerHTML = t('winusb_nspire_block_text');
-    }
-    setTextContent(document.getElementById('winUsbNspireAlternativesLabel'), t('winusb_nspire_block_alternatives'));
-    setTextContent(els.btnCloseWinUsbNspire, t('close'));
     setTextContent(els.btnCloseConnectionHelp, t('close'));
     updateTransportSplashState();
 
@@ -3819,21 +3805,6 @@ function resetToSplashState() {
     }
 }
 
-function openWinUsbNspireModal() {
-    if (!els.winUsbNspireModal) {
-        return;
-    }
-    els.winUsbNspireModal.classList.remove('hidden');
-}
-
-function closeWinUsbNspireModal() {
-    if (!els.winUsbNspireModal) {
-        return;
-    }
-    els.winUsbNspireModal.classList.add('hidden');
-    resetToSplashState();
-}
-
 function openConnectionHelpModal(title, html) {
     if (!els.connectionHelpModal || !els.connectionHelpBody) {
         alert(`${title}\n\n${html.replace(/<[^>]+>/g, '')}`);
@@ -3887,16 +3858,6 @@ function showCableOpenHelp(result) {
             ${closeAppsReminder}
         `);
     }
-}
-
-function guardWinUsbNspireCX2(device = state.authorizedDevice) {
-    if (!isWindowsPlatform() || Number(device.productId) !== PID_NSPIRE_CXII) {
-        return false;
-    }
-    resetToSplashState();
-    openWinUsbNspireModal();
-    log(t('log_winusb_nspire_blocked'));
-    return true;
 }
 
 function isNspireActive() {
@@ -4116,10 +4077,6 @@ async function autoConnectIfAuthorized() {
         } else {
             state.authorizedDevice = usbDevice;
         }
-    }
-
-    if (guardWinUsbNspireCX2(state.authorizedDevice)) {
-        return;
     }
 
     if (isNspireActive()) {
@@ -4364,9 +4321,6 @@ async function connect() {
     try {
         state.connectInProgress = true;
         await authorizeDevice(true);
-        if (guardWinUsbNspireCX2(state.authorizedDevice)) {
-            return;
-        }
         if (promptCableMismatchResolution()) {
             return;
         }
@@ -7524,9 +7478,6 @@ function bindEvents() {
             closeSettingsModal();
         }
     });
-    if (els.btnCloseWinUsbNspire) {
-        els.btnCloseWinUsbNspire.addEventListener('click', closeWinUsbNspireModal);
-    }
     if (els.btnCloseConnectionHelp) {
         els.btnCloseConnectionHelp.addEventListener('click', closeConnectionHelpModal);
     }
@@ -7534,13 +7485,6 @@ function bindEvents() {
         els.newFolderModal.addEventListener('click', event => {
             if (event.target === els.newFolderModal) {
                 closeNewFolderModal();
-            }
-        });
-    }
-    if (els.winUsbNspireModal) {
-        els.winUsbNspireModal.addEventListener('click', event => {
-            if (event.target === els.winUsbNspireModal) {
-                closeWinUsbNspireModal();
             }
         });
     }
