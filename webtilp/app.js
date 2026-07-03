@@ -658,6 +658,7 @@ function syncStatusTranslation(text) {
 
 const CCALL_TIMEOUT_MS = 12000;
 const CCALL_MIN_GAP_MS = 100;
+const SUSPENDED_CCALL_GRACE_MS = 20000;
 const CREATE_HANDLE_RETRY_DELAY_MS = 300;
 const PROGRESS_IDLE_TIMEOUT_MS = 5000;
 const AUTO_QUERY_DELAY_MS = 500;
@@ -831,6 +832,7 @@ function isFatalWasmRuntimeError(err) {
 
 function handleFatalWasmRuntimeError(err) {
     console.error('[WebTILP] Fatal WASM runtime error', err);
+    retireModule(state.module, String(err?.message || err || 'fatal WASM runtime error'));
     clearActiveOperations();
     // Do not call back into WASM after a fatal runtime error.
     state.module = null;
@@ -845,6 +847,78 @@ function handleFatalWasmRuntimeError(err) {
 }
 
 /**
+ * Per-module Asyncify call bookkeeping. Asyncify supports a single suspended
+ * call at a time, so every async ccall is serialized through `tail`, and a
+ * call abandoned by the JS side (timeout) keeps the module blocked until the
+ * underlying call actually returns. `markDead` permanently retires the module
+ * (suspended call that never returned, fatal runtime error, teardown) so
+ * queued and future callers fail fast instead of re-entering suspended WASM.
+ * @param {any} module
+ */
+function getModuleCallState(module) {
+    let cs = module.__ccallState;
+    if (!cs) {
+        let signalDead = null;
+        const deadSignal = new Promise(resolve => {
+            signalDead = resolve;
+        });
+        cs = {
+            tail: Promise.resolve(),
+            dead: false,
+            deadReason: '',
+            deadSignal,
+            markDead(reason) {
+                if (!cs.dead) {
+                    cs.dead = true;
+                    cs.deadReason = reason || 'module retired';
+                    signalDead();
+                }
+            }
+        };
+        module.__ccallState = cs;
+    }
+    return cs;
+}
+
+function makeModuleDeadError(cs) {
+    const err = new Error(`WASM module needs reinitialization (${cs.deadReason}). Please reconnect.`);
+    err.wasmModuleDead = true;
+    return err;
+}
+
+function retireModule(module, reason) {
+    if (module) {
+        getModuleCallState(module).markDead(reason);
+    }
+}
+
+/**
+ * Called when a JS-side timeout fired while the underlying WASM call is still
+ * suspended inside Asyncify. The call cannot be cancelled from JS; if it does
+ * not return within a grace period, the module is unusable and must be
+ * reinitialized.
+ * @param {any} module
+ * @param {string} name
+ * @param {Promise<any>} underlying
+ */
+function watchAbandonedCcall(module, name, underlying) {
+    const cs = getModuleCallState(module);
+    let settled = false;
+    underlying.then(() => { settled = true; }, () => { settled = true; });
+    console.warn(`[WebTILP] ${name} timed out on the JS side but is still running in the WASM module; blocking further WASM calls until it returns.`);
+    setTimeout(() => {
+        if (settled || cs.dead) {
+            return;
+        }
+        const err = new Error(`${name} never returned; the WASM module is stuck in a suspended Asyncify call`);
+        cs.markDead(err.message);
+        if (state.module === module) {
+            handleFatalWasmRuntimeError(err);
+        }
+    }, SUSPENDED_CCALL_GRACE_MS);
+}
+
+/**
  * @template T
  * @param {Promise<T>} promise
  * @param {string} label
@@ -852,9 +926,17 @@ function handleFatalWasmRuntimeError(err) {
  * @returns {Promise<T>}
  */
 async function withTimeout(promise, label, timeoutMs = CCALL_TIMEOUT_MS) {
+    if (timeoutMs === null) {
+        return promise;
+    }
+
     let timer;
     const timeoutPromise = new Promise((_, reject) => {
-        timer = setTimeout(() => reject(new Error(`${label} timed out`)), timeoutMs);
+        timer = setTimeout(() => {
+            const err = new Error(`${label} timed out`);
+            err.ccallTimeout = true;
+            reject(err);
+        }, timeoutMs);
     });
     try {
         return await Promise.race([promise, timeoutPromise]);
@@ -899,7 +981,9 @@ async function withProgressTimeout(promise, label, timeoutMs = CCALL_TIMEOUT_MS,
             lastProgress = state.lastProgressTs;
         }
         if (timeoutMs !== null && Date.now() - lastProgress > timeoutMs) {
-            throw new Error(`${label} timed out`);
+            const timeoutErr = new Error(`${label} timed out`);
+            timeoutErr.ccallTimeout = true;
+            throw timeoutErr;
         }
     }
     if (error) {
@@ -927,53 +1011,101 @@ async function ccallAsync(module, name, returnType, argTypes, args, options = {}
             throw err;
         }
     };
-    const now = Date.now();
-    const gap = state.lastCcallTs ? (now - state.lastCcallTs) : CCALL_MIN_GAP_MS;
-    if (gap < CCALL_MIN_GAP_MS) {
-        await sleep(CCALL_MIN_GAP_MS - gap);
-    }
-    state.lastCcallTs = Date.now();
-    const timeoutMs = Object.prototype.hasOwnProperty.call(options, 'timeoutMs')
-        ? options.timeoutMs
-        : CCALL_TIMEOUT_MS;
-    const useProgress = options.useProgress ?? false;
-    const progressLabel = options.progressLabel || name;
-    state.lastProgressTs = Date.now();
-    let result;
-    try {
-        result = module.ccall(name, returnType, argTypes, args, { async: true });
-    } catch (err) {
-        if (isFatalWasmRuntimeError(err)) {
-            handleFatalWasmRuntimeError(err);
+    const cs = getModuleCallState(module);
+    const throwIfDead = () => {
+        if (cs.dead) {
+            throw makeModuleDeadError(cs);
         }
-        throw err;
-    }
-    if (!useProgress) {
+    };
+    throwIfCancelled();
+    throwIfDead();
+    // Strict FIFO: take a slot on the module's Asyncify call chain. The slot is
+    // released when the underlying WASM call settles — not when a JS-side
+    // timeout gives up on it — because Asyncify cannot be re-entered while a
+    // call is suspended.
+    const prev = cs.tail;
+    let release;
+    cs.tail = new Promise(resolve => {
+        release = resolve;
+    });
+    let entered = false;
+    try {
+        await Promise.race([prev, cs.deadSignal]);
+        throwIfCancelled();
+        throwIfDead();
+        const now = Date.now();
+        const gap = state.lastCcallTs ? (now - state.lastCcallTs) : CCALL_MIN_GAP_MS;
+        if (gap < CCALL_MIN_GAP_MS) {
+            await sleep(CCALL_MIN_GAP_MS - gap);
+            throwIfCancelled();
+            throwIfDead();
+        }
+        state.lastCcallTs = Date.now();
+        const timeoutMs = Object.prototype.hasOwnProperty.call(options, 'timeoutMs')
+            ? options.timeoutMs
+            : CCALL_TIMEOUT_MS;
+        const useProgress = options.useProgress ?? false;
+        const progressLabel = options.progressLabel || name;
+        state.lastProgressTs = Date.now();
+        let result;
         try {
-            const value = await withTimeout(result, name, timeoutMs);
-            throwIfCancelled();
-            return value;
+            result = module.ccall(name, returnType, argTypes, args, { async: true });
         } catch (err) {
-            throwIfCancelled();
             if (isFatalWasmRuntimeError(err)) {
+                cs.markDead(String(err?.message || err));
                 handleFatalWasmRuntimeError(err);
             }
             throw err;
         }
-    }
-    startProgress(progressLabel);
-    try {
-        const value = await withProgressTimeout(result, progressLabel, timeoutMs);
-        throwIfCancelled();
-        return value;
-    } catch (err) {
-        throwIfCancelled();
-        if (isFatalWasmRuntimeError(err)) {
-            handleFatalWasmRuntimeError(err);
+        entered = true;
+        let settled = false;
+        const underlying = Promise.resolve(result);
+        underlying.then(
+            () => { settled = true; release(); },
+            () => { settled = true; release(); }
+        );
+        const noteAbandonedIfPending = err => {
+            if (err?.ccallTimeout && !settled) {
+                watchAbandonedCcall(module, name, underlying);
+            }
+        };
+        if (!useProgress) {
+            try {
+                const value = await withTimeout(underlying, name, timeoutMs);
+                throwIfCancelled();
+                return value;
+            } catch (err) {
+                noteAbandonedIfPending(err);
+                throwIfCancelled();
+                if (isFatalWasmRuntimeError(err)) {
+                    cs.markDead(String(err?.message || err));
+                    handleFatalWasmRuntimeError(err);
+                }
+                throw err;
+            }
         }
-        throw err;
+        startProgress(progressLabel);
+        try {
+            const value = await withProgressTimeout(underlying, progressLabel, timeoutMs);
+            throwIfCancelled();
+            return value;
+        } catch (err) {
+            noteAbandonedIfPending(err);
+            throwIfCancelled();
+            if (isFatalWasmRuntimeError(err)) {
+                cs.markDead(String(err?.message || err));
+                handleFatalWasmRuntimeError(err);
+            }
+            throw err;
+        } finally {
+            stopProgress(progressLabel);
+        }
     } finally {
-        stopProgress(progressLabel);
+        if (!entered) {
+            // Never entered WASM: our slot must not unblock the chain ahead of
+            // the previous call, so forward its completion instead.
+            prev.then(release, release);
+        }
     }
 }
 
@@ -3544,6 +3676,10 @@ function logError(err, context) {
 
 function clearActiveOperations(message) {
     state.operationEpoch += 1;
+    // Note: the per-module Asyncify call chain (getModuleCallState) is left
+    // untouched on purpose: a suspended WASM call must never be raced by new
+    // calls, even after a disconnect/cancel. Cancelled operations bail out via
+    // the epoch check; the chain unblocks when the underlying call settles.
     document.querySelectorAll('.btn.loading').forEach(button => {
         setButtonLoading(button, false);
     });
@@ -3930,7 +4066,7 @@ async function initModule() {
         }
         state.progressHooked = true;
     }
-    await state.module.ccall('init', 'number', [], [], { async: true });
+    await ccallAsync(state.module, 'init', 'number', [], []);
     applySettingsToModule();
     log('WASM module initialized.');
     setStatus('status_module_ready', true);
@@ -4144,17 +4280,9 @@ async function ensureHandle() {
         let attempts = 0;
         while (!handle && attempts < 3) {
             attempts += 1;
-            try {
-                handle = module._create_handle();
-                if (handle && typeof handle.then === 'function') {
-                    handle = await handle;
-                }
-            } catch (err) {
-                if (isFatalWasmRuntimeError(err)) {
-                    handleFatalWasmRuntimeError(err);
-                }
-                throw err;
-            }
+            // Routed through ccallAsync: create_handle can suspend in Asyncify,
+            // so it must be serialized with every other async C call.
+            handle = await ccallAsync(module, 'create_handle', 'number', [], [], { timeoutMs: 8000 });
             if (!handle) {
                 await sleep(CREATE_HANDLE_RETRY_DELAY_MS);
             }
@@ -5379,7 +5507,7 @@ async function sendKey(code) {
             log('Remote key/action sending is not supported by this calculator.');
             return;
         }
-        const result = await ccallAsync(module, 'calc_send_key', 'number', ['number', 'number'], [handle, key], { timeoutMs: 1000 });
+        const result = await ccallAsync(module, 'calc_send_key', 'number', ['number', 'number'], [handle, key], { timeoutMs: 12000 });
         if (result !== 0) {
             log(`Failed to send key (${formatErrorResult(module, result)}).`);
             return;
@@ -7272,7 +7400,7 @@ async function takeScreenshot() {
         await authorizeDevice();
         const module = await initModule();
         const handle = await ensureHandle();
-        const result = await ccallAsync(module, 'calc_screenshot', 'number', ['number'], [handle], { timeoutMs: PROGRESS_IDLE_TIMEOUT_MS, useProgress: true, progressLabel: 'Receiving screenshot' });
+        const result = await ccallAsync(module, 'calc_screenshot', 'number', ['number'], [handle], { timeoutMs: null, useProgress: true, progressLabel: 'Receiving screenshot' });
         if (result !== 0) {
             log(`Screenshot error (${formatErrorResult(module, result)}).`);
             return;
@@ -7375,6 +7503,7 @@ async function nukeConnection(tryReconnect = true) {
             }
         }
     } finally {
+        retireModule(state.module, 'emergency reset');
         state.handle = 0;
         state.module = null;
         state.cableOpen = false;
@@ -7860,6 +7989,7 @@ function handleTransportDisconnect() {
     state.connectInProgress = false;
     state.handlePromise = null;
     if (!silent) {
+        retireModule(state.module, 'device disconnected');
         state.module = null;
         state.needsReauthorize = false;
         clearDeviceData();
@@ -7873,6 +8003,7 @@ function handleTransportConnect() {
     if (state.silentReconnectInProgress) {
         return;
     }
+    retireModule(state.module, 'device reconnected');
     state.handle = 0;
     state.module = null;
     state.cableOpen = false;
