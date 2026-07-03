@@ -144,9 +144,5 @@
   "transfer_overwrite_all": "既存項目をすべて上書き (ファイルごとの確認なし)",
   "transfer_all_ram": "すべて RAM",
   "transfer_all_archive": "すべてアーカイブ",
-  "close": "閉じる",
-  "winusb_nspire_block_title": "このブラウザー/OS 構成では TI-Nspire CX II はまだサポートされていません",
-  "winusb_nspire_block_text": "Windows では、<a href=\"https://chromium.googlesource.com/chromium/src/+/ce1b7e514576f31c05/services/device/usb/usb_device_handle_win.cc#254\" target=\"_blank\">技術的な制限<\/a>により、WebTILP はまだ TI-Nspire CX II に接続できません。対応を進めています。",
-  "winusb_nspire_block_alternatives": "代替手段:",
-  "log_winusb_nspire_blocked": "接続はブロックされました: この環境では TI-Nspire CX II はサポートされていません。"
+  "close": "閉じる"
 }
