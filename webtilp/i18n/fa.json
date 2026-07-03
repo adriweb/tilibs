@@ -144,9 +144,5 @@
   "transfer_overwrite_all": "رونویسی همه موارد موجود (بدون تایید برای هر فایل)",
   "transfer_all_ram": "همه به RAM",
   "transfer_all_archive": "همه به بایگانی",
-  "close": "بستن",
-  "winusb_nspire_block_title": "TI-Nspire CX II هنوز در این پیکربندی مرورگر/سیستم‌عامل پشتیبانی نمی‌شود",
-  "winusb_nspire_block_text": "در ویندوز، WebTILP هنوز به دلیل <a href=\"https://chromium.googlesource.com/chromium/src/+/ce1b7e514576f31c05/services/device/usb/usb_device_handle_win.cc#254\" target=\"_blank\">محدودیت‌های فنی<\/a> نمی‌تواند به TI-Nspire CX II متصل شود. در حال کار روی آن هستیم!",
-  "winusb_nspire_block_alternatives": "گزینه‌های جایگزین:",
-  "log_winusb_nspire_blocked": "اتصال مسدود شد: TI-Nspire CX II از در اینجا پشتیبانی نمی‌شود."
+  "close": "بستن"
 }
