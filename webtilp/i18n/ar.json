@@ -144,9 +144,5 @@
   "transfer_overwrite_all": "استبدال كل العناصر الموجودة (بدون تأكيد لكل ملف)",
   "transfer_all_ram": "الكل إلى RAM",
   "transfer_all_archive": "الكل إلى الأرشيف",
-  "close": "إغلاق",
-  "winusb_nspire_block_title": "TI-Nspire CX II غير مدعوم بعد في إعداد المتصفح/نظام التشغيل هذا",
-  "winusb_nspire_block_text": "على Windows، لا يستطيع WebTILP الاتصال بـ TI-Nspire CX II بعد بسبب <a href=\"https://chromium.googlesource.com/chromium/src/+/ce1b7e514576f31c05/services/device/usb/usb_device_handle_win.cc#254\" target=\"_blank\">قيود تقنية<\/a>. نحن نعمل على ذلك!",
-  "winusb_nspire_block_alternatives": "البدائل:",
-  "log_winusb_nspire_blocked": "تم حظر الاتصال: TI-Nspire CX II غير مدعوم هنا."
+  "close": "إغلاق"
 }
