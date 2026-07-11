@@ -633,6 +633,23 @@ static int slv_open(CableHandle *h)
 
 	max_ps_in = finalize_bulk_packet_size(endpoint_pair.in_packet_size, max_ps_in, (int)sizeof(rBuf), "IN");
 	max_ps_out = finalize_bulk_packet_size(endpoint_pair.out_packet_size, max_ps_out, (int)sizeof(rBuf), "OUT");
+	#ifdef __EMSCRIPTEN__
+	if (tigl_devices[h->address].pid == PID_TIGLUSB)
+	{
+		// WebUSB can preserve a halted endpoint across a close/reopen of the same
+		// authorized SilverLink USBDevice. Start each session with both pipes usable.
+		ret = libusb_clear_halt(uHdl, uOutEnd);
+		if (ret != 0)
+		{
+			ticables_warning("libusb_clear_halt on bulk OUT endpoint during open (%s).\n", libusb_strerror((libusb_error)ret));
+		}
+		ret = libusb_clear_halt(uHdl, uInEnd);
+		if (ret != 0)
+		{
+			ticables_warning("libusb_clear_halt on bulk IN endpoint during open (%s).\n", libusb_strerror((libusb_error)ret));
+		}
+	}
+	#endif
 
 	nBytesRead = 0;
 	was_max_ps = 0;
@@ -723,6 +740,45 @@ static int slv_reset(CableHandle *h)
 	return ret;
 }
 
+static int bulk_write_with_stall_recovery(CableHandle *h, unsigned char endpoint, unsigned char *data,
+	int length, int *transferred, unsigned int timeout)
+{
+	int ret;
+	#ifdef __EMSCRIPTEN__
+	int pipe_errors = 0;
+	#endif
+
+	do
+	{
+		ret = libusb_bulk_transfer(uHdl, endpoint, data, length, transferred, timeout);
+		#ifdef __EMSCRIPTEN__
+		if (ret == LIBUSB_ERROR_PIPE && tigl_devices[h->address].pid == PID_TIGLUSB)
+		{
+			pipe_errors++;
+			if (pipe_errors >= 3)
+			{
+				break;
+			}
+
+			int clear_ret = libusb_clear_halt(uHdl, endpoint);
+			if (clear_ret != 0)
+			{
+				ticables_warning("libusb_clear_halt after bulk OUT stall (%s).\n", libusb_strerror((libusb_error)clear_ret));
+				break;
+			}
+
+			ticables_warning("bulk OUT endpoint stalled; cleared halt and retrying.\n");
+			usleep(2000);
+			continue;
+		}
+		#endif
+		break;
+	}
+	while (1);
+
+	return ret;
+}
+
 // convenient function which send one or more bytes
 static int send_block(CableHandle *h, uint8_t *data, int length)
 {
@@ -738,7 +794,7 @@ static int send_block(CableHandle *h, uint8_t *data, int length)
 		return ERR_WRITE_ERROR;
 	}
 
-	ret = libusb_bulk_transfer(uHdl, uOutEnd, (unsigned char*)data, length, &tmp, to);
+	ret = bulk_write_with_stall_recovery(h, uOutEnd, (unsigned char*)data, length, &tmp, to);
 
 	if (ret == LIBUSB_ERROR_TIMEOUT)
 	{
@@ -755,7 +811,7 @@ static int send_block(CableHandle *h, uint8_t *data, int length)
 	if ((tigl_devices[h->address].pid == PID_NSPIRE || tigl_devices[h->address].pid == PID_NSPIRE_CRADLE) && length % max_ps_out == 0)
 	{
 		ticables_info("XXX triggering an extra bulk write");
-		ret = libusb_bulk_transfer(uHdl, uOutEnd, (unsigned char*)data, 0, &tmp, to);
+		ret = bulk_write_with_stall_recovery(h, uOutEnd, (unsigned char*)data, 0, &tmp, to);
 
 		if (ret == LIBUSB_ERROR_TIMEOUT)
 		{
@@ -887,6 +943,23 @@ static int slv_get_(CableHandle *h, uint8_t *data)
 			// NOTE: slv_get() has already checked for uHdl != NULL .
 			ret = slv_bulk_read(uHdl, uInEnd, (unsigned char*)rBuf, max_ps_in, &len, to);
 			#ifdef __EMSCRIPTEN__
+			if (ret == LIBUSB_ERROR_PIPE && tigl_devices[h->address].pid == PID_TIGLUSB)
+			{
+				// A WebUSB transfer with status "stall" leaves the endpoint
+				// halted. Recover the pipe, but abort this protocol operation:
+				// WebUSB transferIn() cannot be cancelled, so retrying a read for
+				// a calculator command which produced no response can suspend the
+				// WASM module forever despite the libusb timeout.
+				int clear_ret = libusb_clear_halt(uHdl, uInEnd);
+				if (clear_ret != 0)
+				{
+					ticables_warning("libusb_clear_halt after bulk IN stall (%s).\n", libusb_strerror((libusb_error)clear_ret));
+					break;
+				}
+
+				ticables_warning("bulk IN endpoint stalled; cleared halt and aborted the current read.\n");
+				break;
+			}
 			if (ret == LIBUSB_ERROR_OTHER)
 			{
 				other_errors++;
