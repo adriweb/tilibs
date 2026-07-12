@@ -1121,24 +1121,13 @@ static int		dump_rom_1	(CalcHandle* handle)
 	{
 		return rd_send_dumper(handle, "romdump.73p", romDumpSize73, romDump73);
 	}
+	else if (handle->model == CALC_TI84PC)
+	{
+		return rd_send_dumper(handle, "romdump.8Xp", romDumpSize84pc, romDump84pc);
+	}
 	else
 	{
-		CalcInfos infos;
-
-		int ret = get_version(handle, &infos);
-		if (!ret)
-		{
-			if (infos.hw_version < 5)
-			{
-				ret = rd_send_dumper(handle, "romdump.8Xp", romDumpSize8Xp, romDump8Xp);
-			}
-			else
-			{
-				ret = rd_send_dumper(handle, "romdump.8Xp", romDumpSize84pc, romDump84pc);
-			}
-		}
-
-		return ret;
+		return rd_send_dumper(handle, "romdump.8Xp", romDumpSize8Xp, romDump8Xp);
 	}
 }
 
