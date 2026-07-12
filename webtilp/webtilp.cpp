@@ -1896,6 +1896,11 @@ const char* calc_get_info_string(CableHandle* cable_handle) {
     const int result = ticalcs_calc_get_version(g_calc_handle, &infos);
     if (result != 0) {
         printf("ERROR: Failed to get calc infos (error %d)\n", result);
+        if (g_cable_model == CABLE_SLV || g_cable_model == CABLE_GRY) {
+            printf("Resetting legacy cable session after failed optional device info query\n");
+            reset_calc_handle_state();
+            g_cable_reopen_needed = 1;
+        }
         return "";
     }
 
