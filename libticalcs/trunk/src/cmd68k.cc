@@ -476,6 +476,7 @@ int TICALL ti89_recv_VAR(CalcHandle* handle, uint32_t * varsize, uint8_t * varty
 	}
 	if (cmd != DBUS_CMD_VAR)
 	{
+		ticalcs_warning("Expected VAR, received %s (0x%02X)", dbus_cmd2name(cmd), cmd);
 		return ERR_INVALID_CMD;
 	}
 
@@ -531,6 +532,7 @@ int TICALL ti92_recv_VAR(CalcHandle* handle, uint32_t * varsize, uint8_t * varty
 	}
 	if (cmd != DBUS_CMD_VAR)
 	{
+		ticalcs_warning("Expected VAR, received %s (0x%02X)", dbus_cmd2name(cmd), cmd);
 		return ERR_INVALID_CMD;
 	}
 
@@ -640,18 +642,20 @@ int TICALL ti68k_recv_XDP(CalcHandle* handle, uint16_t * length, uint8_t * data)
 
 	const int err = dbus_recv(handle, &host, &cmd, &len, data);
 	*length = len;
+	if (err)
+	{
+		return err;
+	}
 
 	if (cmd != DBUS_CMD_XDP)
 	{
+		ticalcs_warning("Expected XDP, received %s (0x%02X)", dbus_cmd2name(cmd), cmd);
 		return ERR_INVALID_CMD;
 	}
 
-	if (!err)
-	{
-		ticalcs_info(" TI->PC: XDP (%04X=%i bytes)", *length, *length);
-	}
+	ticalcs_info(" TI->PC: XDP (%04X=%i bytes)", *length, *length);
 
-	return err;
+	return 0;
 }
 
 /* ACK: receive acknowledge
