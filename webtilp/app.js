@@ -4521,6 +4521,11 @@ async function getDeviceInfo() {
         const handle = await ensureCableOpen();
         await updateCapabilities();
         const infoText = await ccallAsync(module, 'calc_get_info_string', 'string', ['number'], [handle], { timeoutMs: 12000 });
+        const reopenNeeded = module._consume_cable_reopen_flag();
+        if (reopenNeeded) {
+            state.cableOpen = false;
+            log('Cable session closed after device info query failure; it will reopen for the next operation.');
+        }
         if (!infoText || typeof infoText !== 'string') {
             log('Device info unavailable.');
             return;
@@ -4548,10 +4553,6 @@ async function getDeviceInfo() {
                 console.warn('[WebTILP] Failed to parse model update info', err);
                 log('Calculator model updated based on device info.');
             }
-        }
-        const reopenNeeded = module._consume_cable_reopen_flag();
-        if (reopenNeeded) {
-            state.cableOpen = false;
         }
         if ((state.features & FEATURE_FLAGS.OPS_CLOCK) !== 0) {
             const clockInfo = await getClockInfo(module, handle);
