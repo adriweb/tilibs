@@ -1204,6 +1204,7 @@ static int tiz80_recv_XDP(CalcHandle* handle, uint16_t * length, uint8_t * data,
 	}
 	if (cmd != DBUS_CMD_XDP)
 	{
+		ticalcs_warning("Expected XDP, received %s (0x%02X)", dbus_cmd2name(cmd), cmd);
 		return ERR_INVALID_CMD;
 	}
 
