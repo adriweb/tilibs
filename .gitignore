@@ -1,0 +1,8 @@
+node_modules/
+dist/
+*.tsbuildinfo
+
+# Compiled Emscripten artifacts are provided out-of-band; see wasm/README.md.
+wasm/*.js
+wasm/*.mjs
+wasm/*.wasm
