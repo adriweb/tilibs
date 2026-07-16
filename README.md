@@ -58,9 +58,29 @@ try {
 
 ## Installation
 
+This package isn't on the npm registry. Install a tagged release straight
+from GitHub instead:
+
 ```sh
-pnpm add webtilp-core
+pnpm add github:TTkindboy/webtilp-core#v0.1.0
 ```
+
+(swap in whatever [release](https://github.com/TTkindboy/webtilp-core/releases)
+tag you want). `dist/` isn't committed to the repo; it's built automatically
+on install via the package's `prepare` script.
+
+> [!IMPORTANT]
+> **pnpm only:** pnpm refuses to run a git dependency's build scripts by
+> default, so without this step `prepare` never runs and `dist/` stays empty.
+> Add the package to `onlyBuiltDependencies` in your project's
+> `pnpm-workspace.yaml`:
+>
+> ```yaml
+> onlyBuiltDependencies:
+>   - webtilp-core
+> ```
+>
+> npm and yarn run `prepare` for git dependencies without any extra config.
 
 ## Providing the compiled bridge
 
@@ -140,6 +160,16 @@ mise install     # node + pnpm, pinned in mise.toml
 pnpm install
 pnpm typecheck
 pnpm build       # tsup → dist/
+```
+
+### Cutting a release
+
+Push a `v*.*.*` tag; [`.github/workflows/release.yml`](.github/workflows/release.yml)
+typechecks, builds, and publishes a GitHub Release for it automatically:
+
+```sh
+git tag v0.1.0
+git push origin v0.1.0
 ```
 
 ## License

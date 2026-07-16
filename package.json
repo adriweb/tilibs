@@ -32,6 +32,7 @@
     "build": "tsup",
     "dev": "tsup --watch",
     "typecheck": "tsc --noEmit",
+    "prepare": "tsup",
     "prepublishOnly": "pnpm typecheck && pnpm build"
   },
   "packageManager": "pnpm@10.33.0",
