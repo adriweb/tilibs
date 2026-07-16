@@ -1,0 +1,45 @@
+{
+  "name": "webtilp-core",
+  "version": "0.1.0",
+  "description": "Idiomatic TypeScript wrapper around the tilibs Emscripten bridge — TI calculator linking over WebUSB, in the browser.",
+  "license": "GPL-2.0-only",
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "wasm"
+  ],
+  "keywords": [
+    "ti",
+    "calculator",
+    "tilibs",
+    "ticalcs",
+    "webusb",
+    "wasm",
+    "emscripten"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/TTkindboy/webtilp-core.git"
+  },
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "typecheck": "tsc --noEmit",
+    "prepublishOnly": "pnpm typecheck && pnpm build"
+  },
+  "packageManager": "pnpm@10.33.0",
+  "engines": {
+    "node": ">=22"
+  },
+  "devDependencies": {
+    "tsup": "^8.5.0",
+    "typescript": "^5.9.2"
+  }
+}

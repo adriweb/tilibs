@@ -1,6 +1,0 @@
-TARGETNAME=rwports
-TARGETPATH=.
-TARGETTYPE=DRIVER
-NTDEBUG=ntsd
-
-SOURCES= rwports.c rwports.rc
