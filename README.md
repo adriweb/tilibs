@@ -4,8 +4,11 @@ An idiomatic TypeScript wrapper around the [tilibs](https://github.com/debrouxl/
 Emscripten bridge — link with TI calculators over WebUSB, straight from the
 browser.
 
-- **Promise-based** API with a typed event emitter for progress/status — no polling
+- **Promise-based** API built on web platform primitives: `EventTarget` +
+  native `ProgressEvent` for progress/status (no polling), `File` for
+  transfers, `ImageData` for screenshots
 - **`AbortSignal`** support on all long-running operations
+- **`await using`** support (async disposable sessions)
 - **Browser-only, pure library** — no DOM assumptions, no UI, no dependencies
 - **ESM only**, fully typed
 
@@ -16,18 +19,26 @@ const calc = await connect(); // must run inside a user gesture (WebUSB)
 
 console.log(calc.model); // "TI-84 Plus CE"
 
-const stopListening = calc.on("progress", ({ transferred, total }) => {
-  console.log(`${transferred}/${total} bytes`);
+calc.addEventListener("progress", (e) => {
+  console.log(`${e.loaded}/${e.total} bytes`); // native ProgressEvent
 });
 
 await calc.sendFile(file, { location: "archive" }); // file: File | { name, data }
 
 const { entries } = await calc.listDirectory();
-const { data } = await calc.receiveFile("PRGM.8xp");
-const { width, height, rgba } = await calc.screenshot();
+const file = await calc.receiveFile("PRGM.8xp"); // → File
+const image = await calc.screenshot(); // → ImageData
+ctx.putImageData(image, 0, 0);
 
-stopListening();
 await calc.disconnect();
+```
+
+Sessions are async-disposable, so they can be scoped to a block:
+
+```ts
+await using calc = await connect();
+await calc.sendFile(file);
+// disconnects automatically when the block exits
 ```
 
 Cancel a transfer with a standard `AbortSignal`:
@@ -95,21 +106,24 @@ driven by two transfers at once.
 | `model: string` | Model name reported by tilibs |
 | `connected: boolean` | Whether the session is still open |
 | `sendFile(file, options?)` | Send a variable/app file image. `file` is a `File` or `{ name, data }`; `options.location` is `"ram"` (default) or `"archive"` |
-| `receiveFile(name, options?)` | Read a variable off the calculator as a file image |
+| `receiveFile(name, options?): Promise<File>` | Read a variable off the calculator as a file image |
 | `listDirectory(folder?, options?)` | List variables (folder applies to 68k models) |
-| `screenshot(options?)` | Capture the screen as RGBA8888 pixels |
-| `disconnect()` | Close the session (idempotent) |
-| `on / once / off` | Typed event subscription; `on`/`once` return an unsubscribe function |
+| `screenshot(options?): Promise<ImageData>` | Capture the screen, ready for `ctx.putImageData()` |
+| `disconnect()` | Close the session (idempotent); also runs via `await using` |
 
 All long-running methods accept `{ signal?: AbortSignal }`.
 
 ### Events
 
-| Event | Payload | When |
+`Calculator` is an `EventTarget` with typed events, so the platform's
+subscription options apply: `{ once: true }` for one-shot listeners and
+`{ signal }` for automatic listener cleanup.
+
+| Event | Type | When |
 | --- | --- | --- |
-| `progress` | `{ transferred, total }` | Repeatedly during transfers |
-| `status` | `string` | Status text from the link library |
-| `disconnect` | — | Once, when the session closes |
+| `progress` | `ProgressEvent` (`loaded`/`total` in bytes) | Repeatedly during transfers |
+| `status` | `StatusEvent` (`message: string`) | Status text from the link library |
+| `disconnect` | `Event` | Once, when the session closes |
 
 ### Errors
 

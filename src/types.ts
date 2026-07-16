@@ -29,14 +29,6 @@ export interface FileInput {
   data: Blob | ArrayBuffer | ArrayBufferView;
 }
 
-/** Progress of the transfer currently in flight. */
-export interface ProgressInfo {
-  /** Bytes transferred so far. */
-  transferred: number;
-  /** Total bytes expected, or `0` when the total is not known. */
-  total: number;
-}
-
 /** A single variable or application as reported by the calculator. */
 export interface VariableEntry {
   name: string;
@@ -61,27 +53,3 @@ export interface DirectoryListing {
   /** Present when the calculator reports free memory alongside the listing. */
   memory?: MemoryInfo;
 }
-
-export interface Screenshot {
-  width: number;
-  height: number;
-  /** Row-major RGBA8888 pixel data (`width * height * 4` bytes). */
-  rgba: Uint8Array;
-}
-
-export interface ReceivedFile {
-  /** File name including extension, as produced by tilibs. */
-  name: string;
-  /** The variable as a file image, ready to save or re-send. */
-  data: Uint8Array;
-}
-
-/** Events emitted by a connected calculator. */
-export type CalculatorEvents = {
-  /** Fired repeatedly while a transfer is running. */
-  progress: ProgressInfo;
-  /** Human-readable status messages from the link library. */
-  status: string;
-  /** Fired once when the connection closes. */
-  disconnect: undefined;
-};

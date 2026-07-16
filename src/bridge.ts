@@ -1,6 +1,13 @@
 import { TilibsError } from "./errors.js";
 import type { TilibsModule } from "./module.js";
-import type { Screenshot } from "./types.js";
+
+/** Raw screenshot payload as produced by the bridge. */
+export interface RawScreenshot {
+  width: number;
+  height: number;
+  /** Row-major RGBA8888 pixel data (`width * height * 4` bytes). */
+  rgba: Uint8Array<ArrayBuffer>;
+}
 
 /**
  * Low-level, typed façade over the flat C API exported by the tilibs
@@ -85,7 +92,7 @@ export class TilibsBridge {
     }
   }
 
-  async receiveFile(name: string): Promise<Uint8Array> {
+  async receiveFile(name: string): Promise<Uint8Array<ArrayBuffer>> {
     const namePtr = this.#allocString(name);
     const out = this.#allocOut(2); // [data*, len]
     try {
@@ -122,7 +129,7 @@ export class TilibsBridge {
     }
   }
 
-  async screenshot(): Promise<Screenshot> {
+  async screenshot(): Promise<RawScreenshot> {
     const out = this.#allocOut(4); // [rgba*, len, width, height]
     try {
       this.#check(
@@ -195,7 +202,7 @@ export class TilibsBridge {
   }
 
   /** Copies a bridge-owned buffer out of the heap, then frees it. */
-  #takeBytes(ptr: number, length: number): Uint8Array {
+  #takeBytes(ptr: number, length: number): Uint8Array<ArrayBuffer> {
     const copy = new Uint8Array(length);
     if (ptr !== 0) {
       copy.set(this.#module.HEAPU8.subarray(ptr, ptr + length));

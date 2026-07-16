@@ -1,13 +1,10 @@
 import type { TilibsBridge } from "./bridge.js";
-import { Emitter } from "./emitter.js";
+import { StatusEvent, type CalculatorEventMap } from "./events.js";
 import { DisconnectedError, abortReason } from "./errors.js";
 import type {
-  CalculatorEvents,
   DirectoryListing,
   FileInput,
   OperationOptions,
-  ReceivedFile,
-  Screenshot,
   SendFileOptions,
   VariableEntry,
 } from "./types.js";
@@ -17,8 +14,12 @@ import type {
  *
  * Operations run one at a time — concurrent calls are queued in order, so
  * the link cable is never driven by two transfers at once.
+ *
+ * `Calculator` is an {@link EventTarget}; see {@link CalculatorEventMap} for
+ * the events it dispatches. It is also async-disposable, so a session can be
+ * scoped with `await using calc = await connect()`.
  */
-export class Calculator extends Emitter<CalculatorEvents> {
+export class Calculator extends EventTarget {
   /** Model name reported by tilibs, e.g. `"TI-84 Plus CE"`. */
   readonly model: string;
 
@@ -32,9 +33,15 @@ export class Calculator extends Emitter<CalculatorEvents> {
     this.#bridge = bridge;
     this.model = bridge.modelName();
     bridge.setProgressHandler((transferred, total) =>
-      this.emit("progress", { transferred, total }),
+      this.dispatchEvent(
+        new ProgressEvent("progress", {
+          loaded: transferred,
+          total,
+          lengthComputable: total > 0,
+        }),
+      ),
     );
-    bridge.setStatusHandler((text) => this.emit("status", text));
+    bridge.setStatusHandler((text) => this.dispatchEvent(new StatusEvent(text)));
   }
 
   /** Whether the connection is still open. */
@@ -50,10 +57,10 @@ export class Calculator extends Emitter<CalculatorEvents> {
     );
   }
 
-  /** Reads a variable off the calculator as a file image. */
-  async receiveFile(name: string, options: OperationOptions = {}): Promise<ReceivedFile> {
+  /** Reads a variable off the calculator, as a file image ready to save or re-send. */
+  async receiveFile(name: string, options: OperationOptions = {}): Promise<File> {
     const data = await this.#enqueue(options.signal, () => this.#bridge.receiveFile(name));
-    return { name, data };
+    return new File([data], name);
   }
 
   /** Lists variables, optionally scoped to one folder (68k models). */
@@ -62,9 +69,16 @@ export class Calculator extends Emitter<CalculatorEvents> {
     return parseDirectoryListing(json);
   }
 
-  /** Captures the calculator's screen. */
-  async screenshot(options: OperationOptions = {}): Promise<Screenshot> {
-    return this.#enqueue(options.signal, () => this.#bridge.screenshot());
+  /** Captures the calculator's screen, ready for `ctx.putImageData()`. */
+  async screenshot(options: OperationOptions = {}): Promise<ImageData> {
+    const { width, height, rgba } = await this.#enqueue(options.signal, () =>
+      this.#bridge.screenshot(),
+    );
+    return new ImageData(
+      new Uint8ClampedArray(rgba.buffer, rgba.byteOffset, rgba.byteLength),
+      width,
+      height,
+    );
   }
 
   /** Closes the connection. Safe to call more than once. */
@@ -74,8 +88,48 @@ export class Calculator extends Emitter<CalculatorEvents> {
     try {
       await this.#bridge.close();
     } finally {
-      this.emit("disconnect", undefined);
+      this.dispatchEvent(new Event("disconnect"));
     }
+  }
+
+  async [Symbol.asyncDispose](): Promise<void> {
+    await this.disconnect();
+  }
+
+  override addEventListener<K extends keyof CalculatorEventMap>(
+    type: K,
+    listener: (this: Calculator, event: CalculatorEventMap[K]) => void,
+    options?: boolean | AddEventListenerOptions,
+  ): void;
+  override addEventListener(
+    type: string,
+    listener: EventListenerOrEventListenerObject | null,
+    options?: boolean | AddEventListenerOptions,
+  ): void;
+  override addEventListener(
+    type: string,
+    listener: EventListenerOrEventListenerObject | null,
+    options?: boolean | AddEventListenerOptions,
+  ): void {
+    super.addEventListener(type, listener, options);
+  }
+
+  override removeEventListener<K extends keyof CalculatorEventMap>(
+    type: K,
+    listener: (this: Calculator, event: CalculatorEventMap[K]) => void,
+    options?: boolean | EventListenerOptions,
+  ): void;
+  override removeEventListener(
+    type: string,
+    listener: EventListenerOrEventListenerObject | null,
+    options?: boolean | EventListenerOptions,
+  ): void;
+  override removeEventListener(
+    type: string,
+    listener: EventListenerOrEventListenerObject | null,
+    options?: boolean | EventListenerOptions,
+  ): void {
+    super.removeEventListener(type, listener, options);
   }
 
   /** Serializes operations on the cable and wires up cancellation. */

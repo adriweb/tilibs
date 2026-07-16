@@ -40,19 +40,15 @@ export async function connect(options: ConnectOptions = {}): Promise<Calculator>
 }
 
 export { Calculator } from "./calculator.js";
-export { Emitter, type Listener } from "./emitter.js";
+export { StatusEvent, type CalculatorEventMap } from "./events.js";
 export { DisconnectedError, TilibsError } from "./errors.js";
 export type { TilibsModule, TilibsModuleFactory, TilibsModuleInit } from "./module.js";
 export type {
-  CalculatorEvents,
   DirectoryListing,
   FileInput,
   FileLocation,
   MemoryInfo,
   OperationOptions,
-  ProgressInfo,
-  ReceivedFile,
-  Screenshot,
   SendFileOptions,
   VariableEntry,
 } from "./types.js";
