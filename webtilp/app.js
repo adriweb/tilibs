@@ -662,6 +662,8 @@ const SUSPENDED_CCALL_GRACE_MS = 20000;
 const CREATE_HANDLE_RETRY_DELAY_MS = 300;
 const PROGRESS_IDLE_TIMEOUT_MS = 5000;
 const AUTO_QUERY_DELAY_MS = 500;
+// Matches libticalcs' reserved detailed Evo Kermit error code.
+const TICALCS_EVO_ERROR = 510;
 
 const ERROR_CODE_FALLBACKS = new Map([
     [257, 'Calculator not ready'],
@@ -755,13 +757,25 @@ function formatErrorResult(module, code) {
             raw = 0;
         }
     }
-    const label = raw ? `0x${raw.toString(16).toUpperCase().padStart(4, '0')}` : `${numericCode}`;
+    let label = raw ? `0x${raw.toString(16).toUpperCase().padStart(4, '0')}` : `${numericCode}`;
+    if (raw && numericCode === TICALCS_EVO_ERROR) {
+        const wireCode = String.fromCharCode((raw >> 8) & 0xFF, raw & 0xFF);
+        if (/^[A-Z]{2}$/.test(wireCode)) {
+            label = wireCode;
+        }
+    }
     if (!message) {
         const fallback = getFallbackErrorMessage(numericCode);
         return fallback ? `error ${label}: ${fallback}` : `error ${label}`;
     }
     const firstLine = message.split('\n').map(line => line.trim()).find(Boolean) || message;
-    const cleaned = firstLine.replace(/^Msg:\s*/i, '');
+    const cleaned = firstLine.replace(/^Msg:\s*/i, '').replace(/\.$/, '');
+    if (numericCode === TICALCS_EVO_ERROR) {
+        const match = cleaned.match(/^TI-Evo Kermit result [A-Z]{2}\s+\((.+)\)$/i);
+        if (match) {
+            return `${label} (${match[1]})`;
+        }
+    }
     return `error ${label}: ${cleaned}`;
 }
 
@@ -775,7 +789,7 @@ function clearNativeWarnings() {
     }
 }
 
-function getNativeWarningSuffix() {
+function getNativeWarningSuffix(handledErrorCode = null) {
     const warnings = [];
     if (state.module) {
         try {
@@ -788,8 +802,12 @@ function getNativeWarningSuffix() {
         }
     }
     const unique = [];
+    const isHandledEvoError = Number(handledErrorCode) === TICALCS_EVO_ERROR;
     for (const warning of warnings) {
         const text = String(warning || '').trim();
+        if (isHandledEvoError && text.startsWith('TI-Evo Kermit E packet')) {
+            continue;
+        }
         if (text && !unique.includes(text)) {
             unique.push(text);
         }
@@ -6709,14 +6727,14 @@ async function performTransfers(plan, module, options) {
                     });
                 }
             } else {
-                log(`Failed to send ${displayName} (${formatErrorResult(module, result)}).${getNativeWarningSuffix()}`);
+                log(`Failed to send ${displayName}: ${formatErrorResult(module, result)}.${getNativeWarningSuffix(result)}`);
             }
         } catch (err) {
             if (err?.silent) {
                 throw err;
             }
             const label = item?.entryName ? `${item.file?.name || 'file'} (${item.entryName})` : (item.file?.name || 'file');
-            log(`Failed to send ${label} (${err?.message || 'unknown error'}).${getNativeWarningSuffix()}`);
+            log(`Failed to send ${label}: ${err?.message || 'unknown error'}.${getNativeWarningSuffix()}`);
         }
     }
     return { successCount };
