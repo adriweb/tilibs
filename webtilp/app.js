@@ -6657,9 +6657,14 @@ async function performTransfers(plan, module, options) {
                 }
             }
 
-            const locationCode = canOverrideLocation && selectionLocation !== item.defaultLocation
-                ? (selectionLocation === 'archive' ? 1 : 0)
-                : -1;
+            let locationCode = -1;
+            if (isVar && locationMask === 1) {
+                locationCode = 0;
+            } else if (isVar && locationMask === 2) {
+                locationCode = 1;
+            } else if (canOverrideLocation && selectionLocation !== item.defaultLocation) {
+                locationCode = selectionLocation === 'archive' ? 1 : 0;
+            }
             const isArchiveOrFlashTransfer = item.fileClass === 'application'
                 || item.fileClass === 'flash'
                 || item.fileClass === 'os'
