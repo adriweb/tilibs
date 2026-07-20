@@ -38,6 +38,10 @@ enum{
 };
 
 enum {
+    WEBTILP_EVO_TYPE_PICTURE = 4,
+    WEBTILP_EVO_TYPE_IMAGE = 5,
+    WEBTILP_EVO_TYPE_GROUP = 9,
+    WEBTILP_EVO_TYPE_FLASH_APP = 11,
     WEBTILP_EVO_TYPE_RCL_WINDOW = 13
 };
 
@@ -2472,18 +2476,48 @@ static unsigned int compute_location_mask_for_entry(const VarEntry* ve) {
     if (!ve) {
         return (LOC_RAM | LOC_ARCHIVE);
     }
-    unsigned int location_mask = (LOC_RAM | LOC_ARCHIVE);
-    const int flash_type = tifiles_flash_type(g_calc_model);
-    const char* type_name = tifiles_vartype2type(g_calc_model, ve->type);
-    if ((flash_type >= 0 && ve->type == (uint8_t)flash_type)
-        || (type_name &&
-            (  g_ascii_strcasecmp(type_name, "CERT") == 0
-            || g_ascii_strcasecmp(type_name, "PIC") == 0
-            || g_ascii_strcasecmp(type_name, "IMAGE") == 0
-            || g_ascii_strcasecmp(type_name, "GRP") == 0))) {
-        location_mask = LOC_ARCHIVE;
+
+    const char* type_id = tifiles_vartype2string(g_calc_model, ve->type);
+    // Graphing equation/Y-var records are system variables and cannot be archived.
+    if (type_id
+        && (  g_ascii_strcasecmp(type_id, "EQU") == 0
+           || g_ascii_strcasecmp(type_id, "YVAR") == 0)) {
+        return LOC_RAM;
     }
-    return location_mask;
+
+    if (ticonv_model_is_tievo(g_calc_model)) {
+        switch (ve->type) {
+            case WEBTILP_EVO_TYPE_PICTURE:
+            case WEBTILP_EVO_TYPE_IMAGE:
+            case WEBTILP_EVO_TYPE_GROUP:
+                return LOC_ARCHIVE;
+            case WEBTILP_EVO_TYPE_FLASH_APP:
+                // The generic type-11 transfer is only a RAM staging path.
+                return LOC_RAM;
+            default:
+                return (LOC_RAM | LOC_ARCHIVE);
+        }
+    }
+
+    // Color 84+/CE models keep both Pic and Image vars in archive. Monochrome
+    // Z80 and 68k Pic vars may live in either RAM or archive.
+    const bool archive_only_graphics =
+        g_calc_model == CALC_TI84PC
+        || g_calc_model == CALC_TI84PC_USB
+        || g_calc_model == CALC_TI83PCE_USB
+        || g_calc_model == CALC_TI84PCE_USB
+        || g_calc_model == CALC_TI82AEP_USB;
+    const uint8_t flash_type = tifiles_flash_type(g_calc_model);
+    if ((flash_type != G_MAXUINT8 && ve->type == flash_type)
+        || (type_id &&
+            (  g_ascii_strcasecmp(type_id, "CERT") == 0
+            || g_ascii_strcasecmp(type_id, "GRP") == 0
+            || (archive_only_graphics
+                && (  g_ascii_strcasecmp(type_id, "PIC") == 0
+                   || g_ascii_strcasecmp(type_id, "IMAGE") == 0))))) {
+        return LOC_ARCHIVE;
+    }
+    return (LOC_RAM | LOC_ARCHIVE);
 }
 
 static void append_var_entry_json_with_container(GString* out, const VarEntry* ve, const char* container_type, int container_index) {
