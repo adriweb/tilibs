@@ -28,7 +28,7 @@
   "send_key": "إرسال المفتاح",
   "calculator_variables": "متغيرات الآلة الحاسبة",
   "preview": "معاينة",
-  "prettify_reindent": "تحسين التنسيق وإعادة المسافة البادئة",
+  "reindent": "إعادة المسافة البادئة",
   "download": "تنزيل",
   "filter_name_or_type": "تصفية حسب الاسم أو النوع",
   "refresh_list": "تحديث القائمة",

@@ -366,7 +366,7 @@ const I18N_EN = {
     "send_key": "Send Key",
     "calculator_variables": "Calculator Variables",
     "preview": "Preview",
-    "prettify_reindent": "Prettify and Reindent",
+    "reindent": "Reindent",
     "download": "Download",
     "filter_name_or_type": "Filter name or type",
     "refresh_list": "Refresh List",
@@ -1231,6 +1231,11 @@ const PYTHON_CONVERSION_NONE = 0;
 const PYTHON_CONVERSION_CE = 1;
 const PYTHON_CONVERSION_EVO = 2;
 const PYTHON_CONVERSION_NSPIRE_CXII = 3;
+const LEGACY_TIVARS_EXTENSION_RE = /^8(?:2|3|x|c)[a-z]$/i;
+const LEGACY_TIVARS_FLASH_EXTENSIONS = new Set([
+    '82u', '8xu', '8cu', '8eu', '8pu', '8yu',
+    '8xk', '8ck', '8ek', '8xq', '8cq'
+]);
 
 const PID_SILVERLINK = 0xe001;
 const DIRECTLINK_PIDS = new Set([
@@ -2841,12 +2846,16 @@ const els = {
     previewTitle: document.getElementById('previewTitle'),
     previewMeta: document.getElementById('previewMeta'),
     previewControls: document.getElementById('previewControls'),
-    previewPrettify: document.getElementById('previewPrettify'),
-    previewPrettifyLabel: document.getElementById('previewPrettifyLabel'),
+    previewReindent: document.getElementById('previewReindent'),
+    previewReindentLabel: document.getElementById('previewReindentLabel'),
     previewImage: document.getElementById('previewImage'),
     previewContent: document.getElementById('previewContent'),
     btnClosePreview: document.getElementById('btnClosePreview'),
     btnDownloadPreview: document.getElementById('btnDownloadPreview'),
+    previewBasicDownloads: document.getElementById('previewBasicDownloads'),
+    previewDownloadLabel: document.getElementById('previewDownloadLabel'),
+    btnDownloadPreviewEvo: document.getElementById('btnDownloadPreviewEvo'),
+    btnDownloadPreviewLegacy: document.getElementById('btnDownloadPreviewLegacy'),
     btnDismissPreview: document.getElementById('btnDismissPreview')
 };
 
@@ -3522,8 +3531,10 @@ async function applyTranslations() {
     setTextContent(document.getElementById('varsHeaderLocation'), t('location'));
     setTextContent(document.getElementById('varsHeaderFolder'), t('folder'));
     setTextContent(document.getElementById('varsHeaderKind'), t('kind'));
-    setTextContent(els.previewPrettifyLabel, t('prettify_reindent'));
+    setTextContent(els.previewReindentLabel, t('reindent'));
     setTextContent(els.btnDownloadPreview, `⬇️ ${t('download')}`);
+    setTextContent(els.previewDownloadLabel, `${t('download')}:`);
+    els.previewBasicDownloads?.setAttribute('aria-label', t('download'));
     setTextContent(els.btnDismissPreview, t('close'));
 
     setTextContent(document.getElementById('panelScreenshotTitle'), t('screenshot'));
@@ -7633,8 +7644,14 @@ function closePreviewModal() {
     if (els.previewControls) {
         els.previewControls.classList.add('hidden');
     }
-    if (els.previewPrettify) {
-        els.previewPrettify.checked = false;
+    if (els.previewBasicDownloads) {
+        els.previewBasicDownloads.classList.add('hidden');
+    }
+    if (els.btnDownloadPreview) {
+        els.btnDownloadPreview.classList.remove('hidden');
+    }
+    if (els.previewReindent) {
+        els.previewReindent.checked = false;
     }
     disposePreviewSession();
 }
@@ -7699,6 +7716,10 @@ function unwrapReadablePreview(readable) {
 
 function isTIBasicPreviewEntry(entry, modelId) {
     const typeId = Number(entry.type);
+    const typeName = String(entry.typeName || entry.type_name || '').trim().toLowerCase();
+    if (typeName && typeName.includes('program') && !typeName.includes('python')) {
+        return true;
+    }
     return EVO_PYTHON_CALC_MODELS.has(modelId)
         ? TIVARS_EVO_BASIC_PROGRAM_TYPES.has(typeId)
         : TIVARS_LEGACY_BASIC_PROGRAM_TYPES.has(typeId);
@@ -7785,8 +7806,20 @@ function openPreviewModal(entry, readable) {
     if (els.previewControls) {
         els.previewControls.classList.toggle('hidden', !previewSession?.isTIBasic);
     }
-    if (els.previewPrettify) {
-        els.previewPrettify.checked = false;
+    const hasBasicDownloadControls = Boolean(
+        els.previewBasicDownloads
+        && els.btnDownloadPreviewEvo
+        && els.btnDownloadPreviewLegacy
+    );
+    const showBasicDownloads = Boolean(previewSession?.isTIBasic && hasBasicDownloadControls);
+    if (els.previewBasicDownloads) {
+        els.previewBasicDownloads.classList.toggle('hidden', !showBasicDownloads);
+    }
+    if (els.btnDownloadPreview) {
+        els.btnDownloadPreview.classList.toggle('hidden', showBasicDownloads);
+    }
+    if (els.previewReindent) {
+        els.previewReindent.checked = false;
     }
     renderPreviewContent(entry, readable);
     els.previewModal.classList.remove('hidden');
@@ -7794,14 +7827,14 @@ function openPreviewModal(entry, readable) {
     els.btnClosePreview?.focus();
 }
 
-function refreshPreviewPrettify() {
+function refreshPreviewReindent() {
     const session = previewSession;
     if (!session?.isTIBasic || !session.variable || !session.options) {
         return;
     }
     try {
-        const enabled = els.previewPrettify?.checked ? 1 : 0;
-        session.options.set('prettify', enabled);
+        const enabled = els.previewReindent?.checked ? 1 : 0;
+        session.options.set('prettify', 1);
         session.options.set('reindent', enabled);
         const readable = session.variable.getReadableContent(session.options);
         renderPreviewContent(session.entry, readable);
@@ -7820,6 +7853,46 @@ function downloadPreviewFile() {
         triggerDownload(session.downloadName, data);
     } catch (error) {
         logError(error, 'Preview download failed');
+    }
+}
+
+function downloadTIBasicPreview(targetModel) {
+    const session = previewSession;
+    if (!session?.isTIBasic || !session.module || !session.receivedPath || !session.tivars) {
+        return;
+    }
+
+    const safeInputName = String(session.downloadName || 'program.8xp').replace(/[\\/]/g, '_');
+    const outputBaseName = String(session.entry?.name || safeInputName.replace(/\.[^.]*$/, '') || 'PROGRAM')
+        .replace(/[\\/]/g, '_');
+    const inputPath = `/preview-download-${Date.now()}-${safeInputName}`;
+    let outputPath = '';
+    let variable = null;
+    try {
+        const data = session.module.FS.readFile(session.receivedPath);
+        session.tivars.FS.writeFile(inputPath, data, { encoding: 'binary' });
+        variable = session.tivars.TIVarFile.loadFromFile(inputPath);
+        variable.convertToModel(targetModel, targetModel === '84Evo');
+        outputPath = variable.saveVarToFile('.', outputBaseName);
+        const converted = session.tivars.FS.readFile(outputPath, { encoding: 'binary' });
+        const outputName = outputPath.split('/').pop() || (targetModel === '84Evo' ? 'program.8xp2' : 'program.8xp');
+        triggerDownload(outputName, converted);
+    } catch (error) {
+        logError(new Error(formatTivarsException(session.tivars, error)), 'Preview download failed');
+    } finally {
+        for (const path of [inputPath, outputPath]) {
+            if (!path) {
+                continue;
+            }
+            try {
+                session.tivars.FS.unlink(path);
+            } catch {
+                // ignore
+            }
+        }
+        if (variable && typeof variable.delete === 'function') {
+            variable.delete();
+        }
     }
 }
 
@@ -7877,7 +7950,7 @@ async function previewEntry(entry, actionButton) {
         try {
             variable = tivars.TIVarFile.loadFromFile(converterPath);
             options = new tivars.options_t();
-            options.set('prettify', 0);
+            options.set('prettify', 1);
             options.set('reindent', 0);
             const isTIBasic = isTIBasicPreviewEntry(entry, modelId);
             let language = usesTIBasicPreviewSyntax(entry, modelId) ? 'basic-z80' : '';
@@ -8339,8 +8412,10 @@ function bindEvents() {
     });
     els.btnClosePreview?.addEventListener('click', closePreviewModal);
     els.btnDownloadPreview?.addEventListener('click', downloadPreviewFile);
+    els.btnDownloadPreviewEvo?.addEventListener('click', () => downloadTIBasicPreview('84Evo'));
+    els.btnDownloadPreviewLegacy?.addEventListener('click', () => downloadTIBasicPreview('84+CE'));
     els.btnDismissPreview?.addEventListener('click', closePreviewModal);
-    els.previewPrettify?.addEventListener('change', refreshPreviewPrettify);
+    els.previewReindent?.addEventListener('change', refreshPreviewReindent);
     els.previewModal?.addEventListener('click', event => {
         if (event.target === els.previewModal) {
             closePreviewModal();
