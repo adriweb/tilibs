@@ -45,6 +45,7 @@
   "clear_log": "清空日志",
   "language": "语言",
   "convert_python_files": "转换 Python 文件（.py <-> 计算器格式）",
+  "convert_python_files_nspire": "转换 Python 文件（.py -> .tns）",
   "settings_title": "设置",
   "cable": "线缆",
   "force_cable_hint": "强制使用线缆类型以跳过探测。",
