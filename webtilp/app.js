@@ -365,6 +365,9 @@ const I18N_EN = {
     "key_input_placeholder": "Key name or code (hex/dec)",
     "send_key": "Send Key",
     "calculator_variables": "Calculator Variables",
+    "preview": "Preview",
+    "prettify_reindent": "Prettify and Reindent",
+    "download": "Download",
     "filter_name_or_type": "Filter name or type",
     "refresh_list": "Refresh List",
     "new_folder": "New Folder",
@@ -1207,6 +1210,23 @@ const EVO_PYTHON_CALC_MODELS = new Map([
     [45, '84Evo']
 ]);
 const NSPIRE_CXII_PYTHON_CALC_MODELS = new Set([32, 33, 34, 35]);
+const TIVARS_PREVIEW_CALC_MODELS = new Set([
+    1, 2, 3, 4, 5, 13, 17, 18, 19, 20, 21, 22, 36, 43, 44, 45
+]);
+const TIVARS_LEGACY_PREVIEW_TYPES = new Set([
+    0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08,
+    0x0B, 0x0C, 0x0D, 0x0F, 0x10, 0x11, 0x15, 0x17, 0x18,
+    0x1A, 0x1B, 0x1C, 0x1D, 0x1E, 0x1F, 0x20, 0x21
+]);
+const TIVARS_EVO_PREVIEW_TYPES = new Set([
+    0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 12, 13, 14, 15
+]);
+const TIVARS_LEGACY_BASIC_PROGRAM_TYPES = new Set([0x05, 0x06]);
+const TIVARS_EVO_BASIC_PROGRAM_TYPES = new Set([2]);
+const TIVARS_LEGACY_BASIC_SYNTAX_TYPES = new Set([
+    0x01, 0x02, 0x03, 0x05, 0x06, 0x0B, 0x0D
+]);
+const TIVARS_EVO_BASIC_SYNTAX_TYPES = new Set([1, 2, 6, 7]);
 const PYTHON_CONVERSION_NONE = 0;
 const PYTHON_CONVERSION_CE = 1;
 const PYTHON_CONVERSION_EVO = 2;
@@ -2816,7 +2836,18 @@ const els = {
     connectionHelpModal: document.getElementById('connectionHelpModal'),
     connectionHelpTitle: document.getElementById('connectionHelpTitle'),
     connectionHelpBody: document.getElementById('connectionHelpBody'),
-    btnCloseConnectionHelp: document.getElementById('btnCloseConnectionHelp')
+    btnCloseConnectionHelp: document.getElementById('btnCloseConnectionHelp'),
+    previewModal: document.getElementById('previewModal'),
+    previewTitle: document.getElementById('previewTitle'),
+    previewMeta: document.getElementById('previewMeta'),
+    previewControls: document.getElementById('previewControls'),
+    previewPrettify: document.getElementById('previewPrettify'),
+    previewPrettifyLabel: document.getElementById('previewPrettifyLabel'),
+    previewImage: document.getElementById('previewImage'),
+    previewContent: document.getElementById('previewContent'),
+    btnClosePreview: document.getElementById('btnClosePreview'),
+    btnDownloadPreview: document.getElementById('btnDownloadPreview'),
+    btnDismissPreview: document.getElementById('btnDismissPreview')
 };
 
 state.settings = loadSettings();
@@ -3491,6 +3522,9 @@ async function applyTranslations() {
     setTextContent(document.getElementById('varsHeaderLocation'), t('location'));
     setTextContent(document.getElementById('varsHeaderFolder'), t('folder'));
     setTextContent(document.getElementById('varsHeaderKind'), t('kind'));
+    setTextContent(els.previewPrettifyLabel, t('prettify_reindent'));
+    setTextContent(els.btnDownloadPreview, `⬇️ ${t('download')}`);
+    setTextContent(els.btnDismissPreview, t('close'));
 
     setTextContent(document.getElementById('panelScreenshotTitle'), t('screenshot'));
     setTextContent(els.btnScreenshot, `📸 ${t('take_screenshot')}`);
@@ -5059,6 +5093,19 @@ function isBuiltInListName(name) {
     return /^L(?:[1-6]|[₁₂₃₄₅₆])$/i.test(name);
 }
 
+function canPreviewVariable(entry, modelId = getActiveCalcModelId()) {
+    if (!entry || entry.is_folder === 1 || entry.kind !== 'var') {
+        return false;
+    }
+    if (!TIVARS_PREVIEW_CALC_MODELS.has(modelId)) {
+        return false;
+    }
+    const typeId = Number(entry.type);
+    return EVO_PYTHON_CALC_MODELS.has(modelId)
+        ? TIVARS_EVO_PREVIEW_TYPES.has(typeId)
+        : TIVARS_LEGACY_PREVIEW_TYPES.has(typeId);
+}
+
 function formatVariableDisplayName(entry) {
     const name = entry.name || '';
     if (calcSupportsFolders() || entry.is_folder === 1) {
@@ -5075,6 +5122,7 @@ function formatVariableDisplayName(entry) {
 
 function renderTableView(entries, filter) {
     const selectionKeys = getSelectedVarKeys();
+    const previewModelId = getActiveCalcModelId();
     els.varTableBody.innerHTML = '';
     const tree = buildTree(entries);
     state.folderSizeMap = new Map();
@@ -5150,8 +5198,10 @@ function renderTableView(entries, filter) {
         row.dataset.depth = String(depth);
         const canRename = (state.features & FEATURE_FLAGS.OPS_RENAME) !== 0;
         const canDelete = (state.features & FEATURE_FLAGS.OPS_DELVAR) !== 0;
+        const canPreview = canPreviewVariable(entry, previewModelId);
         const rowActions = `
             <div class="row-actions">
+                ${canPreview ? `<button class="btn ghost btn-inline action-preview" title="${escapeHtml(t('preview'))}" aria-label="${escapeHtml(t('preview'))}">👁️</button>` : ''}
                 <button class="btn ghost btn-inline action-download" title="Download">⬇️</button>
                 ${canRename ? '<button class="btn ghost btn-inline action-rename" title="Rename">✏️</button>' : ''}
                 ${canDelete ? '<button class="btn ghost btn-inline action-delete" title="Delete">🗑️</button>' : ''}
@@ -5183,6 +5233,8 @@ function renderTableView(entries, filter) {
             checkbox.dataset.folder = entry.folder || '';
             checkbox.dataset.folderPath = normalizedFolderPath;
             checkbox.dataset.kind = isFolder ? 'folder' : (entry.kind || '');
+            checkbox.dataset.typeName = entry.type_name || '';
+            checkbox.dataset.size = String(sizeValue);
         }
         els.varTableBody.appendChild(row);
     };
@@ -5689,6 +5741,8 @@ function buildEntryFromCheckbox(checkbox) {
         name: checkbox.dataset.name,
         folder: checkbox.dataset.folder,
         type: Number(checkbox.dataset.type),
+        typeName: checkbox.dataset.typeName || '',
+        size: Number(checkbox.dataset.size) || 0,
         kind: checkbox.dataset.kind,
         isFolder: checkbox.dataset.isFolder === '1',
         folderPath: checkbox.dataset.folderPath || ''
@@ -6056,6 +6110,36 @@ function isCEBundleOSFile(item) {
 
 let tivarsLibPromise = null;
 let webLunaPromise = null;
+let previewHighlighterPromise = null;
+
+function getPreviewHighlighter() {
+    if (window.hljs) {
+        return Promise.resolve(window.hljs);
+    }
+    if (!previewHighlighterPromise) {
+        previewHighlighterPromise = new Promise((resolve, reject) => {
+            const script = document.createElement('script');
+            script.src = new URL('highlighter.min.js', document.baseURI).href;
+            script.async = true;
+            script.dataset.webtilpHighlighter = 'true';
+            script.addEventListener('load', () => {
+                if (window.hljs) {
+                    resolve(window.hljs);
+                } else {
+                    reject(new Error('Preview highlighter is unavailable'));
+                }
+            }, { once: true });
+            script.addEventListener('error', () => {
+                reject(new Error('Failed to load the preview highlighter'));
+            }, { once: true });
+            document.head.appendChild(script);
+        }).catch(error => {
+            previewHighlighterPromise = null;
+            throw error;
+        });
+    }
+    return previewHighlighterPromise;
+}
 
 function loadPythonConverterModule(fileName, factoryName) {
     const moduleUrl = new URL(fileName, document.baseURI).href;
@@ -7515,6 +7599,358 @@ async function downloadEntry(entry) {
     }
 }
 
+let previewSession = null;
+let previewRenderId = 0;
+
+function disposePreviewSession() {
+    const session = previewSession;
+    previewSession = null;
+    previewRenderId += 1;
+    if (session?.module && session.receivedPath) {
+        try {
+            session.module.FS.unlink(session.receivedPath);
+        } catch (error) {
+            console.warn('[WebTILP] Failed to remove preview file:', error);
+        }
+    }
+    if (session?.options && typeof session.options.delete === 'function') {
+        session.options.delete();
+    }
+    if (session?.variable && typeof session.variable.delete === 'function') {
+        session.variable.delete();
+    }
+}
+
+function closePreviewModal() {
+    if (els.previewModal) {
+        els.previewModal.classList.add('hidden');
+        els.previewModal.setAttribute('aria-hidden', 'true');
+    }
+    if (els.previewImage) {
+        els.previewImage.removeAttribute('src');
+        els.previewImage.classList.add('hidden');
+    }
+    if (els.previewControls) {
+        els.previewControls.classList.add('hidden');
+    }
+    if (els.previewPrettify) {
+        els.previewPrettify.checked = false;
+    }
+    disposePreviewSession();
+}
+
+function formatTivarsException(tivars, error) {
+    if (tivars?.getExceptionMessage) {
+        try {
+            const message = tivars.getExceptionMessage(error);
+            if (Array.isArray(message)) {
+                const joined = message.filter(Boolean).join(': ');
+                if (joined) {
+                    return joined;
+                }
+            } else if (message) {
+                return String(message);
+            }
+        } catch {
+            // Fall through to the regular error formatting.
+        }
+    }
+    return error?.message || String(error);
+}
+
+function unwrapReadablePreview(readable) {
+    let content = String(readable ?? '');
+    let imageDataUrl = '';
+    let language = '';
+    try {
+        const parsed = JSON.parse(content);
+        let displayValue = parsed;
+        if (typeof parsed.readableContent === 'string') {
+            try {
+                const nested = JSON.parse(parsed.readableContent);
+                if (typeof nested.previewImageDataUrl === 'string') {
+                    imageDataUrl = nested.previewImageDataUrl;
+                    delete nested.previewImageDataUrl;
+                }
+                displayValue = nested;
+            } catch {
+                displayValue = parsed.readableContent;
+            }
+        } else if (typeof parsed.python?.code === 'string') {
+            displayValue = parsed.python.code;
+            language = 'python';
+        } else if (typeof parsed.code === 'string') {
+            displayValue = parsed.code;
+        } else if (typeof parsed.previewImageDataUrl === 'string') {
+            imageDataUrl = parsed.previewImageDataUrl;
+            delete parsed.previewImageDataUrl;
+        }
+        if (typeof displayValue !== 'string') {
+            language = 'json';
+        }
+        content = typeof displayValue === 'string'
+            ? displayValue
+            : JSON.stringify(displayValue, null, 2);
+    } catch {
+        // Plain-text readable content needs no additional processing.
+    }
+    return { content, imageDataUrl, language };
+}
+
+function isTIBasicPreviewEntry(entry, modelId) {
+    const typeId = Number(entry.type);
+    return EVO_PYTHON_CALC_MODELS.has(modelId)
+        ? TIVARS_EVO_BASIC_PROGRAM_TYPES.has(typeId)
+        : TIVARS_LEGACY_BASIC_PROGRAM_TYPES.has(typeId);
+}
+
+function usesTIBasicPreviewSyntax(entry, modelId) {
+    const typeId = Number(entry.type);
+    return EVO_PYTHON_CALC_MODELS.has(modelId)
+        ? TIVARS_EVO_BASIC_SYNTAX_TYPES.has(typeId)
+        : TIVARS_LEGACY_BASIC_SYNTAX_TYPES.has(typeId);
+}
+
+function renderJsonHighlightedPreview(content) {
+    const fragment = document.createDocumentFragment();
+    const tokenPattern = /"(?:\\.|[^"\\])*"(?=\s*:)|"(?:\\.|[^"\\])*"|-?\b\d+(?:\.\d+)?(?:[eE][+-]?\d+)?\b|\b(?:true|false|null)\b/g;
+    let offset = 0;
+    for (const match of content.matchAll(tokenPattern)) {
+        const index = match.index ?? 0;
+        fragment.appendChild(document.createTextNode(content.slice(offset, index)));
+        const token = match[0];
+        const span = document.createElement('span');
+        if (token.startsWith('"')) {
+            span.className = /^\s*:/.test(content.slice(index + token.length))
+                ? 'hljs-attribute'
+                : 'hljs-string';
+        } else if (/^(?:true|false|null)$/.test(token)) {
+            span.className = 'hljs-literal';
+        } else {
+            span.className = 'hljs-number';
+        }
+        span.textContent = token;
+        fragment.appendChild(span);
+        offset = index + token.length;
+    }
+    fragment.appendChild(document.createTextNode(content.slice(offset)));
+    els.previewContent.replaceChildren(fragment);
+}
+
+function renderHighlightedPreview(content, language) {
+    if (!els.previewContent) {
+        return;
+    }
+    const renderId = ++previewRenderId;
+    els.previewContent.classList.toggle('hljs', Boolean(language));
+    els.previewContent.textContent = content;
+    if (!language) {
+        return;
+    }
+    if (language === 'json') {
+        renderJsonHighlightedPreview(content);
+        return;
+    }
+    getPreviewHighlighter().then(highlighter => {
+        if (renderId !== previewRenderId || !els.previewContent) {
+            return;
+        }
+        els.previewContent.innerHTML = highlighter.highlight(language, content).value;
+    }).catch(error => {
+        console.warn('[WebTILP] Preview syntax highlighting unavailable:', error);
+    });
+}
+
+function renderPreviewContent(entry, readable) {
+    const preview = unwrapReadablePreview(readable);
+    const language = previewSession?.language || preview.language || '';
+    renderHighlightedPreview(preview.content, language);
+    if (els.previewImage) {
+        els.previewImage.classList.toggle('hidden', !preview.imageDataUrl);
+        if (preview.imageDataUrl) {
+            els.previewImage.src = preview.imageDataUrl;
+        } else {
+            els.previewImage.removeAttribute('src');
+        }
+        els.previewImage.alt = `${t('preview')}: ${formatVariableDisplayName(entry)}`;
+    }
+}
+
+function openPreviewModal(entry, readable) {
+    if (!els.previewModal || !els.previewContent) {
+        return;
+    }
+    els.previewTitle.textContent = `${t('preview')}: ${formatVariableDisplayName(entry)}`;
+    els.previewMeta.textContent = `${entry.typeName || `Type ${entry.type}`} · ${formatBytes(entry.size)}`;
+    if (els.previewControls) {
+        els.previewControls.classList.toggle('hidden', !previewSession?.isTIBasic);
+    }
+    if (els.previewPrettify) {
+        els.previewPrettify.checked = false;
+    }
+    renderPreviewContent(entry, readable);
+    els.previewModal.classList.remove('hidden');
+    els.previewModal.setAttribute('aria-hidden', 'false');
+    els.btnClosePreview?.focus();
+}
+
+function refreshPreviewPrettify() {
+    const session = previewSession;
+    if (!session?.isTIBasic || !session.variable || !session.options) {
+        return;
+    }
+    try {
+        const enabled = els.previewPrettify?.checked ? 1 : 0;
+        session.options.set('prettify', enabled);
+        session.options.set('reindent', enabled);
+        const readable = session.variable.getReadableContent(session.options);
+        renderPreviewContent(session.entry, readable);
+    } catch (error) {
+        logError(new Error(formatTivarsException(session.tivars, error)), 'Preview failed');
+    }
+}
+
+function downloadPreviewFile() {
+    const session = previewSession;
+    if (!session?.module || !session.receivedPath) {
+        return;
+    }
+    try {
+        const data = session.module.FS.readFile(session.receivedPath);
+        triggerDownload(session.downloadName, data);
+    } catch (error) {
+        logError(error, 'Preview download failed');
+    }
+}
+
+async function previewEntry(entry, actionButton) {
+    if (!canPreviewVariable({
+        ...entry,
+        type_name: entry.typeName,
+        is_folder: entry.isFolder ? 1 : 0
+    })) {
+        log(`Preview is not supported for ${entry.name}.`);
+        return;
+    }
+
+    setButtonLoading(actionButton, true);
+    let module = null;
+    let receivedPath = '';
+    let tivars = null;
+    let converterPath = '';
+    let variable = null;
+    let options = null;
+    try {
+        const modelId = getActiveCalcModelId();
+        await authorizeDevice();
+        module = await initModule();
+        const handle = await ensureHandle();
+        if (!module.FS.analyzePath('/previews').exists) {
+            module.FS.mkdir('/previews');
+        }
+        const result = await ccallAsync(
+            module,
+            'calc_recv_var',
+            'number',
+            ['number', 'string', 'string', 'number', 'string'],
+            [handle, entry.folder, entry.name, entry.type, '/previews'],
+            {
+                timeoutMs: PROGRESS_IDLE_TIMEOUT_MS,
+                useProgress: true,
+                progressLabel: `Preparing preview for ${entry.name}`
+            }
+        );
+        if (result !== 0) {
+            throw new Error(`Receive failed (${formatErrorResult(module, result)})`);
+        }
+
+        receivedPath = module.FS.readFile('/last_recv_path.txt', { encoding: 'utf8' }).trim();
+        if (!receivedPath) {
+            throw new Error('The received preview file path is unavailable');
+        }
+        const data = module.FS.readFile(receivedPath);
+        const receivedName = receivedPath.split('/').pop() || 'preview.8x?';
+
+        tivars = await getTivarsLib();
+        converterPath = `/preview-${Date.now()}-${receivedName.replace(/[\\/]/g, '_')}`;
+        tivars.FS.writeFile(converterPath, data, { encoding: 'binary' });
+        try {
+            variable = tivars.TIVarFile.loadFromFile(converterPath);
+            options = new tivars.options_t();
+            options.set('prettify', 0);
+            options.set('reindent', 0);
+            const isTIBasic = isTIBasicPreviewEntry(entry, modelId);
+            let language = usesTIBasicPreviewSyntax(entry, modelId) ? 'basic-z80' : '';
+            if (!language && EVO_PYTHON_CALC_MODELS.has(modelId) && Number(entry.type) === 15) {
+                language = 'python';
+            } else if (!language && Number(entry.type) === 0x15) {
+                options.set('metadata', 1);
+                try {
+                    const metadata = JSON.parse(variable.getReadableContent(options));
+                    if (metadata?.typeName === 'PythonAppVar') {
+                        language = 'python';
+                    }
+                } catch {
+                    // A regular AppVar has no structured Python metadata.
+                } finally {
+                    options.set('metadata', 0);
+                }
+            }
+            const readable = variable.getReadableContent(options);
+            closePreviewModal();
+            previewSession = {
+                entry,
+                tivars,
+                variable,
+                options,
+                isTIBasic,
+                language,
+                module,
+                receivedPath,
+                downloadName: receivedName
+            };
+            variable = null;
+            options = null;
+            receivedPath = '';
+            openPreviewModal(entry, readable);
+            log(`Previewed ${entry.name}.`);
+        } catch (error) {
+            throw new Error(formatTivarsException(tivars, error));
+        }
+    } catch (err) {
+        logError(err, 'Preview failed');
+    } finally {
+        if (options && typeof options.delete === 'function') {
+            options.delete();
+        }
+        if (variable && typeof variable.delete === 'function') {
+            variable.delete();
+        }
+        if (tivars && converterPath) {
+            try {
+                tivars.FS.unlink(converterPath);
+            } catch {
+                // ignore
+            }
+        }
+        if (module && receivedPath) {
+            try {
+                module.FS.unlink(receivedPath);
+            } catch {
+                // ignore
+            }
+        }
+        if (module) {
+            try {
+                module.FS.unlink('/last_recv_path.txt');
+            } catch {
+                // ignore
+            }
+        }
+        setButtonLoading(actionButton, false);
+    }
+}
+
 async function downloadFolderEntriesWithSession(module, handle, folderPath, confirmDownload) {
     const target = normalizeFolderPath(folderPath);
     const entries = state.dirlist.filter(entry => {
@@ -7761,10 +8197,13 @@ async function downloadLastReceived(module, fallbackName) {
 function triggerDownload(filename, data) {
     const blob = new Blob([data], { type: 'application/octet-stream' });
     const link = document.createElement('a');
-    link.href = URL.createObjectURL(blob);
+    const url = URL.createObjectURL(blob);
+    link.href = url;
     link.download = filename;
+    document.body.appendChild(link);
     link.click();
-    URL.revokeObjectURL(link.href);
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 0);
 }
 
 function clearLog() {
@@ -7896,6 +8335,15 @@ function bindEvents() {
     els.settingsModal.addEventListener('click', event => {
         if (event.target === els.settingsModal) {
             closeSettingsModal();
+        }
+    });
+    els.btnClosePreview?.addEventListener('click', closePreviewModal);
+    els.btnDownloadPreview?.addEventListener('click', downloadPreviewFile);
+    els.btnDismissPreview?.addEventListener('click', closePreviewModal);
+    els.previewPrettify?.addEventListener('change', refreshPreviewPrettify);
+    els.previewModal?.addEventListener('click', event => {
+        if (event.target === els.previewModal) {
+            closePreviewModal();
         }
     });
     if (els.btnCloseConnectionHelp) {
@@ -8066,7 +8514,7 @@ function bindEvents() {
             }
             return;
         }
-        const actionButton = event.target.closest('button.action-rename, button.action-delete, button.action-download');
+        const actionButton = event.target.closest('button.action-preview, button.action-rename, button.action-delete, button.action-download');
         if (actionButton) {
             const row = actionButton.closest('tr');
             const checkbox = row ? row.querySelector('input[type=\"checkbox\"]') : null;
@@ -8078,7 +8526,9 @@ function bindEvents() {
             }
             const entry = buildEntryFromCheckbox(checkbox);
             try {
-                if (actionButton.classList.contains('action-rename')) {
+                if (actionButton.classList.contains('action-preview')) {
+                    await previewEntry(entry, actionButton);
+                } else if (actionButton.classList.contains('action-rename')) {
                     await renameEntry(entry);
                 } else if (actionButton.classList.contains('action-download')) {
                     await downloadEntry(entry);
@@ -8211,6 +8661,10 @@ function bindEvents() {
     });
     document.addEventListener('keydown', event => {
         if (event.key === 'Escape') {
+            if (els.previewModal && !els.previewModal.classList.contains('hidden')) {
+                closePreviewModal();
+                return;
+            }
             if (els.settingsModal && !els.settingsModal.classList.contains('hidden')) {
                 closeSettingsModal();
                 return;
