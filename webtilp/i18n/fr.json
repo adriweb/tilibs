@@ -54,6 +54,7 @@
   "cable_delay": "Délai câble (µs)",
   "language": "Langue",
   "convert_python_files": "Convertir les fichiers Python (.py <-> format calculatrice)",
+  "convert_python_files_nspire": "Convertir les fichiers Python (.py -> .tns)",
   "settings_note": "Modifier les paramètres réinitialise la connexion en cours. Reconnectez-vous pour appliquer les changements.",
   "offline_ready": "Cette application peut fonctionner sans connexion réseau.",
   "offline_update_available": "Une mise à jour est disponible. Rechargez pour l'utiliser.",
