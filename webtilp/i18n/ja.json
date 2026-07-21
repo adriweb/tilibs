@@ -28,7 +28,7 @@
   "send_key": "キー送信",
   "calculator_variables": "電卓の変数",
   "preview": "プレビュー",
-  "prettify_reindent": "整形して再インデント",
+  "reindent": "再インデント",
   "download": "ダウンロード",
   "filter_name_or_type": "名前または種類で絞り込み",
   "refresh_list": "一覧更新",
