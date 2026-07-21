@@ -54,6 +54,7 @@
   "cable_delay": "Kabelvertraging (µs)",
   "language": "Taal",
   "convert_python_files": "Python-bestanden converteren (.py <-> rekenmachineformaat)",
+  "convert_python_files_nspire": "Python-bestanden converteren (.py -> .tns)",
   "settings_note": "Het wijzigen van instellingen reset de huidige verbinding. Maak opnieuw verbinding voor het volledige effect.",
   "offline_ready": "Deze app kan nu zonder netwerkverbinding werken.",
   "offline_update_available": "Er is een update beschikbaar. Herlaad om de nieuwste versie te gebruiken.",
