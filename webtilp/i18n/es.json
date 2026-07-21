@@ -28,7 +28,7 @@
   "send_key": "Enviar tecla",
   "calculator_variables": "Variables de la calculadora",
   "preview": "Vista previa",
-  "prettify_reindent": "Mejorar formato y reindentar",
+  "reindent": "Reindentar",
   "download": "Descargar",
   "filter_name_or_type": "Filtrar nombre o tipo",
   "refresh_list": "Actualizar lista",
