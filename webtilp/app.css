@@ -912,11 +912,14 @@ tr:focus-within .row-actions {
 }
 
 #screenshotCanvas {
-    width: 100%;
+    display: block;
+    width: auto;
+    height: auto;
     image-rendering: pixelated;
-    padding: 8px;
-    border-radius: 10px;
-    max-width: calc(640px + 2 * 8px); /* account for padding */
+    outline: 4px solid grey;
+    margin: 8px auto;
+    border-radius: 2px;
+    max-width: min(640px, 100%);
     background: rgba(6, 8, 12, 0.4);
 }
 
