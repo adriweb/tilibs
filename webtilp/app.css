@@ -1050,6 +1050,101 @@ a {
     display: none;
 }
 
+.preview-meta {
+    margin-top: 3px;
+    color: var(--muted);
+    font-size: 12px;
+}
+
+.preview-body {
+    display: grid;
+    gap: 14px;
+    max-height: min(70vh, 720px);
+    overflow: auto;
+}
+
+.preview-controls {
+    display: flex;
+    align-items: center;
+    min-height: 30px;
+}
+
+.preview-controls.hidden {
+    display: none;
+}
+
+.preview-option {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    color: var(--text);
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+}
+
+.preview-image {
+    max-width: 100%;
+    max-height: 420px;
+    margin: 0 auto;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    image-rendering: pixelated;
+}
+
+.preview-content {
+    min-height: 120px;
+    margin: 0;
+    padding: 14px;
+    overflow: auto;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: #0b0d12;
+    color: #c7d0e0;
+    font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+
+.preview-content .hljs-comment {
+    color: #7f8c98;
+    font-style: italic;
+}
+
+.preview-content .hljs-keyword {
+    color: #66aaff;
+    font-weight: 700;
+}
+
+.preview-content .hljs-built_in,
+.preview-content .hljs-class .hljs-title,
+.preview-content .hljs-function .hljs-title {
+    color: #ff9696;
+}
+
+.preview-content .hljs-string {
+    color: #7bd88f;
+}
+
+.preview-content .hljs-attribute {
+    color: #8be9fd;
+}
+
+.preview-content .hljs-number,
+.preview-content .hljs-symbol,
+.preview-content .hljs-title {
+    color: #ffb86b;
+}
+
+.preview-content .hljs-literal {
+    color: #67e8f9;
+}
+
+.preview-content .hljs-variable,
+.preview-content .hljs-params {
+    color: #c3e88d;
+}
+
 .modal-overlay {
     position: absolute;
     inset: 0;
