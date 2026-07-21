@@ -54,6 +54,7 @@
   "cable_delay": "تأخير الكابل (µs)",
   "language": "اللغة",
   "convert_python_files": "تحويل ملفات Python (.py <-> تنسيق الحاسبة)",
+  "convert_python_files_nspire": "تحويل ملفات Python (.py -> .tns)",
   "settings_note": "تغيير الإعدادات يعيد تهيئة الاتصال الحالي. أعد الاتصال لتطبيقها بالكامل.",
   "offline_ready": "يمكن الآن تشغيل التطبيق دون اتصال بالشبكة.",
   "offline_update_available": "يتوفر تحديث. أعد التحميل لاستخدام أحدث إصدار.",

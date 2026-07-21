@@ -1204,6 +1204,11 @@ a {
     color: var(--text);
 }
 
+.form-field.disabled .form-option {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
 .form-input {
     padding: 10px 12px;
     border-radius: 10px;

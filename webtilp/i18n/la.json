@@ -54,6 +54,7 @@
   "cable_delay": "Mora cabli (µs)",
   "language": "Lingua",
   "convert_python_files": "Fasciculos Python converte (.py <-> forma calculatricis)",
+  "convert_python_files_nspire": "Fasciculos Python converte (.py -> .tns)",
   "settings_note": "Mutationes optionum ansam praesentem reponunt. Reconiunge ut plene valeant.",
   "offline_ready": "Haec applicatio iam sine rete currere potest.",
   "offline_update_available": "Nova versio adest. Iterum onera ut recentissimam utaris.",
