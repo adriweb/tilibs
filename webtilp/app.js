@@ -6272,6 +6272,55 @@ async function convertPythonSourceForCalc(file, data, module, modelId, conversio
     return '';
 }
 
+function isLegacyTivarsConversionCandidate(fileName) {
+    const match = String(fileName || '').toLowerCase().match(/\.([^.]+)$/);
+    const extension = match?.[1] || '';
+    return LEGACY_TIVARS_EXTENSION_RE.test(extension)
+        && !LEGACY_TIVARS_FLASH_EXTENSIONS.has(extension);
+}
+
+async function convertLegacyTivarsFileForEvo(file, data, module, modelId) {
+    const modelName = EVO_PYTHON_CALC_MODELS.get(modelId);
+    if (!modelName || !isLegacyTivarsConversionCandidate(file.name)) {
+        return '';
+    }
+
+    const tivars = await getTivarsLib();
+    const safeInputName = String(file.name || 'variable.8x?').replace(/[\\/]/g, '_');
+    const outputBaseName = safeInputName.replace(/\.[^.]*$/, '') || 'VARIABLE';
+    const inputPath = `/evo-input-${Date.now()}-${safeInputName}`;
+    let outputPath = '';
+    let variable = null;
+    try {
+        tivars.FS.writeFile(inputPath, data, { encoding: 'binary' });
+        variable = tivars.TIVarFile.loadFromFile(inputPath);
+        if (variable.isEvoFormat()) {
+            return '';
+        }
+        variable.convertToModel(modelName, true);
+        outputPath = variable.saveVarToFile('.', outputBaseName);
+        const converted = tivars.FS.readFile(outputPath, { encoding: 'binary' });
+        const outputName = outputPath.split('/').pop() || `${safeInputName}2`;
+        const modulePath = `/uploads/${outputName}`;
+        module.FS.writeFile(modulePath, converted);
+        return modulePath;
+    } finally {
+        for (const path of [inputPath, outputPath]) {
+            if (!path) {
+                continue;
+            }
+            try {
+                tivars.FS.unlink(path);
+            } catch {
+                // ignore
+            }
+        }
+        if (variable && typeof variable.delete === 'function') {
+            variable.delete();
+        }
+    }
+}
+
 async function buildTransferPlan(files, module) {
     if (!module.FS.analyzePath('/uploads').exists) {
         module.FS.mkdir('/uploads');
@@ -6306,6 +6355,23 @@ async function buildTransferPlan(files, module) {
                 }
             } catch (err) {
                 console.warn('[WebTILP] Failed to convert Python source file', err);
+            }
+        }
+        if (EVO_PYTHON_CALC_MODELS.has(activeModelId)
+            && isLegacyTivarsConversionCandidate(file.name)) {
+            try {
+                const convertedPath = await convertLegacyTivarsFileForEvo(file, data, module, activeModelId);
+                if (convertedPath && convertedPath !== path) {
+                    try {
+                        module.FS.unlink(path);
+                    } catch {
+                        // ignore
+                    }
+                    uploadPaths.push(convertedPath);
+                    continue;
+                }
+            } catch (err) {
+                console.warn(`[WebTILP] Failed to convert ${file.name} for Evo; trying the original file`, err);
             }
         }
         uploadPaths.push(path);
