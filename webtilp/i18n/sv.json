@@ -54,6 +54,7 @@
   "cable_delay": "Kabelfördröjning (µs)",
   "language": "Språk",
   "convert_python_files": "Konvertera Python-filer (.py <-> räknarformat)",
+  "convert_python_files_nspire": "Konvertera Python-filer (.py -> .tns)",
   "settings_note": "Ändrade inställningar återställer den aktuella anslutningen. Återanslut för full effekt.",
   "offline_ready": "Denna app kan nu köras utan nätverksanslutning.",
   "offline_update_available": "En uppdatering finns tillgänglig. Ladda om för att använda den senaste versionen.",

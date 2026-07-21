@@ -97,5 +97,9 @@ webtilp/build-profile.css
 webtilp/webtilp.js
 webtilp/webtilp_prejs.js
 webtilp/webtilp.wasm
+webtilp/TIVarsLib.js
+webtilp/TIVarsLib.wasm
+webtilp/WebLuna.js
+webtilp/WebLuna.wasm
 webtilp/version.json
 webtilp/sw.js

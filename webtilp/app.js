@@ -392,6 +392,7 @@ const I18N_EN = {
     "cable_delay": "Cable delay (us)",
     "language": "Language",
     "convert_python_files": "Convert Python files (.py <-> calculator format)",
+    "convert_python_files_nspire": "Convert Python files (.py -> .tns)",
     "settings_note": "Changing settings resets the current handle. Reconnect for full effect.",
     "offline_ready": "This app can now run without a network connection.",
     "offline_update_available": "An update is available. Reload to use the latest version.",
@@ -1194,6 +1195,22 @@ const CALC_MODEL_OPTIONS = [
     { value: 44, label: 'TI-84 Evo-T' },
     { value: 45, label: 'TI-83 Evo' }
 ];
+
+const CE_PYTHON_CALC_MODELS = new Map([
+    [19, '83PCEEP'],
+    [20, '84+CEPy'],
+    [36, '82AEP']
+]);
+const EVO_PYTHON_CALC_MODELS = new Map([
+    [43, '84Evo'],
+    [44, '84Evo'],
+    [45, '84Evo']
+]);
+const NSPIRE_CXII_PYTHON_CALC_MODELS = new Set([32, 33, 34, 35]);
+const PYTHON_CONVERSION_NONE = 0;
+const PYTHON_CONVERSION_CE = 1;
+const PYTHON_CONVERSION_EVO = 2;
+const PYTHON_CONVERSION_NSPIRE_CXII = 3;
 
 const PID_SILVERLINK = 0xe001;
 const DIRECTLINK_PIDS = new Set([
@@ -2769,6 +2786,7 @@ const els = {
     settingDelay: document.getElementById('settingDelay'),
     settingLanguage: document.getElementById('settingLanguage'),
     settingConvertPythonFiles: document.getElementById('settingConvertPythonFiles'),
+    settingConvertPythonFilesField: document.getElementById('settingConvertPythonFilesField'),
     transferModal: document.getElementById('transferModal'),
     transferTableBody: document.getElementById('transferTableBody'),
     transferOverwriteAll: document.getElementById('transferOverwriteAll'),
@@ -3112,8 +3130,6 @@ function applySettingsToModule() {
     const settings = state.settings;
     module._set_cable_timeout(settings.cableTimeout);
     module._set_cable_delay(settings.cableDelay);
-    module._set_convert_python_files(settings.convertPythonFiles ? 1 : 0);
-
     if (settings.cableModel === 'auto') {
         module._set_force_cable(0);
     } else {
@@ -3195,6 +3211,56 @@ function getActiveCalcModelString() {
         return value || null;
     } catch (err) {
         return null;
+    }
+}
+
+function getActiveCalcModelId() {
+    if (!state.module) {
+        return 0;
+    }
+    try {
+        return Number(state.module.ccall('get_calc_model_id', 'number', [], [])) || 0;
+    } catch (err) {
+        return 0;
+    }
+}
+
+function getPythonConversionKind(model) {
+    const modelId = Number(model);
+    if (CE_PYTHON_CALC_MODELS.has(modelId)) {
+        return PYTHON_CONVERSION_CE;
+    }
+    if (EVO_PYTHON_CALC_MODELS.has(modelId)) {
+        return PYTHON_CONVERSION_EVO;
+    }
+    if (NSPIRE_CXII_PYTHON_CALC_MODELS.has(modelId)) {
+        return PYTHON_CONVERSION_NSPIRE_CXII;
+    }
+    return PYTHON_CONVERSION_NONE;
+}
+
+function getSelectedPythonConversionKind() {
+    const selectedModel = els.settingCalcModel?.value ?? state.settings?.calcModel ?? 'auto';
+    const modelId = selectedModel === 'auto' ? getActiveCalcModelId() : Number(selectedModel);
+    return getPythonConversionKind(modelId);
+}
+
+function updatePythonConversionSettingAvailability() {
+    if (!els.settingConvertPythonFiles) {
+        return;
+    }
+    const conversionKind = getSelectedPythonConversionKind();
+    const supported = conversionKind !== PYTHON_CONVERSION_NONE;
+    els.settingConvertPythonFiles.disabled = !supported;
+    setTextContent(
+        document.getElementById('settingConvertPythonFilesLabel'),
+        t(conversionKind === PYTHON_CONVERSION_NSPIRE_CXII ? 'convert_python_files_nspire' : 'convert_python_files')
+    );
+    if (els.settingConvertPythonFilesField) {
+        els.settingConvertPythonFilesField.classList.toggle('disabled', !supported);
+        els.settingConvertPythonFilesField.title = supported
+            ? ''
+            : 'Python source conversion is available only for CE, Evo, and TI-Nspire CX II models.';
     }
 }
 
@@ -3497,6 +3563,7 @@ async function applyTranslations() {
     }
     updateThemeButton();
     updateCalcHint(els.settingCableModel?.value || state.settings?.cableModel || 'auto');
+    updatePythonConversionSettingAvailability();
 }
 
 function seedSettingsForm() {
@@ -3512,6 +3579,7 @@ function seedSettingsForm() {
         els.settingConvertPythonFiles.checked = state.settings.convertPythonFiles !== false;
     }
     updateCalcHint(els.settingCableModel.value);
+    updatePythonConversionSettingAvailability();
 }
 
 function openSettingsModal() {
@@ -5986,25 +6054,151 @@ function isCEBundleOSFile(item) {
     return /\.8[ep]u$/i.test(item.file.name);
 }
 
+let tivarsLibPromise = null;
+let webLunaPromise = null;
+
+function loadPythonConverterModule(fileName, factoryName) {
+    const moduleUrl = new URL(fileName, document.baseURI).href;
+    return import(moduleUrl).then(imported => {
+        const factory = imported.default;
+        if (typeof factory !== 'function') {
+            throw new Error(`${factoryName} factory is unavailable`);
+        }
+        return factory();
+    });
+}
+
+function getTivarsLib() {
+    if (!tivarsLibPromise) {
+        tivarsLibPromise = loadPythonConverterModule('TIVarsLib.js', 'TIVarsLib');
+    }
+    return tivarsLibPromise;
+}
+
+function getWebLuna() {
+    if (!webLunaPromise) {
+        webLunaPromise = loadPythonConverterModule('WebLuna.js', 'WebLuna');
+    }
+    return webLunaPromise;
+}
+
+function sanitizePythonVarName(fileName) {
+    const base = String(fileName || '').replace(/\.[^.]*$/, '');
+    let name = base.toUpperCase().replace(/[^A-Z0-9_]/g, '');
+    if (!/^[A-Z]/.test(name)) {
+        name = `P${name}`;
+    }
+    name = name.slice(0, 8);
+    return /^[A-Z][A-Z0-9_]{0,7}$/.test(name) ? name : 'PYTHON';
+}
+
+async function convertTivarsPythonSource(file, data, module, modelId, conversionKind) {
+    const tivars = await getTivarsLib();
+    const varName = sanitizePythonVarName(file.name);
+    const modelName = conversionKind === PYTHON_CONVERSION_EVO
+        ? EVO_PYTHON_CALC_MODELS.get(modelId)
+        : CE_PYTHON_CALC_MODELS.get(modelId);
+    if (!modelName) {
+        return '';
+    }
+
+    const source = new TextDecoder('utf-8').decode(data);
+    const variable = tivars.TIVarFile.createNew('PythonAppVar', varName, modelName);
+    let converterPath = '';
+    try {
+        if (conversionKind === PYTHON_CONVERSION_EVO) {
+            variable.setContentFromString(source);
+        } else {
+            variable.setContentFromString(JSON.stringify({
+                typeName: 'PythonAppVar',
+                filename: `${varName}.py`,
+                code: source
+            }));
+        }
+        converterPath = variable.saveVarToFile('.', varName);
+        const converted = tivars.FS.readFile(converterPath, { encoding: 'binary' });
+        const extension = conversionKind === PYTHON_CONVERSION_EVO ? '8xpy2' : '8xv';
+        const outputPath = `/uploads/${varName}.${extension}`;
+        module.FS.writeFile(outputPath, converted);
+        return outputPath;
+    } finally {
+        if (converterPath) {
+            try {
+                tivars.FS.unlink(converterPath);
+            } catch {
+                // ignore
+            }
+        }
+        if (typeof variable.delete === 'function') {
+            variable.delete();
+        }
+    }
+}
+
+async function convertNspirePythonSource(file, data, module) {
+    const luna = await getWebLuna();
+    const inputName = String(file.name || 'python.py').replace(/[\\/]/g, '_');
+    const outputName = inputName.replace(/\.[^.]*$/, '') + '.tns';
+    const inputPath = `/${inputName}`;
+    const converterPath = `/${outputName}`;
+    try {
+        luna.FS.writeFile(inputPath, data, { encoding: 'binary' });
+        try {
+            luna.FS.unlink(converterPath);
+        } catch {
+            // ignore
+        }
+        const result = luna.callMain([inputPath, converterPath]);
+        if (result !== 0) {
+            throw new Error(`Luna exited with status ${result}`);
+        }
+        const converted = luna.FS.readFile(converterPath, { encoding: 'binary' });
+        const outputPath = `/uploads/${outputName}`;
+        module.FS.writeFile(outputPath, converted);
+        return outputPath;
+    } finally {
+        for (const path of [inputPath, converterPath]) {
+            try {
+                luna.FS.unlink(path);
+            } catch {
+                // ignore
+            }
+        }
+    }
+}
+
+async function convertPythonSourceForCalc(file, data, module, modelId, conversionKind) {
+    if (conversionKind === PYTHON_CONVERSION_CE || conversionKind === PYTHON_CONVERSION_EVO) {
+        return convertTivarsPythonSource(file, data, module, modelId, conversionKind);
+    }
+    if (conversionKind === PYTHON_CONVERSION_NSPIRE_CXII) {
+        return convertNspirePythonSource(file, data, module);
+    }
+    return '';
+}
+
 async function buildTransferPlan(files, module) {
     if (!module.FS.analyzePath('/uploads').exists) {
         module.FS.mkdir('/uploads');
     }
 
     const uploadPaths = [];
+    const activeModelId = getActiveCalcModelId();
+    const pythonConversionKind = getPythonConversionKind(activeModelId);
     for (const file of files) {
         const data = new Uint8Array(await file.arrayBuffer());
         const path = `/uploads/${file.name}`;
         module.FS.writeFile(path, data);
-        if (state.settings?.convertPythonFiles !== false && /\.py$/i.test(file.name)) {
+        if (state.settings?.convertPythonFiles !== false
+            && pythonConversionKind !== PYTHON_CONVERSION_NONE
+            && /\.py$/i.test(file.name)) {
             try {
-                const convertedPath = await ccallAsync(
+                const convertedPath = await convertPythonSourceForCalc(
+                    file,
+                    data,
                     module,
-                    'convert_python_source_for_calc',
-                    'string',
-                    ['string', 'string'],
-                    [path, '/uploads'],
-                    { timeoutMs: 12000 }
+                    activeModelId,
+                    pythonConversionKind
                 );
                 if (convertedPath && convertedPath !== path) {
                     try {
@@ -7476,13 +7670,84 @@ function downloadCanvas() {
     setButtonLoading(els.btnDownloadScreenshot, false);
 }
 
+async function convertReceivedPythonFile(filename, data) {
+    if (state.settings?.convertPythonFiles === false) {
+        return null;
+    }
+    const conversionKind = getPythonConversionKind(getActiveCalcModelId());
+    const isCeCandidate = conversionKind === PYTHON_CONVERSION_CE && /\.8xv$/i.test(filename);
+    const isEvoCandidate = conversionKind === PYTHON_CONVERSION_EVO && /\.8xpy2$/i.test(filename);
+    if (!isCeCandidate && !isEvoCandidate) {
+        return null;
+    }
+
+    const safeInputName = String(filename || 'python-var').replace(/[\\/]/g, '_');
+    const converterPath = `/${safeInputName}`;
+    let tivars = null;
+    let variable = null;
+    let options = null;
+    try {
+        tivars = await getTivarsLib();
+        tivars.FS.writeFile(converterPath, data, { encoding: 'binary' });
+        variable = tivars.TIVarFile.loadFromFile(converterPath);
+        options = new tivars.options_t();
+        options.set('metadata', 1);
+        const metadata = JSON.parse(variable.getReadableContent(options));
+
+        let source = '';
+        let sourceName = '';
+        if (isCeCandidate && metadata.typeName === 'PythonAppVar' && typeof metadata.code === 'string') {
+            source = metadata.code;
+            sourceName = metadata.filename || safeInputName.replace(/\.[^.]*$/, '');
+        } else if (isEvoCandidate
+            && metadata.typeName === 'PythonScript'
+            && metadata.python?.compiledModule === false
+            && typeof metadata.python.code === 'string') {
+            source = metadata.python.code;
+            sourceName = metadata.python.name || safeInputName.replace(/\.[^.]*$/, '');
+        } else {
+            return null;
+        }
+
+        sourceName = String(sourceName).replace(/[\\/]/g, '_');
+        if (!/\.py$/i.test(sourceName)) {
+            sourceName += '.py';
+        }
+        return {
+            filename: sourceName,
+            data: new TextEncoder().encode(source)
+        };
+    } catch {
+        return null;
+    } finally {
+        if (options && typeof options.delete === 'function') {
+            options.delete();
+        }
+        if (variable && typeof variable.delete === 'function') {
+            variable.delete();
+        }
+        if (tivars) {
+            try {
+                tivars.FS.unlink(converterPath);
+            } catch {
+                // ignore
+            }
+        }
+    }
+}
+
 async function downloadLastReceived(module, fallbackName) {
     let filename = fallbackName || 'download.bin';
     try {
         const lastPath = module.FS.readFile('/last_recv_path.txt', { encoding: 'utf8' }).trim();
         if (lastPath) {
             filename = lastPath.split('/').pop();
-            const data = module.FS.readFile(lastPath);
+            let data = module.FS.readFile(lastPath);
+            const converted = await convertReceivedPythonFile(filename, data);
+            if (converted) {
+                filename = converted.filename;
+                data = converted.data;
+            }
             triggerDownload(filename, data);
             module.FS.unlink(lastPath);
             return;
@@ -7625,7 +7890,9 @@ function bindEvents() {
         } else {
             els.settingCalcModel.value = options.find(option => option.value !== 'auto')?.value ?? 'auto';
         }
+        updatePythonConversionSettingAvailability();
     });
+    els.settingCalcModel.addEventListener('change', updatePythonConversionSettingAvailability);
     els.settingsModal.addEventListener('click', event => {
         if (event.target === els.settingsModal) {
             closeSettingsModal();
