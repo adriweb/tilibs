@@ -54,6 +54,7 @@
   "cable_delay": "ケーブル遅延 (µs)",
   "language": "言語",
   "convert_python_files": "Python ファイルを変換 (.py <-> 電卓形式)",
+  "convert_python_files_nspire": "Python ファイルを変換 (.py -> .tns)",
   "settings_note": "設定変更により現在のハンドルがリセットされます。完全適用には再接続してください。",
   "offline_ready": "このアプリはネットワークなしでも実行できます。",
   "offline_update_available": "更新があります。最新バージョンを使うには再読み込みしてください。",
