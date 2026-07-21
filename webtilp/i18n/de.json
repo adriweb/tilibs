@@ -54,6 +54,7 @@
   "cable_delay": "Kabel-Verzögerung (µs)",
   "language": "Sprache",
   "convert_python_files": "Python-Dateien konvertieren (.py <-> Rechnerformat)",
+  "convert_python_files_nspire": "Python-Dateien konvertieren (.py -> .tns)",
   "settings_note": "Einstellungsänderungen setzen die aktuelle Verbindung zurück. Danach neu verbinden.",
   "offline_ready": "Diese App kann jetzt ohne Netzwerkverbindung genutzt werden.",
   "offline_update_available": "Ein Update ist verfügbar. Neu laden, um die neueste Version zu nutzen.",
