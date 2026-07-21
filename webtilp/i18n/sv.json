@@ -28,7 +28,7 @@
   "send_key": "Skicka tangent",
   "calculator_variables": "Kalkylatorvariabler",
   "preview": "Förhandsvisning",
-  "prettify_reindent": "Förbättra formatering och indrag",
+  "reindent": "Indentera om",
   "download": "Ladda ner",
   "filter_name_or_type": "Filtrera namn eller typ",
   "refresh_list": "Uppdatera lista",
