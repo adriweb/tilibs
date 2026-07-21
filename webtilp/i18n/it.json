@@ -54,6 +54,7 @@
   "cable_delay": "Ritardo cavo (µs)",
   "language": "Lingua",
   "convert_python_files": "Converti file Python (.py <-> formato calcolatrice)",
+  "convert_python_files_nspire": "Converti file Python (.py -> .tns)",
   "settings_note": "La modifica delle impostazioni reimposta la connessione corrente. Riconnettiti per applicare le modifiche.",
   "offline_ready": "Questa app può ora funzionare senza connessione di rete.",
   "offline_update_available": "È disponibile un aggiornamento. Ricarica per usare l'ultima versione.",
