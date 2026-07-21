@@ -392,13 +392,20 @@
             </div>
             <div class="modal-footer modal-footer-split">
                 <div class="preview-controls hidden" id="previewControls">
-                    <label class="preview-option" for="previewPrettify">
-                        <input type="checkbox" id="previewPrettify">
-                        <span id="previewPrettifyLabel">Prettify and Reindent</span>
+                    <label class="preview-option" for="previewReindent">
+                        <input type="checkbox" id="previewReindent">
+                        <span id="previewReindentLabel">Reindent</span>
                     </label>
                 </div>
                 <div class="modal-footer-actions">
                     <button class="btn ghost" id="btnDownloadPreview" type="button">⬇️ Download</button>
+                    <div class="preview-download-split hidden" id="previewBasicDownloads" role="group" aria-label="Download">
+                        <span class="preview-download-label" id="previewDownloadLabel">Download:</span>
+                        <div class="preview-download-choices">
+                            <button class="btn ghost" id="btnDownloadPreviewEvo" type="button">.8xp2 (Evo)</button>
+                            <button class="btn ghost" id="btnDownloadPreviewLegacy" type="button">.8xp (CE / legacy)</button>
+                        </div>
+                    </div>
                     <button class="btn primary" id="btnDismissPreview" type="button">Close</button>
                 </div>
             </div>
