@@ -1073,6 +1073,40 @@ a {
     display: none;
 }
 
+.preview-download-split {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.preview-download-split.hidden {
+    display: none;
+}
+
+.preview-download-label {
+    color: var(--muted);
+    font-size: 12px;
+    font-weight: 700;
+}
+
+.preview-download-choices {
+    display: inline-flex;
+}
+
+.preview-download-choices .btn {
+    border-radius: 0;
+    padding-inline: 10px;
+}
+
+.preview-download-choices .btn:first-child {
+    border-radius: 8px 0 0 8px;
+}
+
+.preview-download-choices .btn:last-child {
+    margin-left: -1px;
+    border-radius: 0 8px 8px 0;
+}
+
 .preview-option {
     display: inline-flex;
     align-items: center;
