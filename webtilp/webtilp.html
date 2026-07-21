@@ -377,6 +377,34 @@
         </div>
     </div>
 
+    <div class="modal hidden" id="previewModal" aria-hidden="true">
+        <div class="modal-card modal-wide" role="dialog" aria-modal="true" aria-labelledby="previewTitle">
+            <div class="modal-header">
+                <div>
+                    <h3 id="previewTitle">Preview</h3>
+                    <div class="preview-meta" id="previewMeta"></div>
+                </div>
+                <button class="btn ghost" id="btnClosePreview" type="button" aria-label="Close">✖️</button>
+            </div>
+            <div class="modal-body preview-body">
+                <img class="preview-image hidden" id="previewImage" alt="">
+                <pre class="preview-content" id="previewContent"></pre>
+            </div>
+            <div class="modal-footer modal-footer-split">
+                <div class="preview-controls hidden" id="previewControls">
+                    <label class="preview-option" for="previewPrettify">
+                        <input type="checkbox" id="previewPrettify">
+                        <span id="previewPrettifyLabel">Prettify and Reindent</span>
+                    </label>
+                </div>
+                <div class="modal-footer-actions">
+                    <button class="btn ghost" id="btnDownloadPreview" type="button">⬇️ Download</button>
+                    <button class="btn primary" id="btnDismissPreview" type="button">Close</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <footer class="footer">
         <span>WebTILP made by <a href="https://github.com/adriweb/tilibs/tree/exp2-full-emscripten" target="_blank">Adriweb</a>
             <abbr title="Initial build infrastructure and lib intertwining done manually, but Frontend (HTML/JS/CSS) and Middleware glue (webtilp.cpp) all created by Codex (90%) and Claude (10%)">with LLMs</abbr>.</span>
