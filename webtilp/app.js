@@ -4936,24 +4936,24 @@ function updateScreenshotCanvasScale() {
     if (!canvas || !canvas.width || !canvas.height) {
         return;
     }
+    canvas.style.aspectRatio = `${canvas.width} / ${canvas.height}`;
     const parent = canvas.parentElement;
     if (!parent) {
         return;
     }
     const styles = getComputedStyle(canvas);
-    const padX = (parseFloat(styles.paddingLeft) || 0) + (parseFloat(styles.paddingRight) || 0);
     let maxWidth = parent.clientWidth;
     const cssMaxWidth = parseFloat(styles.maxWidth);
     if (Number.isFinite(cssMaxWidth) && cssMaxWidth > 0) {
         maxWidth = Math.min(maxWidth, cssMaxWidth);
     }
-    maxWidth -= padX;
     if (maxWidth <= 0) {
         return;
     }
-    const scale = Math.max(1, Math.floor(maxWidth / canvas.width));
-    canvas.style.width = `${canvas.width * scale}px`;
-    canvas.style.height = `${canvas.height * scale}px`;
+    const integerScale = Math.floor(maxWidth / canvas.width);
+    const displayWidth = integerScale >= 1 ? canvas.width * integerScale : maxWidth;
+    canvas.style.width = `${displayWidth}px`;
+    canvas.style.height = 'auto';
 }
 
 function updateClockInfoRow(clockInfo, settings, fallbackDate) {
@@ -5000,11 +5000,13 @@ function clearDeviceData() {
     state.deviceInfoEntries = [];
     els.memoryInfo.textContent = '—';
     els.memoryInfo.title = '';
-    const ctx = els.screenshotCanvas.getContext('2d');
-    els.screenshotCanvas.width = 320;
-    els.screenshotCanvas.height = 240;
-    els.screenshotCanvas.classList.remove('filled');
-    ctx.clearRect(0, 0, els.screenshotCanvas.width, els.screenshotCanvas.height);
+    const canvas = els.screenshotCanvas;
+    canvas.width = 0;
+    canvas.height = 0;
+    canvas.style.removeProperty('width');
+    canvas.style.removeProperty('height');
+    canvas.style.removeProperty('aspect-ratio');
+    canvas.classList.remove('filled');
 }
 
 function updateMemoryFromDeviceInfo(entries) {
