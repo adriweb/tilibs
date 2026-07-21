@@ -54,6 +54,7 @@
   "cable_delay": "Atraso do cabo (µs)",
   "language": "Idioma",
   "convert_python_files": "Converter ficheiros Python (.py <-> formato da calculadora)",
+  "convert_python_files_nspire": "Converter ficheiros Python (.py -> .tns)",
   "settings_note": "Alterar configurações reinicia a ligação atual. Volte a ligar para aplicar totalmente.",
   "offline_ready": "Esta aplicação pode agora funcionar sem ligação à rede.",
   "offline_update_available": "Está disponível uma atualização. Recarregue para usar a versão mais recente.",
