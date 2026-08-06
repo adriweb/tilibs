@@ -1,0 +1,23 @@
+{
+  "name": "webdfu",
+  "version": "1.0.5",
+  "description": "Utility classes to interract with DFU-enabled devices using WebUSB.",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/M4xi1m3/webdfu.git"
+  },
+  "keywords": [
+    "webusb",
+    "dfu"
+  ],
+  "author": "M4x1m3",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/M4xi1m3/webdfu/issues"
+  },
+  "homepage": "https://github.com/M4xi1m3/webdfu#readme"
+}
