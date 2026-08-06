@@ -7,6 +7,7 @@ EMCC = em++
 ROOT_DIR = ..
 LIBTICABLES_DIR = $(ROOT_DIR)/libticables/trunk
 LIBTICALCS_DIR  = $(ROOT_DIR)/libticalcs/trunk
+LIBHPCALCS_DIR  = $(ROOT_DIR)/hplp/libhpcalcs
 LIBTIFILES_DIR  = $(ROOT_DIR)/libtifiles/trunk
 LIBTICONV_DIR   = $(ROOT_DIR)/libticonv/trunk
 LIBUSB_DIR      = $(ROOT_DIR)/libusb
@@ -20,6 +21,7 @@ LUNA_DIR       ?= $(ROOT_DIR)/../Luna/emscripten
 INCLUDES = \
 	-I$(LIBTICABLES_DIR)/src \
 	-I$(LIBTICALCS_DIR)/src \
+	-I$(LIBHPCALCS_DIR)/src \
 	-I$(LIBTIFILES_DIR)/src \
 	-I$(LIBTICONV_DIR)/src \
 	-I$(LIBUSB_DIR)/libusb \
@@ -30,6 +32,7 @@ INCLUDES = \
 # Libraries
 LIBS = \
 	$(BUILD_DIR)/libticalcs/trunk/libticalcs2.a \
+	$(BUILD_DIR)/hplp/libhpcalcs/libhpcalcs.a \
 	$(BUILD_DIR)/libtifiles/trunk/libtifiles2.a \
 	$(BUILD_DIR)/libticables/trunk/libticables2.a \
 	$(BUILD_DIR)/libticonv/trunk/libticonv.a \
@@ -61,7 +64,7 @@ EMCCFLAGS = \
 
 # Targets
 TARGET = webtilp.js
-SRC = webtilp.cpp
+SRC = webtilp.cpp hp_prime_bridge.cpp hp_prime_app.cpp
 PREJS = webtilp_prejs.js
 PREJS_DEV = webtilp_prejs_dev.js
 PREJS_PROD = webtilp_prejs_prod.js
@@ -104,6 +107,14 @@ $(PREJS):
 
 stamp:
 	@BUILD_SHA="$(BUILD_SHA)" BUILD_DATE="$(BUILD_DATE)" python3 -c "import hashlib, json, os, pathlib; root=pathlib.Path('.'); files=['app.css','build-profile.css','app.bundle.js','app.js','highlighter.min.js','webtilp.html','webtilp.js','webtilp.wasm','webtilp_prejs.js','TIVarsLib.js','TIVarsLib.wasm','WebLuna.js','WebLuna.wasm','site.webmanifest','sw.js.in']; files += [str(p.relative_to(root)) for p in sorted((root/'i18n').glob('*.json'))] if (root/'i18n').exists() else []; h=hashlib.sha256(); [h.update((root/f).read_bytes()) for f in files if (root/f).exists()]; content_hash=h.hexdigest()[:12]; build_sha=os.environ.get('BUILD_SHA','unknown'); build_date=os.environ.get('BUILD_DATE','unknown'); build_id=f'{build_sha}-{content_hash}'; version={'buildId':build_id,'gitSha':build_sha,'buildDate':build_date,'contentHash':content_hash}; (root/'version.json').write_text(json.dumps(version, indent=2)+'\\n', encoding='utf-8'); sw_in=root/'sw.js.in'; sw_out=root/'sw.js'; sw_out.write_text(sw_in.read_text(encoding='utf-8').replace('__BUILD_ID__', build_id), encoding='utf-8') if sw_in.exists() else None"
+
+test:
+	$(CXX) -std=c++17 -Wall -Wextra -Werror hp_prime_app.cpp tests/test_hp_prime_app.cpp -o tests/test_hp_prime_app
+	./tests/test_hp_prime_app
+	rm -f tests/test_hp_prime_app
+	node --check $(APP_JS_SRC)
+	node tests/test_hp_prime_frontend.js
+	python3 i18n/check.py
 
 $(TARGET): $(SRC) $(LIBS) $(PREJS)
 	$(EMCC) $(CXXFLAGS) $(SRC) $(INCLUDES) $(LIBS) -o $(TARGET) $(EMCCFLAGS)

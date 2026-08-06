@@ -7,6 +7,14 @@ const SERIAL_KIND_GRAYLINK = 2;
 const CABLE_GRAYLINK = '1';
 const CABLE_SILVERLINK = '4';
 const CABLE_DIRECTLINK = '5';
+const DEVICE_FAMILY_TI = 'ti';
+const DEVICE_FAMILY_HP_PRIME = 'hp-prime';
+const HP_VENDOR_ID = 0x03F0;
+const HP_PRIME_PRODUCT_IDS = new Set([0x0441, 0x1541, 0x2441]);
+const HP_PRIME_UPLOAD_EXTENSIONS = new Set([
+    'hpapp', 'hplist', 'hpmat', 'hpmatrix', 'hpnote', 'hpprgm',
+    'hpappnote', 'hpappprgm', 'hpcomplex', 'hpreal'
+]);
 
 // Known TI USB devices
 const TI_USB_DEVICES = [
@@ -26,6 +34,148 @@ const TI_USB_DEVICES = [
  // { productId: 0xE020, name: "Python Adapter" },                          // not for us
     { productId: 0xE022, name: "TI-Nspire CX II Hand-Held" },
 ];
+const TI_USB_PRODUCT_IDS = new Set(TI_USB_DEVICES.map(device => device.productId));
+
+function getWebUsbDeviceFamily(device) {
+    if (isHPPrimeDevice(device)) {
+        return DEVICE_FAMILY_HP_PRIME;
+    }
+    if (device?.vendorId === TI_VENDOR_ID && TI_USB_PRODUCT_IDS.has(device.productId)) {
+        return DEVICE_FAMILY_TI;
+    }
+    return null;
+}
+
+function getSupportedWebUsbFilters() {
+    return [
+        ...TI_USB_DEVICES.map(device => ({
+            vendorId: TI_VENDOR_ID,
+            productId: device.productId
+        })),
+        ...[...HP_PRIME_PRODUCT_IDS].map(productId => ({
+            vendorId: HP_VENDOR_ID,
+            productId
+        }))
+    ];
+}
+
+async function requestSupportedWebUsbDevice() {
+    if (!navigator.usb) {
+        throw new Error(t('transport_unavailable_error'));
+    }
+    try {
+        return await navigator.usb.requestDevice({
+            filters: getSupportedWebUsbFilters()
+        });
+    } catch (error) {
+        if (error?.name === 'NotFoundError') {
+            console.warn('No supported WebUSB calculator was selected');
+            return null;
+        }
+        console.error('WebUSB device selection failed:', error);
+        throw error;
+    }
+}
+
+async function getAuthorizedSupportedWebUsbDevices() {
+    if (!navigator.usb) {
+        return [];
+    }
+    try {
+        return (await navigator.usb.getDevices()).filter(device =>
+            getWebUsbDeviceFamily(device) !== null
+        );
+    } catch (error) {
+        console.error('Failed to get authorized WebUSB calculators:', error);
+        return [];
+    }
+}
+
+function isHPPrimeDevice(device) {
+    return device
+        && device.vendorId === HP_VENDOR_ID
+        && HP_PRIME_PRODUCT_IDS.has(device.productId);
+}
+
+async function requestHPPrimeDevice(discoveryUsbDevice = null) {
+    if (!navigator.hid) {
+        throw new Error(t('webhid_unsupported_error'));
+    }
+    if (!self.isSecureContext) {
+        throw new Error(t('webhid_secure_context_error'));
+    }
+    if (discoveryUsbDevice && !isHPPrimeDevice(discoveryUsbDevice)) {
+        throw new Error('The selected WebUSB device is not a supported HP Prime.');
+    }
+    try {
+        const productIds = discoveryUsbDevice
+            ? [discoveryUsbDevice.productId]
+            : [...HP_PRIME_PRODUCT_IDS];
+        const devices = await navigator.hid.requestDevice({
+            filters: productIds.map(productId => ({
+                vendorId: HP_VENDOR_ID,
+                productId
+            }))
+        });
+        const device = devices.find(candidate => isHPPrimeDevice(candidate)
+            && (!discoveryUsbDevice || candidate.productId === discoveryUsbDevice.productId)) || null;
+        if (!device) {
+            console.warn('No HP Prime device was selected');
+        }
+        return device;
+    } catch (error) {
+        if (error && error.name === 'NotFoundError') {
+            console.warn('No HP Prime device was selected');
+            return null;
+        }
+        console.error('WebHID device selection failed:', error);
+        throw error;
+    }
+}
+
+async function getAuthorizedHPPrimeDevices(discoveryUsbDevice = null) {
+    if (!navigator.hid) {
+        return [];
+    }
+    try {
+        const devices = await navigator.hid.getDevices();
+        return devices.filter(device => isHPPrimeDevice(device)
+            && (!discoveryUsbDevice || device.productId === discoveryUsbDevice.productId));
+    } catch (error) {
+        console.error('Failed to get authorized HP Prime devices:', error);
+        return [];
+    }
+}
+
+async function bindHPPrimeDeviceToModule(module, device) {
+    if (!module || !isHPPrimeDevice(device)) {
+        return;
+    }
+    const state = module.__hplpWebHID || {};
+    const previousDevice = state.device;
+    state.queue = [];
+    state.error = new Error('HP Prime WebHID device is being rebound');
+    const waiters = Array.isArray(state.waiters)
+        ? state.waiters.splice(0, state.waiters.length)
+        : [];
+    state.waiters = Array.isArray(state.waiters) ? state.waiters : [];
+    for (const waiter of waiters) {
+        waiter();
+    }
+    if (previousDevice && previousDevice !== device && state.inputHandler) {
+        previousDevice.removeEventListener('inputreport', state.inputHandler);
+    }
+    if (previousDevice && previousDevice !== device && previousDevice.opened) {
+        try {
+            await previousDevice.close();
+        } catch (error) {
+            console.warn('[WebTILP] Failed to close the previous HP Prime WebHID device.', error);
+        }
+    }
+    state.device = device;
+    state.reportSize = 0;
+    module.__hplpWebHID = state;
+}
 
 /**
  * Request access to a TI calculator via WebUSB.
@@ -244,6 +394,7 @@ function bindEvoSerialPortToModule(module, device) {
 const state = {
     module: null,
     handle: 0,
+    activeFamily: DEVICE_FAMILY_TI,
     connected: false,
     cableOpen: false,
     authorizedDevice: null,
@@ -252,6 +403,10 @@ const state = {
     deviceInfoEntries: [],
     features: 0,
     dirlist: [],
+    hpFileSnapshotLoaded: false,
+    hpFileRefreshGeneration: 0,
+    hpFileRenderGeneration: 0,
+    hpPrimeProtocolVersion: null,
     selectedFiles: [],
     logLines: [],
     sort: { key: 'name', dir: 'asc', userDefined: false },
@@ -339,9 +494,95 @@ const LANGUAGE_OPTIONS = [
 const I18N_EN = {
     "brand_subtitle": "Universal linking, right from your browser!",
     "settings": "Settings",
+    "calculator_family": "Calculator family",
+    "calculator_family_auto": "Auto-detect (TI or NumWorks)",
+    "calculator_family_auto_hint": "TI and NumWorks are detected from one WebUSB chooser. HP Prime uses WebHID and can be selected here when needed.",
+    "hp_prime_family_hint": "HP Prime uses WebHID for info, screenshots, backups, and file transfers.",
+    "hp_prime_welcome_text": "Plug in your HP Prime, then click \"Connect Calculator\" and authorize it through WebHID.",
+    "webhid_unavailable_title": "WebHID is not available in this browser.",
+    "hp_prime_webhid_unavailable_text": "HP Prime access requires WebHID in a secure context; use a recent Chromium-based browser.",
+    "webhid_unsupported_error": "WebHID is not supported in this browser. Please use a recent Chromium-based browser.",
+    "webhid_secure_context_error": "WebHID requires HTTPS or localhost.",
+    "transport_secure_context_error": "WebUSB, WebSerial, and WebHID require HTTPS or localhost.",
+    "transport_unavailable_error": "WebUSB, WebSerial, and WebHID are not available in this browser.",
+    "hp_prime_webhid_only_mode": "WebHID-only mode supports HP Prime calculators.",
+    "hp_prime_backup_tooltip": "Download a read-only HP Prime backup ZIP",
+    "hp_prime_refresh_tooltip": "Refresh HP Prime files (retrieves a read-only calculator snapshot)",
+    "hp_prime_dropzone_title": "Drop HP Prime files to send",
+    "hp_prime_dropzone_subtitle": "Supported extensions include .hpprgm, .hpnote, .hpapp, .hplist, and .hpmat",
+    "hp_prime_files_title": "HP Prime Files",
+    "hp_prime_error_unknown": "unknown HP Prime error",
+    "hp_prime_error_code": "HP Prime error {code}",
+    "hp_prime_no_device_selected": "No HP Prime selected.",
+    "hp_prime_info_unavailable": "HP Prime device info is unavailable.",
+    "hp_prime_info_product_name": "Product name",
+    "hp_prime_info_firmware_version": "Firmware version",
+    "hp_prime_info_build": "Build",
+    "hp_prime_info_serial": "Serial",
+    "hp_prime_info_protocol": "Protocol",
+    "hp_prime_protocol_legacy": "Legacy",
+    "hp_prime_info_v2_capable": "V2 capable",
+    "yes": "Yes",
+    "no": "No",
+    "hp_prime_progress_connecting": "Connecting to HP Prime",
+    "hp_prime_connection_failed": "HP Prime connection failed: {error}",
+    "hp_prime_connected": "Connected to {model} through WebHID.",
+    "hp_prime_progress_reconnecting": "Reconnecting to HP Prime",
+    "hp_prime_auto_connected": "Auto-connected to authorized HP Prime.",
+    "hp_prime_auto_connect_failed": "HP Prime auto-connect failed",
+    "hp_prime_info_refreshed": "HP Prime device info refreshed.",
+    "hp_prime_progress_loading_files": "Loading HP Prime files",
+    "hp_prime_file_listing_failed": "HP Prime file listing failed: {error}.",
+    "hp_prime_snapshot_loaded": "HP Prime file snapshot loaded: {count} entries.",
+    "hp_prime_key_range": "HP Prime key codes must be between 0 and 50.",
+    "hp_prime_key_send_failed": "Failed to send HP Prime key ({error}).",
+    "hp_prime_key_sent": "Sent HP Prime key {key} (0x{hex}).",
+    "hp_prime_confirm_unchecked_overwrite": "The HP Prime file list has not been refreshed, so WebTILP cannot detect overwrites. Sending may replace an item with the same name and type. Continue?",
+    "hp_prime_upload_cancelled": "HP Prime upload cancelled before overwrite preflight.",
+    "hp_prime_unsupported_file": "Unsupported HP Prime filename or extension: {file}.",
+    "hp_prime_confirm_overwrite": "\u201c{file}\u201d will replace the existing HP Prime item \u201c{existing}\u201d. Continue?",
+    "hp_prime_overwrite_skipped": "Skipped {file}; overwrite was not confirmed.",
+    "hp_prime_progress_sending_file": "Sending {file} to HP Prime",
+    "hp_prime_file_sent": "Sent {file} to HP Prime.",
+    "hp_prime_file_send_failed": "Failed to send {file} to HP Prime: {error}.",
+    "hp_prime_progress_receiving_backup": "Receiving HP Prime backup",
+    "hp_prime_backup_failed": "HP Prime backup failed: {error}.",
+    "hp_prime_backup_received": "HP Prime read-only backup ZIP received; file snapshot synchronized ({count} entries).",
+    "hp_prime_missing_cache_index": "No cached HP Prime file index for {name}. Refresh the file list.",
+    "hp_prime_confirm_invalid_crc": "\u201c{name}\u201d failed CRC validation and may be corrupt. Download the cached data anyway?",
+    "hp_prime_invalid_crc_skipped": "Skipped {name}; CRC-invalid download was not confirmed.",
+    "hp_prime_cached_download_failed": "HP Prime cached file download failed: {error}",
+    "hp_prime_text_preview_invalid": "The HP Prime text file has an incomplete UTF-16LE code unit.",
+    "hp_prime_png_preview_invalid": "The HP Prime PNG file has an invalid signature.",
+    "hp_prime_file_received": "Received {file} from HP Prime.",
+    "hp_prime_file_download_failed_context": "Failed to receive {name} from HP Prime",
+    "hp_prime_download_failed": "HP Prime download failed",
+    "hp_prime_app_descriptor": "Application descriptor",
+    "hp_prime_app_note": "Application note data",
+    "hp_prime_app_program": "Application program data",
+    "hp_prime_app_resource": "Application resource",
+    "hp_prime_app_invalid_container": "Application contents could not be parsed; whole-app download remains available.",
+    "hp_prime_app_folder_hint": "Expand to browse; drop files onto this application to add or replace resources.",
+    "hp_prime_app_snapshot_required": "Wait for the HP Prime file snapshot to finish before modifying application contents.",
+    "hp_prime_app_core_read_only": "The application descriptor, note, and program parts are read-only here.",
+    "hp_prime_app_progress_updating": "Updating {app} application contents",
+    "hp_prime_app_rename_failed": "Failed to rename the application resource: {error}.",
+    "hp_prime_app_resource_renamed": "Renamed {old} to {name} inside {app}.",
+    "hp_prime_app_delete_failed": "Failed to delete the application resource: {error}.",
+    "hp_prime_app_resource_deleted": "Deleted {name} from {app}.",
+    "hp_prime_app_resource_too_large": "The application resource batch is too large.",
+    "hp_prime_app_resource_skipped": "Skipped duplicate or unnamed application resource {file}.",
+    "hp_prime_app_core_upload_rejected": "Skipped {file}; core application parts cannot be replaced here.",
+    "hp_prime_app_confirm_resource_overwrite": "{file} already exists inside {app}. Replace it?",
+    "hp_prime_app_upload_failed": "Failed to update {app}: {error}.",
+    "hp_prime_app_resources_sent": "Added or replaced {count} resource(s) inside {app}.",
+    "hp_prime_app_upload_failed_short": "HP Prime application resource upload failed",
+    "hp_prime_progress_receiving_screenshot": "Receiving HP Prime screenshot",
+    "hp_prime_screenshot_failed": "HP Prime screenshot failed: {error}.",
+    "hp_prime_screenshot_captured": "HP Prime screenshot captured ({width}x{height}).",
     "connect_calculator": "Connect Calculator",
     "welcome_title": "Welcome to WebTILP!",
-    "welcome_text": "Plug in your TI graphing calculator, then click \"Connect Calculator\" to get started.",
+    "welcome_text": "Plug in your calculator, then click \"Connect Calculator\"; WebTILP will detect its family automatically.",
     "webusb_unavailable_title": "WebUSB is not available in this browser.",
     "webusb_unavailable_text": "Please use a WebUSB-compatible browser like Chrome, Edge, or Brave.",
     "webserial_only_title": "WebUSB is not available; WebSerial support only.",
@@ -702,8 +943,12 @@ function hasEvoWebSerialTransport() {
     return Boolean(navigator.serial && self.isSecureContext);
 }
 
+function hasHPPrimeWebHidTransport() {
+    return Boolean(navigator.hid && self.isSecureContext);
+}
+
 function hasAnySupportedTransport() {
-    return hasWebUsbTransport() || hasEvoWebSerialTransport();
+    return hasWebUsbTransport() || hasEvoWebSerialTransport() || hasHPPrimeWebHidTransport();
 }
 
 function showToast(message, type = 'error') {
@@ -782,6 +1027,22 @@ function formatErrorResult(module, code) {
         }
     }
     return `error ${label}: ${cleaned}`;
+}
+
+function formatHPPrimeError(module, code) {
+    if (code === null || code === undefined || Number.isNaN(Number(code))) {
+        return t('hp_prime_error_unknown');
+    }
+    const numericCode = Number(code);
+    let message = '';
+    try {
+        message = module?.ccall('hp_prime_get_error_message', 'string',
+            ['number'], [numericCode]) || '';
+    } catch (err) {
+        console.warn('[WebTILP] Failed to resolve HP Prime error message', err);
+    }
+    return message ? `${message} (${numericCode})`
+        : tFormat('hp_prime_error_code', { code: numericCode });
 }
 
 function clearNativeWarnings() {
@@ -1228,6 +1489,9 @@ const TIVARS_LEGACY_BASIC_SYNTAX_TYPES = new Set([
     0x01, 0x02, 0x03, 0x05, 0x06, 0x0B, 0x0D
 ]);
 const TIVARS_EVO_BASIC_SYNTAX_TYPES = new Set([1, 2, 6, 7]);
+const HP_PRIME_TEXT_PREVIEW_EXTENSIONS = new Set([
+    'hpappnote', 'hpappprgm', 'hpprgm'
+]);
 const PYTHON_CONVERSION_NONE = 0;
 const PYTHON_CONVERSION_CE = 1;
 const PYTHON_CONVERSION_EVO = 2;
@@ -2653,6 +2917,22 @@ const KEYMAP_NSP = {
     "CTRL_ENTER": 0x00A600,
 };
 
+// HP Prime physical key IDs, independently cross-checked against the public
+// PrimeWeb map and the EC key example in debrouxl/hplp issue #6.
+const KEYMAP_HP_PRIME = {
+    "APPS": 0, "SYMB": 1, "UP": 2, "HELP": 3, "ESC": 4,
+    "HOME": 5, "PLOT": 6, "LEFT": 7, "RIGHT": 8, "VIEW": 9,
+    "CAS": 10, "NUM": 11, "DOWN": 12, "MENU": 13, "VARS": 14,
+    "TOOLBOX": 15, "SQRT": 16, "X": 17, "ABC": 18,
+    "BACKSPACE": 19, "POWER": 20, "SIN": 21, "COS": 22, "TAN": 23,
+    "LN": 24, "LOG": 25, "SQUARE": 26, "PLUS_MINUS": 27,
+    "PARENTHESES": 28, "COMMA": 29, "ENTER": 30, "EEX": 31,
+    "NUM_7": 32, "NUM_8": 33, "NUM_9": 34, "DIVIDE": 35, "ALPHA": 36,
+    "NUM_4": 37, "NUM_5": 38, "NUM_6": 39, "MULTIPLY": 40, "SHIFT": 41,
+    "NUM_1": 42, "NUM_2": 43, "NUM_3": 44, "MINUS": 45, "ON": 46,
+    "NUM_0": 47, "POINT": 48, "SPACE": 49, "PLUS": 50
+};
+
 const KEYMAP_8X_ENTRIES = Object.entries(KEYMAP_8X_);
 const KEYMAP_8X_BY_NAME = new Map();
 for (const [name, code] of KEYMAP_8X_ENTRIES) {
@@ -2683,11 +2963,18 @@ for (const [name, code] of KEYMAP_NSP_ENTRIES) {
     KEYMAP_NSP_BY_NAME.set(name.toLowerCase(), code);
 }
 
+const KEYMAP_HP_PRIME_ENTRIES = Object.entries(KEYMAP_HP_PRIME);
+const KEYMAP_HP_PRIME_BY_NAME = new Map();
+for (const [name, code] of KEYMAP_HP_PRIME_ENTRIES) {
+    KEYMAP_HP_PRIME_BY_NAME.set(name.toLowerCase(), code);
+}
+
 const KEYMAP_CONFIG_8X = { entries: KEYMAP_8X_ENTRIES, byName: KEYMAP_8X_BY_NAME, listId: 'keyMap834' };
 const KEYMAP_CONFIG_86 = { entries: KEYMAP_86_ENTRIES, byName: KEYMAP_86_BY_NAME, listId: 'keyMap86' };
 const KEYMAP_CONFIG_89 = { entries: KEYMAP_89_ENTRIES, byName: KEYMAP_89_BY_NAME, listId: 'keyMap89' };
 const KEYMAP_CONFIG_92P = { entries: KEYMAP_92P_ENTRIES, byName: KEYMAP_92P_BY_NAME, listId: 'keyMap92p' };
 const KEYMAP_CONFIG_NSP = { entries: KEYMAP_NSP_ENTRIES, byName: KEYMAP_NSP_BY_NAME, listId: 'nspireKeyMap' };
+const KEYMAP_CONFIG_HP_PRIME = { entries: KEYMAP_HP_PRIME_ENTRIES, byName: KEYMAP_HP_PRIME_BY_NAME, listId: 'hpPrimeKeyMap' };
 
 const KEYMAP_BY_MODEL = new Map([
     [1, KEYMAP_CONFIG_8X],
@@ -2726,7 +3013,7 @@ function populateKeyMapDataList(listId, entries) {
 }
 
 function clearKeyMapDataList() {
-    ['keyMap834', 'nspireKeyMap', 'keyMap86', 'keyMap89', 'keyMap92p'].forEach(id => {
+    ['keyMap834', 'nspireKeyMap', 'keyMap86', 'keyMap89', 'keyMap92p', 'hpPrimeKeyMap'].forEach(id => {
         const list = document.getElementById(id);
         if (list) {
             list.textContent = '';
@@ -2996,9 +3283,10 @@ function loadSettings() {
     }
     try {
         const parsed = JSON.parse(raw);
+        const { deviceFamily: _legacyDeviceFamily, ...persisted } = parsed;
         return {
             ...SETTINGS_DEFAULTS,
-            ...parsed,
+            ...persisted,
             cableModel: String(parsed.cableModel ?? SETTINGS_DEFAULTS.cableModel),
             calcModel: String(parsed.calcModel ?? SETTINGS_DEFAULTS.calcModel),
             cableTimeout: Number(parsed.cableTimeout ?? SETTINGS_DEFAULTS.cableTimeout),
@@ -3610,6 +3898,11 @@ async function applyTranslations() {
     updateThemeButton();
     updateCalcHint(els.settingCableModel?.value || state.settings?.cableModel || 'auto');
     updatePythonConversionSettingAvailability();
+    applyActiveFamilyUiState({
+        tiCapabilitiesKnown: state.connected
+            && state.activeFamily === DEVICE_FAMILY_TI
+            && Boolean(state.handle)
+    });
 }
 
 function seedSettingsForm() {
@@ -4016,10 +4309,13 @@ function setConnected(connected) {
 function updateTransportSplashState() {
     const webUsbReady = hasWebUsbTransport();
     const evoSerialReady = hasEvoWebSerialTransport();
-    const supported = webUsbReady || evoSerialReady;
+    const hpWebHidReady = hasHPPrimeWebHidTransport();
+    const supported = hasAnySupportedTransport();
+    const primaryReady = webUsbReady || evoSerialReady || hpWebHidReady;
+    setTextContent(document.getElementById('splashText'), t('welcome_text'));
     if (els.splashWebUsbWarning) {
-        els.splashWebUsbWarning.classList.toggle('hidden', webUsbReady);
-        if (!webUsbReady) {
+        els.splashWebUsbWarning.classList.toggle('hidden', primaryReady);
+        if (!primaryReady) {
             setTextContent(
                 document.getElementById('splashWebUsbWarningTitle'),
                 evoSerialReady ? t('webserial_only_title') : t('webusb_unavailable_title')
@@ -4037,7 +4333,7 @@ function updateTransportSplashState() {
         els.btnConnect.classList.toggle('hidden', !supported);
     }
     if (els.btnSettings) {
-        els.btnSettings.classList.toggle('hidden', !supported);
+        els.btnSettings.classList.toggle('hidden', !hasAnySupportedTransport());
     }
 }
 
@@ -4054,6 +4350,7 @@ function isLinuxPlatform() {
 function resetToSplashState() {
     clearActiveOperations();
     state.handle = 0;
+    state.activeFamily = DEVICE_FAMILY_TI;
     state.cableOpen = false;
     state.authorizedDevice = null;
     state.connectInProgress = false;
@@ -4061,10 +4358,11 @@ function resetToSplashState() {
     state.needsReauthorize = false;
     state.silentReconnectInProgress = false;
     clearDeviceData();
+    applyActiveFamilyUiState();
     setConnected(false);
     if (!self.isSecureContext) {
         setStatus('status_insecure_context', false);
-    } else if (hasWebUsbTransport()) {
+    } else if (hasWebUsbTransport() || hasHPPrimeWebHidTransport()) {
         setStatus('idle', false);
     } else if (hasEvoWebSerialTransport()) {
         setStatus('status_webserial_only', false);
@@ -4133,12 +4431,121 @@ function isNspireActive() {
     return typeof pid === 'number' && NSPIRE_PIDS.has(pid);
 }
 
+function isHPPrimeActive() {
+    return state.activeFamily === DEVICE_FAMILY_HP_PRIME;
+}
+
+function resetFamilySpecificUiText(clearActionTitles = true) {
+    setTextContent(document.getElementById('dropzoneTitle'), t('dropzone_title'));
+    setTextContent(document.getElementById('dropzoneSubtitle'), t('dropzone_subtitle'));
+    setTextContent(document.getElementById('panelVarsTitle'), t('calculator_variables'));
+    if (clearActionTitles) {
+        [els.btnIsReady, els.btnSyncClock, els.btnReceiveBackup,
+            els.btnRefreshDirlist, els.btnNewFolder, els.btnDeleteSelected,
+            els.btnScreenshot, els.btnReceiveOs, els.btnDownloadOsPartial,
+            els.btnDumpRom, els.btnLeaveExam].forEach(button => {
+            if (button) {
+                button.title = '';
+            }
+        });
+    }
+}
+
+function setTiUiState(capabilitiesKnown = false) {
+    resetFamilySpecificUiText(!capabilitiesKnown);
+    if (els.fileInput) {
+        els.fileInput.disabled = false;
+        els.fileInput.accept = '';
+    }
+    updateSendFilesButtonState();
+    if (capabilitiesKnown) {
+        // updateCapabilities() already resolved the key controls and the
+        // per-feature button states for this calculator. Leave them alone, so
+        // that a translation refresh cannot hide the keys panel or drop the
+        // keymap datalist of a connected calculator.
+        updateSelectionActionButtons();
+        return;
+    }
+    updateKeyControlsState(false);
+    if (els.keyCodeInput) {
+        els.keyCodeInput.removeAttribute('list');
+    }
+    clearKeyMapDataList();
+    [els.btnSyncClock, els.btnNewFolder, els.btnDeleteSelected,
+        els.btnReceiveBackup, els.btnRefreshDirlist, els.btnScreenshot].forEach(button => {
+        if (button) {
+            button.disabled = true;
+            button.classList.add('disabled');
+        }
+    });
+    [els.btnIsReady, els.btnReceiveOs, els.btnDownloadOsPartial,
+        els.btnDumpRom, els.btnLeaveExam].forEach(button => button?.classList.add('hidden'));
+}
+
+function setHPPrimeUiState() {
+    updateKeyControlsState(true);
+    if (els.keyCodeInput) {
+        els.keyCodeInput.removeAttribute('list');
+    }
+    clearKeyMapDataList();
+    populateKeyMapDataList(KEYMAP_CONFIG_HP_PRIME.listId,
+        KEYMAP_CONFIG_HP_PRIME.entries);
+    els.keyCodeInput?.setAttribute('list', KEYMAP_CONFIG_HP_PRIME.listId);
+    if (els.fileInput) {
+        els.fileInput.disabled = false;
+        els.fileInput.accept = '';
+    }
+    updateSendFilesButtonState();
+    [els.btnSyncClock, els.btnNewFolder, els.btnDeleteSelected].forEach(button => {
+        if (button) {
+            button.disabled = true;
+            button.classList.add('disabled');
+            button.title = '';
+        }
+    });
+    if (els.btnScreenshot) {
+        els.btnScreenshot.disabled = false;
+        els.btnScreenshot.classList.remove('disabled');
+        els.btnScreenshot.title = '';
+    }
+    els.btnIsReady?.classList.add('hidden');
+    els.btnReceiveOs?.classList.add('hidden');
+    els.btnDownloadOsPartial?.classList.add('hidden');
+    els.btnDumpRom?.classList.add('hidden');
+    els.btnLeaveExam?.classList.add('hidden');
+    if (els.btnReceiveBackup) {
+        els.btnReceiveBackup.disabled = false;
+        els.btnReceiveBackup.classList.remove('disabled');
+        els.btnReceiveBackup.title = t('hp_prime_backup_tooltip');
+    }
+    if (els.btnRefreshDirlist) {
+        els.btnRefreshDirlist.disabled = false;
+        els.btnRefreshDirlist.classList.remove('disabled');
+        els.btnRefreshDirlist.title = t('hp_prime_refresh_tooltip');
+    }
+    setTextContent(document.getElementById('dropzoneTitle'), t('hp_prime_dropzone_title'));
+    setTextContent(document.getElementById('dropzoneSubtitle'), t('hp_prime_dropzone_subtitle'));
+    setTextContent(document.getElementById('panelVarsTitle'), t('hp_prime_files_title'));
+    updateSelectionActionButtons();
+}
+
+function applyActiveFamilyUiState(options = {}) {
+    if (isHPPrimeActive()) {
+        setHPPrimeUiState();
+    } else {
+        setTiUiState(Boolean(options.tiCapabilitiesKnown));
+    }
+}
+
 function is84pFamilyActive() {
     const pid = state.authorizedDevice?.productId;
     return typeof pid === 'number' && TI84P_FAMILY_PIDS.has(pid);
 }
 
 function getActiveKeyMapConfig() {
+    if (isHPPrimeActive()) {
+        return KEYMAP_CONFIG_HP_PRIME;
+    }
     if (isNspireActive()) {
         return KEYMAP_CONFIG_NSP;
     }
@@ -4204,10 +4611,10 @@ function confirmEvoOsModelMismatch(item, module) {
 
 function ensureSupportedTransport() {
     if (!self.isSecureContext) {
-        throw new Error('WebUSB/WebSerial requires HTTPS or localhost.');
+        throw new Error(t('transport_secure_context_error'));
     }
-    if (!navigator.usb && !navigator.serial) {
-        throw new Error('WebUSB is not supported in this browser, and WebSerial is not available.');
+    if (!navigator.usb && !navigator.serial && !navigator.hid) {
+        throw new Error(t('transport_unavailable_error'));
     }
 }
 
@@ -4239,7 +4646,7 @@ async function initModule() {
     return state.module;
 }
 
-async function authorizeDevice(forcePrompt = false) {
+async function authorizeDevice(forcePrompt = false, selectedUsbDevice = null) {
     const module = await initModule();
     const mustPrompt = forcePrompt || state.needsReauthorize;
     const selectedCalcModel = String(state.settings?.calcModel ?? '');
@@ -4272,6 +4679,26 @@ async function authorizeDevice(forcePrompt = false) {
             state.silentReconnectInProgress = false;
             setStatus('status_connected', true);
         }
+        return device;
+    }
+    if (selectedUsbDevice) {
+        if (getWebUsbDeviceFamily(selectedUsbDevice) !== DEVICE_FAMILY_TI) {
+            throw new Error('The selected WebUSB device is not a supported TI calculator.');
+        }
+        const device = await requestEvoSerialForUsbDevice(selectedUsbDevice);
+        if (!device) {
+            const cancelError = new Error('TI-83/84 Evo serial port authorization is required.');
+            cancelError.silent = true;
+            throw cancelError;
+        }
+        if (isSerialDevice(device)) {
+            bindSerialPortToModule(module, device);
+        }
+        state.authorizedDevice = device;
+        if (!hasSilverlinkConnected()) {
+            state.deviceModelName = device.productName || state.deviceModelName;
+        }
+        updateDeviceModelDisplay();
         return device;
     }
     if (!navigator.usb) {
@@ -4343,9 +4770,280 @@ async function authorizeDevice(forcePrompt = false) {
     return device;
 }
 
+async function authorizeHPPrimeDevice(forcePrompt = false, discoveryUsbDevice = null) {
+    let device = !forcePrompt && isHPPrimeDevice(state.authorizedDevice)
+        && (!discoveryUsbDevice || state.authorizedDevice.productId === discoveryUsbDevice.productId)
+        ? state.authorizedDevice
+        : null;
+    if (!device && !forcePrompt) {
+        const devices = await getAuthorizedHPPrimeDevices(discoveryUsbDevice);
+        device = devices[0] || null;
+    }
+    if (!device && forcePrompt) {
+        device = await requestHPPrimeDevice(discoveryUsbDevice);
+    }
+    if (!device) {
+        const cancelError = new Error(t('hp_prime_no_device_selected'));
+        cancelError.silent = true;
+        throw cancelError;
+    }
+    state.authorizedDevice = device;
+    return device;
+}
+
+function getHPPrimeModelName(device = state.authorizedDevice) {
+    if (device?.productId === 0x2441) {
+        return 'HP Prime G2';
+    }
+    if (device?.productId === 0x0441 || device?.productId === 0x1541) {
+        return 'HP Prime G1';
+    }
+    return 'HP Prime';
+}
+
+function getHPPrimeUploadIdentity(filename) {
+    const leaf = String(filename || '').split(/[\\/]/).pop();
+    if (!leaf) {
+        return null;
+    }
+    const lower = leaf.toLowerCase();
+    if (lower === 'calc.settings' || lower === 'cas.settings'
+        || lower === 'settings' || lower === 'testmodes.hptestmodes') {
+        return { name: leaf.replace(/\.[^.]+$/, ''), extension: '' };
+    }
+    const dot = leaf.lastIndexOf('.');
+    if (dot <= 0 || dot === leaf.length - 1) {
+        return null;
+    }
+    const extension = leaf.slice(dot + 1).toLowerCase();
+    if (!HP_PRIME_UPLOAD_EXTENSIONS.has(extension)) {
+        return null;
+    }
+    return {
+        name: leaf.slice(0, dot),
+        extension: extension === 'hpmatrix' ? 'hpmat' : extension
+    };
+}
+
+function applyHPPrimeFileSnapshot(module) {
+    const filesText = module.ccall('hp_prime_get_files_json', 'string', [], []);
+    const files = JSON.parse(filesText || '[]');
+    state.features = 0;
+    state.dirlist = files.flatMap(mapHPPrimeFileEntries);
+    state.hpFileSnapshotLoaded = true;
+    renderDirlist(state.dirlist);
+    return files.length;
+}
+
+function mapHPPrimeFileEntry(file) {
+    return {
+        name: file.name,
+        type: file.type,
+        type_name: file.typeName,
+        size: file.size,
+        kind: 'hp',
+        folder: '',
+        attr: 0,
+        is_folder: Array.isArray(file.children) ? 1 : 0,
+        hpIndex: file.index,
+        extension: file.extension,
+        invalid: Boolean(file.invalid),
+        hpAppRoot: Array.isArray(file.children),
+        hpAppContainerValid: file.appContainerValid !== false
+    };
+}
+
+function hpPrimeAppPartTypeName(kind) {
+    if (kind === 'descriptor') return t('hp_prime_app_descriptor');
+    if (kind === 'note') return t('hp_prime_app_note');
+    if (kind === 'program') return t('hp_prime_app_program');
+    return t('hp_prime_app_resource');
+}
+
+function mapHPPrimeFileEntries(file) {
+    const root = mapHPPrimeFileEntry(file);
+    if (!Array.isArray(file.children)) {
+        return [root];
+    }
+    const children = file.children.map(child => ({
+        name: child.name,
+        type: file.type,
+        type_name: hpPrimeAppPartTypeName(child.kind),
+        size: child.size,
+        kind: 'hp-app-child',
+        folder: file.name,
+        attr: 0,
+        is_folder: 0,
+        hpIndex: file.index,
+        hpAppChildIndex: child.index,
+        hpAppPartKind: child.kind,
+        hpAppChildEditable: Boolean(child.editable),
+        extension: child.extension,
+        invalid: false
+    }));
+    return [root, ...children];
+}
+
+function scheduleHPPrimeProgressRender(module, generation) {
+    if (state.hpFileRenderGeneration === generation) {
+        return;
+    }
+    state.hpFileRenderGeneration = generation;
+    requestAnimationFrame(() => {
+        if (state.hpFileRenderGeneration !== generation) {
+            return;
+        }
+        state.hpFileRenderGeneration = 0;
+        if (state.module !== module
+            || state.hpFileRefreshGeneration !== generation
+            || !isHPPrimeActive()) {
+            return;
+        }
+        renderDirlist(state.dirlist);
+    });
+}
+
+function appendHPPrimeFileArrival(module, generation, json) {
+    if (state.module !== module
+        || state.hpFileRefreshGeneration !== generation
+        || !isHPPrimeActive()) {
+        return false;
+    }
+    try {
+        state.dirlist.push(...mapHPPrimeFileEntries(JSON.parse(json)));
+        scheduleHPPrimeProgressRender(module, generation);
+        return true;
+    } catch (error) {
+        console.warn('[WebTILP] Ignoring invalid HP Prime file update.', error);
+        return false;
+    }
+}
+
+function beginHPPrimeFileSnapshot(module) {
+    const generation = ++state.hpFileRefreshGeneration;
+    state.hpFileRenderGeneration = 0;
+    state.hpFileSnapshotLoaded = false;
+    state.dirlist = [];
+    renderDirlist(state.dirlist);
+    const callback = json => appendHPPrimeFileArrival(module, generation, json);
+    module.__hpPrimeFileArrived = callback;
+    return { generation, callback };
+}
+
+function finishHPPrimeFileSnapshot(module, refresh, successful) {
+    if (module.__hpPrimeFileArrived === refresh.callback) {
+        module.__hpPrimeFileArrived = null;
+    }
+    if (state.module !== module
+        || state.hpFileRefreshGeneration !== refresh.generation
+        || !isHPPrimeActive()) {
+        return state.dirlist.length;
+    }
+    state.hpFileRenderGeneration = 0;
+    if (successful) {
+        return applyHPPrimeFileSnapshot(module);
+    }
+    renderDirlist(state.dirlist);
+    return state.dirlist.length;
+}
+
+function readHPPrimeInfo(module) {
+    const infoText = module.ccall('hp_prime_get_info_json', 'string', [], []);
+    if (!infoText) {
+        throw new Error(t('hp_prime_info_unavailable'));
+    }
+    const info = JSON.parse(infoText);
+    state.hpPrimeProtocolVersion = Number(info.protocol) || null;
+    const entries = [
+        { key: t('hp_prime_info_product_name'), value: getHPPrimeModelName() },
+        { key: t('hp_prime_info_firmware_version'), value: info.version || t('unknown') },
+        { key: t('hp_prime_info_build'), value: String(info.build ?? t('unknown')) },
+        { key: t('hp_prime_info_serial'), value: info.serial || t('unknown') },
+        { key: t('hp_prime_info_protocol'), value: info.protocol === 2 ? 'V2' : t('hp_prime_protocol_legacy') },
+        { key: t('hp_prime_info_v2_capable'), value: info.supportsV2 ? t('yes') : t('no') }
+    ];
+    state.deviceInfoEntries = entries;
+    state.deviceModelName = getHPPrimeModelName();
+    state.deviceInfoProductName = state.deviceModelName;
+    renderDeviceInfo(entries);
+    updateDeviceModelDisplay(state.deviceModelName);
+    els.memoryInfo.textContent = '—';
+    els.memoryInfo.title = '';
+    applyActiveFamilyUiState();
+    return info;
+}
+
+async function connectHPPrime(forcePrompt = true, discoveryUsbDevice = null) {
+    const device = await authorizeHPPrimeDevice(forcePrompt, discoveryUsbDevice);
+    const module = await initModule();
+    await bindHPPrimeDeviceToModule(module, device);
+    const result = await ccallAsync(module, 'hp_prime_connect', 'number', [], [], {
+        timeoutMs: 30000,
+        useProgress: true,
+        progressLabel: t('hp_prime_progress_connecting')
+    });
+    if (result !== 0) {
+        throw new Error(tFormat('hp_prime_connection_failed', {
+            error: formatHPPrimeError(module, result)
+        }));
+    }
+    state.handle = 0;
+    state.cableOpen = true;
+    state.activeFamily = DEVICE_FAMILY_HP_PRIME;
+    applyActiveFamilyUiState();
+    readHPPrimeInfo(module);
+    setConnected(true);
+    setStatus('status_connected', true);
+    log(tFormat('hp_prime_connected', { model: getHPPrimeModelName() }));
+}
+
 async function autoConnectIfAuthorized() {
     if (!hasAnySupportedTransport()) {
         return;
+    }
+    if (state.connectInProgress) {
+        return;
+    }
+    let autoDetectedTiDevice = null;
+    const devices = navigator.usb ? await getAuthorizedSupportedWebUsbDevices() : [];
+    if (devices.length > 1) {
+        return;
+    }
+    if (devices.length === 1) {
+        const device = devices[0];
+        const detectedFamily = getWebUsbDeviceFamily(device);
+        if (detectedFamily === DEVICE_FAMILY_HP_PRIME) {
+            const hpDevices = await getAuthorizedHPPrimeDevices(device);
+            if (hpDevices.length === 1) {
+                try {
+                    state.connectInProgress = true;
+                    state.authorizedDevice = hpDevices[0];
+                    await connectHPPrime(false, device);
+                    log(t('hp_prime_auto_connected'));
+                } catch (err) {
+                    logError(err, t('hp_prime_auto_connect_failed'));
+                } finally {
+                    state.connectInProgress = false;
+                }
+            }
+            return;
+        }
+        autoDetectedTiDevice = device;
+    } else if (hasHPPrimeWebHidTransport()) {
+        const hpDevices = await getAuthorizedHPPrimeDevices();
+        if (hpDevices.length === 1) {
+            try {
+                state.connectInProgress = true;
+                state.authorizedDevice = hpDevices[0];
+                await connectHPPrime(false);
+                log(t('hp_prime_auto_connected'));
+            } catch (err) {
+                logError(err, t('hp_prime_auto_connect_failed'));
+            } finally {
+                state.connectInProgress = false;
+            }
+            return;
+        }
     }
     if (String(state.settings?.cableModel ?? 'auto') === CABLE_GRAYLINK) {
         return;
@@ -4364,7 +5062,9 @@ async function autoConnectIfAuthorized() {
         if (!getAuthorizedDevices) {
             return;
         }
-        const devices = await getAuthorizedDevices();
+        const devices = autoDetectedTiDevice
+            ? [autoDetectedTiDevice]
+            : await getAuthorizedDevices();
         if (!devices || !devices.length) {
             return;
         }
@@ -4502,6 +5202,17 @@ async function updateCapabilities() {
     const hasNewFolder = (features & FEATURE_FLAGS.OPS_NEWFLD) !== 0;
     const isNspire = isNspireActive();
     const canReceiveOs = hasRomDump && isNspire;
+    els.btnIsReady?.classList.remove('hidden');
+    if (els.btnRefreshDirlist) {
+        els.btnRefreshDirlist.classList.remove('disabled');
+        els.btnRefreshDirlist.disabled = false;
+        els.btnRefreshDirlist.title = '';
+    }
+    if (els.btnScreenshot) {
+        els.btnScreenshot.classList.remove('disabled');
+        els.btnScreenshot.disabled = false;
+        els.btnScreenshot.title = '';
+    }
     updateKeyControlsState(hasKeys);
     if (els.keyCodeInput) {
         els.keyCodeInput.removeAttribute('list');
@@ -4574,6 +5285,7 @@ async function updateCapabilities() {
         els.btnLeaveExam.classList.toggle('disabled', !canLeaveExam);
         els.btnLeaveExam.title = canLeaveExam ? '' : 'Leave exam mode is not supported by this calculator';
     }
+    updateSelectionActionButtons();
 }
 
 function updateNspireOsButtons(isNspire, canReceiveOs) {
@@ -4609,32 +5321,65 @@ function updateNspireOsButtons(isNspire, canReceiveOs) {
     }
 }
 
+async function connectTI(forcePrompt = true, selectedUsbDevice = null) {
+    state.activeFamily = DEVICE_FAMILY_TI;
+    applyActiveFamilyUiState();
+    await authorizeDevice(forcePrompt, selectedUsbDevice);
+    if (promptCableMismatchResolution()) {
+        return;
+    }
+    if (!ensureSilverlinkModelSelected()) {
+        return;
+    }
+    await ensureCableOpen();
+    await updateCapabilities();
+    if (!isTi92Selected()) {
+        await getDeviceInfo();
+    } else {
+        log('Skipping automatic device info query for TI-92.');
+    }
+    setConnected(true);
+    setStatus('status_connected', true);
+    log('Device connected.');
+}
+
 async function connect() {
     setButtonLoading(els.btnConnect, true);
     const hadWorkingConnection = state.connected || state.cableOpen || Boolean(state.handle);
     try {
         state.connectInProgress = true;
-        await authorizeDevice(true);
-        if (promptCableMismatchResolution()) {
+        const wantsGrayLink = String(state.settings?.cableModel ?? 'auto') === CABLE_GRAYLINK;
+        if (!wantsGrayLink && hasWebUsbTransport()) {
+            const device = await requestSupportedWebUsbDevice();
+            if (!device) {
+                const cancelError = new Error('No calculator selected.');
+                cancelError.silent = true;
+                throw cancelError;
+            }
+            const detectedFamily = getWebUsbDeviceFamily(device);
+            state.authorizedDevice = device;
+            if (detectedFamily === DEVICE_FAMILY_HP_PRIME) {
+                await connectHPPrime(true, device);
+                return;
+            }
+            if (detectedFamily === DEVICE_FAMILY_TI) {
+                await connectTI(false, device);
+                return;
+            }
+            throw new Error('The selected WebUSB calculator is not supported.');
+        }
+        if (!wantsGrayLink && !hasWebUsbTransport() && hasHPPrimeWebHidTransport()
+            && !hasEvoWebSerialTransport()) {
+            await connectHPPrime(true);
             return;
         }
-        if (!ensureSilverlinkModelSelected()) {
-            return;
-        }
-        await ensureCableOpen();
-        await updateCapabilities();
-        if (!isTi92Selected()) {
-            await getDeviceInfo();
-        } else {
-            log('Skipping automatic device info query for TI-92.');
-        }
-        setConnected(true);
-        setStatus('status_connected', true);
-        log('Device connected.');
+        await connectTI(true);
     } catch (err) {
         if (hadWorkingConnection) {
             setStatus('status_connected', true);
         } else {
+            state.activeFamily = DEVICE_FAMILY_TI;
+            applyActiveFamilyUiState();
             setStatus('status_connection_failed', false);
         }
         logError(err, 'Connect failed');
@@ -4669,6 +5414,12 @@ async function isReady() {
 async function getDeviceInfo() {
     setButtonLoading(els.btnGetInfo, true);
     try {
+        if (isHPPrimeActive()) {
+            const module = await initModule();
+            readHPPrimeInfo(module);
+            log(t('hp_prime_info_refreshed'));
+            return;
+        }
         if (isTi92Selected()) {
             const proceed = confirm(t('confirm_replug_after_device_info'));
             if (!proceed) {
@@ -5022,6 +5773,10 @@ function updateClockInfoRow(clockInfo, settings, fallbackDate) {
 
 function clearDeviceData() {
     state.dirlist = [];
+    state.hpFileSnapshotLoaded = false;
+    state.hpFileRefreshGeneration += 1;
+    state.hpFileRenderGeneration = 0;
+    state.hpPrimeProtocolVersion = null;
     setSelectedFiles([]);
     state.nspireOsReceiveStarted = false;
     updateNspireOsButtons(false, false);
@@ -5080,6 +5835,31 @@ function parseLeadingBytes(text) {
 async function refreshDirlist() {
     setButtonLoading(els.btnRefreshDirlist, true);
     try {
+        if (isHPPrimeActive()) {
+            const module = await initModule();
+            const refresh = beginHPPrimeFileSnapshot(module);
+            let result;
+            try {
+                result = await ccallAsync(module, 'hp_prime_refresh_files', 'number', [], [], {
+                    timeoutMs: null,
+                    useProgress: true,
+                    progressLabel: t('hp_prime_progress_loading_files')
+                });
+            } catch (error) {
+                finishHPPrimeFileSnapshot(module, refresh, false);
+                throw error;
+            }
+            if (result !== 0) {
+                finishHPPrimeFileSnapshot(module, refresh, false);
+                log(tFormat('hp_prime_file_listing_failed', {
+                    error: formatHPPrimeError(module, result)
+                }));
+                return;
+            }
+            const count = finishHPPrimeFileSnapshot(module, refresh, true);
+            log(tFormat('hp_prime_snapshot_loaded', { count }));
+            return;
+        }
         await authorizeDevice();
         const module = await initModule();
         const handle = await ensureHandle();
@@ -5109,8 +5889,8 @@ async function refreshDirlist() {
 
 function renderDirlist(entries) {
     const filter = (els.filterInput.value || '').toLowerCase();
-    const showLocation = !isNspireActive();
-    const showKind = !isNspireActive();
+    const showLocation = !isNspireActive() && !isHPPrimeActive();
+    const showKind = !isNspireActive() && !isHPPrimeActive();
     const table = els.varTableBody.closest('table');
     if (table) {
         table.classList.toggle('hide-location', !showLocation);
@@ -5142,7 +5922,13 @@ function isBuiltInListName(name) {
 }
 
 function canPreviewVariable(entry, modelId = getActiveCalcModelId()) {
-    if (!entry || entry.is_folder === 1 || entry.kind !== 'var') {
+    if (!entry || entry.is_folder === 1) {
+        return false;
+    }
+    if (getHPPrimePreviewKind(entry)) {
+        return true;
+    }
+    if (entry.kind !== 'var') {
         return false;
     }
     if (!TIVARS_PREVIEW_CALC_MODELS.has(modelId)) {
@@ -5152,6 +5938,28 @@ function canPreviewVariable(entry, modelId = getActiveCalcModelId()) {
     return EVO_PYTHON_CALC_MODELS.has(modelId)
         ? TIVARS_EVO_PREVIEW_TYPES.has(typeId)
         : TIVARS_LEGACY_PREVIEW_TYPES.has(typeId);
+}
+
+function getEntryExtension(entry) {
+    const supplied = String(entry?.extension || '').trim().replace(/^\./, '');
+    if (supplied) {
+        return supplied.toLowerCase();
+    }
+    const name = String(entry?.name || '');
+    const dot = name.lastIndexOf('.');
+    return dot >= 0 && dot < name.length - 1
+        ? name.slice(dot + 1).toLowerCase() : '';
+}
+
+function getHPPrimePreviewKind(entry) {
+    if (!entry || (entry.kind !== 'hp' && entry.kind !== 'hp-app-child')) {
+        return '';
+    }
+    const extension = getEntryExtension(entry);
+    if (HP_PRIME_TEXT_PREVIEW_EXTENSIONS.has(extension)) {
+        return 'text';
+    }
+    return extension === 'png' ? 'image' : '';
 }
 
 function formatVariableDisplayName(entry) {
@@ -5224,13 +6032,17 @@ function renderTableView(entries, filter) {
         const isArchived = entry.attr === 3;
         const isFolder = entry.is_folder === 1;
         const location = entry.kind === 'app' ? 'Flash' : (isArchived ? 'Archive' : 'RAM');
-        const typeLabel = isFolder ? 'Directory' : (entry.type_name || `Unknown (${entry.type})`);
+        const typeLabel = isFolder
+            ? (entry.hpAppRoot ? entry.type_name : 'Directory')
+            : (entry.type_name || `Unknown (${entry.type})`);
         const sizeValue = Number(entry.size) || 0;
         const sizeLabel = options.sizeLabel ?? (isFolder ? '-' : formatBytes(sizeValue));
         const indentBars = depth > 0
             ? `<span class="indent-bars">${'<span class="indent-bar"></span>'.repeat(depth)}</span>`
             : '';
-        const kindLabel = isFolder ? 'folder' : (entry.kind || '');
+        const kindLabel = isFolder
+            ? (entry.hpAppRoot ? 'hp' : 'folder')
+            : (entry.kind || '');
         const safeTypeLabel = escapeHtml(typeLabel);
         const safeLocation = escapeHtml(isFolder ? '-' : location);
         const safeKindLabel = escapeHtml(kindLabel);
@@ -5239,13 +6051,28 @@ function renderTableView(entries, filter) {
         const row = document.createElement('tr');
         const normalizedFolderPath = normalizeFolderPath(getEntryFolderPath(entry));
         const safeName = escapeHtml(formatVariableDisplayName(entry));
+        const appContainerInvalid = entry.kind === 'hp'
+            && entry.hpAppContainerValid === false;
+        const integrityTitle = appContainerInvalid
+            ? t('hp_prime_app_invalid_container')
+            : 'CRC validation failed; the cached data may be corrupt';
+        const integrityWarning = entry.invalid || appContainerInvalid
+            ? `<span class="integrity-warning" title="${escapeHtml(integrityTitle)}" aria-label="Integrity validation failed">⚠ ${appContainerInvalid ? 'APP' : 'CRC'}</span>`
+            : '';
         const safeFolderPath = escapeHtml(normalizedFolderPath);
         row.dataset.folderTarget = normalizedFolderPath;
         row.dataset.isFolder = isFolder ? '1' : '0';
         row.dataset.folderPath = normalizedFolderPath;
         row.dataset.depth = String(depth);
-        const canRename = (state.features & FEATURE_FLAGS.OPS_RENAME) !== 0;
-        const canDelete = (state.features & FEATURE_FLAGS.OPS_DELVAR) !== 0;
+        row.dataset.hpAppRoot = entry.hpAppRoot ? '1' : '0';
+        if (entry.hpAppRoot) {
+            row.title = t('hp_prime_app_folder_hint');
+        }
+        row.classList.toggle('integrity-invalid', Boolean(entry.invalid || appContainerInvalid));
+        const canRename = (entry.hpAppChildEditable && state.hpFileSnapshotLoaded)
+            || (state.features & FEATURE_FLAGS.OPS_RENAME) !== 0;
+        const canDelete = (entry.hpAppChildEditable && state.hpFileSnapshotLoaded)
+            || (state.features & FEATURE_FLAGS.OPS_DELVAR) !== 0;
         const canPreview = canPreviewVariable(entry, previewModelId);
         const rowActions = `
             <div class="row-actions">
@@ -5259,7 +6086,7 @@ function renderTableView(entries, filter) {
             : '';
         const displayName = isFolder
             ? `<span class="folder-icon" data-folder-path="${safeFolderPath}">📂</span> ${safeName}`
-            : safeName;
+            : `${safeName}${integrityWarning}`;
         const summaryText = options.summary ? `<em class="folder-summary">(${options.summary})</em>` : '';
         row.innerHTML = `
             <td><input type="checkbox" data-name="" data-folder="" data-folder-path="" data-is-folder="${isFolder ? '1' : '0'}" data-type="${entry.type}" data-kind=""></td>
@@ -5283,6 +6110,14 @@ function renderTableView(entries, filter) {
             checkbox.dataset.kind = isFolder ? 'folder' : (entry.kind || '');
             checkbox.dataset.typeName = entry.type_name || '';
             checkbox.dataset.size = String(sizeValue);
+            checkbox.dataset.hpIndex = entry.hpIndex == null ? '' : String(entry.hpIndex);
+            checkbox.dataset.hpAppRoot = entry.hpAppRoot ? '1' : '0';
+            checkbox.dataset.hpAppChildIndex = entry.hpAppChildIndex == null
+                ? '' : String(entry.hpAppChildIndex);
+            checkbox.dataset.hpAppPartKind = entry.hpAppPartKind || '';
+            checkbox.dataset.hpAppChildEditable = entry.hpAppChildEditable ? '1' : '0';
+            checkbox.dataset.extension = entry.extension || '';
+            checkbox.dataset.invalid = entry.invalid ? '1' : '0';
         }
         els.varTableBody.appendChild(row);
     };
@@ -5310,8 +6145,12 @@ function renderTableView(entries, filter) {
             return 0;
         }
         const children = node.children || [];
-        const total = children.reduce((sum, child) => sum + collectFolderSizes(child), 0);
         const folderEntry = node.entry || buildSyntheticFolderEntry(node);
+        const childrenTotal = children.reduce(
+            (sum, child) => sum + collectFolderSizes(child), 0);
+        const total = folderEntry.hpAppRoot
+            ? Number(folderEntry.size) || childrenTotal
+            : childrenTotal;
         const folderPath = normalizeFolderPath(getEntryFolderPath(folderEntry));
         state.folderSizeMap.set(folderPath, total);
         return total;
@@ -5620,7 +6459,9 @@ function updateSelectionActionButtons() {
         els.btnRecvSelected.disabled = !hasSelection;
     }
     if (els.btnDeleteSelected) {
-        els.btnDeleteSelected.disabled = !hasSelection;
+        const disabled = !hasSelection || isHPPrimeActive();
+        els.btnDeleteSelected.disabled = disabled;
+        els.btnDeleteSelected.classList.toggle('disabled', disabled);
     }
     if (els.selectAllVars) {
         const allInputs = Array.from(els.varTableBody.querySelectorAll('input[type="checkbox"]:not(:disabled)'));
@@ -5684,6 +6525,26 @@ async function sendKey(code) {
         return;
     }
     try {
+        if (isHPPrimeActive()) {
+            if (key > 50) {
+                log(t('hp_prime_key_range'));
+                return;
+            }
+            const module = await initModule();
+            const result = await ccallAsync(module, 'hp_prime_send_key', 'number',
+                ['number'], [key], { timeoutMs: 12000 });
+            if (result !== 0) {
+                log(tFormat('hp_prime_key_send_failed', {
+                    error: formatHPPrimeError(module, result)
+                }));
+                return;
+            }
+            log(tFormat('hp_prime_key_sent', {
+                key,
+                hex: key.toString(16).toUpperCase()
+            }));
+            return;
+        }
         await authorizeDevice();
         if (!ensureSilverlinkModelSelected()) {
             return;
@@ -5793,7 +6654,15 @@ function buildEntryFromCheckbox(checkbox) {
         size: Number(checkbox.dataset.size) || 0,
         kind: checkbox.dataset.kind,
         isFolder: checkbox.dataset.isFolder === '1',
-        folderPath: checkbox.dataset.folderPath || ''
+        folderPath: checkbox.dataset.folderPath || '',
+        hpIndex: checkbox.dataset.hpIndex === '' ? null : Number(checkbox.dataset.hpIndex),
+        hpAppRoot: checkbox.dataset.hpAppRoot === '1',
+        hpAppChildIndex: checkbox.dataset.hpAppChildIndex === ''
+            ? null : Number(checkbox.dataset.hpAppChildIndex),
+        hpAppPartKind: checkbox.dataset.hpAppPartKind || '',
+        hpAppChildEditable: checkbox.dataset.hpAppChildEditable === '1',
+        extension: checkbox.dataset.extension || '',
+        invalid: checkbox.dataset.invalid === '1'
     };
 }
 
@@ -5964,11 +6833,147 @@ async function ensureDirlistLoadedWithPrompt() {
     }
 }
 
+function encodeHPPrimeAppResourceManifest(resources) {
+    const encoder = new TextEncoder();
+    const encoded = resources.map(resource => ({
+        name: encoder.encode(resource.name),
+        data: resource.data
+    }));
+    let total = 4;
+    encoded.forEach(resource => {
+        if (resource.name.byteLength > 0xFFFFFFFF
+            || resource.data.byteLength > 0xFFFFFFFF) {
+            throw new Error(t('hp_prime_app_resource_too_large'));
+        }
+        total += 8 + resource.name.byteLength + resource.data.byteLength;
+    });
+    if (!Number.isSafeInteger(total)) {
+        throw new Error(t('hp_prime_app_resource_too_large'));
+    }
+    const result = new Uint8Array(total);
+    const view = new DataView(result.buffer);
+    let offset = 0;
+    const writeU32 = value => {
+        view.setUint32(offset, value, false);
+        offset += 4;
+    };
+    writeU32(encoded.length);
+    encoded.forEach(resource => {
+        writeU32(resource.name.byteLength);
+        result.set(resource.name, offset);
+        offset += resource.name.byteLength;
+        writeU32(resource.data.byteLength);
+        result.set(resource.data, offset);
+        offset += resource.data.byteLength;
+    });
+    return result;
+}
+
+function findHPPrimeAppRoot(folderPath) {
+    const normalized = normalizeFolderPath(folderPath || '');
+    if (!normalized) {
+        return null;
+    }
+    return state.dirlist.find(entry => entry.hpAppRoot
+        && normalizeFolderPath(getEntryFolderPath(entry)) === normalized) || null;
+}
+
+async function sendHPPrimeAppResources(files, appRoot) {
+    if (!state.hpFileSnapshotLoaded) {
+        log(t('hp_prime_app_snapshot_required'));
+        return;
+    }
+    const module = await initModule();
+    const existingChildren = state.dirlist.filter(entry => entry.kind === 'hp-app-child'
+        && entry.hpIndex === appRoot.hpIndex);
+    const pending = [];
+    const pendingNames = new Set();
+    for (const file of files) {
+        const name = String(file.name || '').split(/[\\/]/).pop();
+        const key = name.toLowerCase();
+        if (!name || pendingNames.has(key)) {
+            log(tFormat('hp_prime_app_resource_skipped', { file: file.name }));
+            continue;
+        }
+        const existing = existingChildren.find(entry => entry.name.toLowerCase() === key);
+        if (existing && !existing.hpAppChildEditable) {
+            log(tFormat('hp_prime_app_core_upload_rejected', { file: file.name }));
+            continue;
+        }
+        if (existing && !confirm(tFormat('hp_prime_app_confirm_resource_overwrite', {
+            file: file.name,
+            app: appRoot.name
+        }))) {
+            log(tFormat('hp_prime_overwrite_skipped', { file: file.name }));
+            continue;
+        }
+        pendingNames.add(key);
+        pending.push({
+            name,
+            data: new Uint8Array(await file.arrayBuffer())
+        });
+    }
+    if (!pending.length) {
+        return;
+    }
+    const manifestPath = `/hp-prime-app-resources-${appRoot.hpIndex}.bin`;
+    try {
+        module.FS.writeFile(manifestPath,
+            encodeHPPrimeAppResourceManifest(pending));
+        const result = await ccallAsync(module,
+            'hp_prime_send_cached_app_resources', 'number',
+            ['number', 'string'], [appRoot.hpIndex, manifestPath], {
+                timeoutMs: null,
+                useProgress: true,
+                progressLabel: tFormat('hp_prime_app_progress_updating', {
+                    app: appRoot.name
+                })
+            });
+        if (result !== 0) {
+            log(tFormat('hp_prime_app_upload_failed', {
+                app: appRoot.name,
+                error: formatHPPrimeError(module, result)
+            }));
+            return;
+        }
+        state.expandedFolders.add(getEntryFolderPath(appRoot));
+        applyHPPrimeFileSnapshot(module);
+        log(tFormat('hp_prime_app_resources_sent', {
+            count: pending.length,
+            app: appRoot.name
+        }));
+    } finally {
+        try {
+            module.FS.unlink(manifestPath);
+        } catch {
+            // Best-effort cleanup.
+        }
+    }
+}
+
 async function sendDroppedFiles(files, dropFolder) {
     if (!files.length) {
         return;
     }
     log(`Dropped ${files.length} file(s) for transfer.`);
+    if (isHPPrimeActive()) {
+        const appRoot = findHPPrimeAppRoot(dropFolder);
+        if (appRoot) {
+            try {
+                await sendHPPrimeAppResources(files, appRoot);
+            } catch (error) {
+                logError(error, t('hp_prime_app_upload_failed_short'));
+            }
+            return;
+        }
+        setSelectedFiles(files, 'table drop');
+        try {
+            await sendSelectedFiles();
+        } catch (error) {
+            logError(error, 'Dropped transfer failed');
+        }
+        return;
+    }
     await processIncomingTransfers(files, {
         dropFolder,
         checkCableMismatch: true,
@@ -7151,6 +8156,70 @@ async function sendSelectedFiles() {
     }
     setButtonLoading(els.btnSendFiles, true);
     try {
+        if (isHPPrimeActive()) {
+            const module = await initModule();
+            let successCount = 0;
+            if (!state.hpFileSnapshotLoaded
+                && !confirm(t('hp_prime_confirm_unchecked_overwrite'))) {
+                log(t('hp_prime_upload_cancelled'));
+                return;
+            }
+            for (let index = 0; index < files.length; index++) {
+                const file = files[index];
+                const identity = getHPPrimeUploadIdentity(file.name);
+                if (!identity) {
+                    log(tFormat('hp_prime_unsupported_file', { file: file.name }));
+                    continue;
+                }
+                const duplicate = state.hpFileSnapshotLoaded
+                    ? state.dirlist.find(entry => {
+                        const entryExtension = String(entry.extension || '').toLowerCase();
+                        const normalizedExtension = entryExtension === 'hpmatrix'
+                            ? 'hpmat' : entryExtension;
+                        return entry.kind === 'hp' && entry.name === identity.name
+                            && normalizedExtension === identity.extension;
+                    })
+                    : null;
+                if (duplicate && !confirm(tFormat('hp_prime_confirm_overwrite', {
+                    file: file.name,
+                    existing: duplicate.name
+                }))) {
+                    log(tFormat('hp_prime_overwrite_skipped', { file: file.name }));
+                    continue;
+                }
+                const path = `/hp-prime-upload-${index}.bin`;
+                try {
+                    module.FS.writeFile(path, new Uint8Array(await file.arrayBuffer()));
+                    const result = await ccallAsync(module, 'hp_prime_send_file', 'number',
+                        ['string', 'string'], [path, file.name], {
+                            timeoutMs: null,
+                            useProgress: true,
+                            progressLabel: tFormat('hp_prime_progress_sending_file', { file: file.name })
+                        });
+                    if (result === 0) {
+                        successCount += 1;
+                        state.hpFileSnapshotLoaded = false;
+                        log(tFormat('hp_prime_file_sent', { file: file.name }));
+                    } else {
+                        log(tFormat('hp_prime_file_send_failed', {
+                            file: file.name,
+                            error: formatHPPrimeError(module, result)
+                        }));
+                    }
+                } finally {
+                    try {
+                        module.FS.unlink(path);
+                    } catch {
+                        // Best-effort cleanup.
+                    }
+                }
+            }
+            if (successCount > 0) {
+                setSelectedFiles([]);
+                await refreshDirlist();
+            }
+            return;
+        }
         await processIncomingTransfers(files, {
             checkCableMismatch: false,
             useModal: true,
@@ -7158,6 +8227,11 @@ async function sendSelectedFiles() {
         });
     } finally {
         setButtonLoading(els.btnSendFiles, false);
+        // A completed HP Prime transfer can clear the selected files while the
+        // button is still in its loading state. Recompute from the current
+        // selection after restoring the button so stale pre-transfer state
+        // cannot leave it enabled.
+        updateSendFilesButtonState();
     }
 }
 
@@ -7256,6 +8330,38 @@ async function processIncomingTransfers(files, options = {}) {
 async function receiveBackup() {
     setButtonLoading(els.btnReceiveBackup, true);
     try {
+        if (isHPPrimeActive()) {
+            const module = await initModule();
+            if (!module.FS.analyzePath('/downloads').exists) {
+                module.FS.mkdir('/downloads');
+            }
+            const target = '/downloads/hp-prime-backup.zip';
+            const refresh = beginHPPrimeFileSnapshot(module);
+            let result;
+            try {
+                result = await ccallAsync(module, 'hp_prime_backup', 'number', ['string'], [target], {
+                    timeoutMs: null,
+                    useProgress: true,
+                    progressLabel: t('hp_prime_progress_receiving_backup')
+                });
+            } catch (error) {
+                finishHPPrimeFileSnapshot(module, refresh, false);
+                throw error;
+            }
+            if (result !== 0) {
+                finishHPPrimeFileSnapshot(module, refresh, false);
+                log(tFormat('hp_prime_backup_failed', {
+                    error: formatHPPrimeError(module, result)
+                }));
+                return;
+            }
+            const snapshotCount = finishHPPrimeFileSnapshot(module, refresh, true);
+            const data = module.FS.readFile(target);
+            triggerDownload('hp-prime-backup.zip', data);
+            module.FS.unlink(target);
+            log(tFormat('hp_prime_backup_received', { count: snapshotCount }));
+            return;
+        }
         await authorizeDevice();
         const module = await initModule();
         const handle = await ensureHandle();
@@ -7473,10 +8579,76 @@ async function leaveExamMode() {
         setButtonLoading(els.btnLeaveExam, false);
     }
 }
+
+async function downloadHPPrimeEntry(entry) {
+    if (!Number.isInteger(entry.hpIndex) || entry.hpIndex < 0) {
+        throw new Error(tFormat('hp_prime_missing_cache_index', { name: entry.name }));
+    }
+    if (entry.invalid && !confirm(tFormat('hp_prime_confirm_invalid_crc', { name: entry.name }))) {
+        log(tFormat('hp_prime_invalid_crc_skipped', { name: entry.name }));
+        return false;
+    }
+    const module = await initModule();
+    if (!module.FS.analyzePath('/downloads').exists) {
+        module.FS.mkdir('/downloads');
+    }
+    const safeName = String(entry.name || 'unnamed').replace(/[\\/\0-\x1F\x7F]/g, '_');
+    const extension = String(entry.extension || '').replace(/[^A-Za-z0-9_-]/g, '');
+    const isAppChild = Number.isInteger(entry.hpAppChildIndex)
+        && entry.hpAppChildIndex >= 0;
+    const filename = isAppChild
+        ? safeName : (extension ? `${safeName}.${extension}` : safeName);
+    const target = isAppChild
+        ? `/downloads/hp-prime-${entry.hpIndex}-child-${entry.hpAppChildIndex}.bin`
+        : `/downloads/hp-prime-${entry.hpIndex}.bin`;
+    const result = isAppChild
+        ? await ccallAsync(module, 'hp_prime_download_cached_app_child', 'number',
+            ['number', 'number', 'string'],
+            [entry.hpIndex, entry.hpAppChildIndex, target], { timeoutMs: 8000 })
+        : await ccallAsync(module, 'hp_prime_download_cached_file', 'number',
+            ['number', 'string'], [entry.hpIndex, target], { timeoutMs: 8000 });
+    if (result !== 0) {
+        throw new Error(tFormat('hp_prime_cached_download_failed', {
+            error: formatHPPrimeError(module, result)
+        }));
+    }
+    const data = module.FS.readFile(target);
+    triggerDownload(filename, data);
+    module.FS.unlink(target);
+    log(tFormat('hp_prime_file_received', { file: filename }));
+    return true;
+}
+
+async function downloadHPPrimeEntries(entries) {
+    const selectedAppRoots = new Set(entries
+        .filter(entry => entry.hpAppRoot && Number.isInteger(entry.hpIndex))
+        .map(entry => entry.hpIndex));
+    const downloads = entries.filter(entry => !Number.isInteger(entry.hpAppChildIndex)
+        || !selectedAppRoots.has(entry.hpIndex));
+    for (const entry of downloads) {
+        try {
+            await downloadHPPrimeEntry(entry);
+        } catch (err) {
+            logError(err, tFormat('hp_prime_file_download_failed_context', {
+                name: entry.name
+            }));
+        }
+    }
+}
+
 async function receiveSelected() {
     const selections = getSelectedVarInputs().map(buildEntryFromCheckbox);
     if (!selections.length) {
         log('No variables selected.');
+        return;
+    }
+    if (isHPPrimeActive()) {
+        setButtonLoading(els.btnRecvSelected, true);
+        try {
+            await downloadHPPrimeEntries(selections);
+        } finally {
+            setButtonLoading(els.btnRecvSelected, false);
+        }
         return;
     }
     const normalizePath = (value) => normalizeFolderPath(value || '');
@@ -7625,6 +8797,43 @@ async function renameEntry(entry) {
 
     setButtonLoading(els.btnDeleteSelected, true);
     try {
+        if (isHPPrimeActive()) {
+            if (!state.hpFileSnapshotLoaded) {
+                log(t('hp_prime_app_snapshot_required'));
+                return;
+            }
+            if (!entry.hpAppChildEditable
+                || !Number.isInteger(entry.hpIndex)
+                || !Number.isInteger(entry.hpAppChildIndex)) {
+                log(t('hp_prime_app_core_read_only'));
+                return;
+            }
+            const module = await initModule();
+            const result = await ccallAsync(module,
+                'hp_prime_rename_cached_app_resource', 'number',
+                ['number', 'number', 'string'],
+                [entry.hpIndex, entry.hpAppChildIndex, trimmed], {
+                    timeoutMs: null,
+                    useProgress: true,
+                    progressLabel: tFormat('hp_prime_app_progress_updating', {
+                        app: entry.folder
+                    })
+                });
+            if (result !== 0) {
+                log(tFormat('hp_prime_app_rename_failed', {
+                    error: formatHPPrimeError(module, result)
+                }));
+                return;
+            }
+            state.expandedFolders.add(entry.folder);
+            applyHPPrimeFileSnapshot(module);
+            log(tFormat('hp_prime_app_resource_renamed', {
+                old: currentName,
+                name: trimmed,
+                app: entry.folder
+            }));
+            return;
+        }
         await authorizeDevice();
         const module = await initModule();
         const handle = await ensureHandle();
@@ -7660,6 +8869,42 @@ async function deleteEntry(entry) {
     }
     setButtonLoading(els.btnDeleteSelected, true);
     try {
+        if (isHPPrimeActive()) {
+            if (!state.hpFileSnapshotLoaded) {
+                log(t('hp_prime_app_snapshot_required'));
+                return;
+            }
+            if (!entry.hpAppChildEditable
+                || !Number.isInteger(entry.hpIndex)
+                || !Number.isInteger(entry.hpAppChildIndex)) {
+                log(t('hp_prime_app_core_read_only'));
+                return;
+            }
+            const module = await initModule();
+            const result = await ccallAsync(module,
+                'hp_prime_delete_cached_app_resource', 'number',
+                ['number', 'number'],
+                [entry.hpIndex, entry.hpAppChildIndex], {
+                    timeoutMs: null,
+                    useProgress: true,
+                    progressLabel: tFormat('hp_prime_app_progress_updating', {
+                        app: entry.folder
+                    })
+                });
+            if (result !== 0) {
+                log(tFormat('hp_prime_app_delete_failed', {
+                    error: formatHPPrimeError(module, result)
+                }));
+                return;
+            }
+            state.expandedFolders.add(entry.folder);
+            applyHPPrimeFileSnapshot(module);
+            log(tFormat('hp_prime_app_resource_deleted', {
+                name: entry.name,
+                app: entry.folder
+            }));
+            return;
+        }
         await authorizeDevice();
         const module = await initModule();
         const handle = await ensureHandle();
@@ -7688,6 +8933,17 @@ async function deleteEntry(entry) {
 }
 
 async function downloadEntry(entry) {
+    if (isHPPrimeActive()) {
+        setButtonLoading(els.btnRecvSelected, true);
+        try {
+            await downloadHPPrimeEntry(entry);
+        } catch (err) {
+            logError(err, t('hp_prime_download_failed'));
+        } finally {
+            setButtonLoading(els.btnRecvSelected, false);
+        }
+        return;
+    }
     if (entry.isFolder) {
         await downloadFolderEntries(entry.folderPath || entry.name);
         return;
@@ -7724,6 +8980,9 @@ function disposePreviewSession() {
     const session = previewSession;
     previewSession = null;
     previewRenderId += 1;
+    if (session?.objectUrl) {
+        URL.revokeObjectURL(session.objectUrl);
+    }
     if (session?.module && session.receivedPath) {
         try {
             session.module.FS.unlink(session.receivedPath);
@@ -7808,6 +9067,7 @@ function unwrapReadablePreview(readable) {
         } else if (typeof parsed.previewImageDataUrl === 'string') {
             imageDataUrl = parsed.previewImageDataUrl;
             delete parsed.previewImageDataUrl;
+            displayValue = Object.keys(parsed).length ? parsed : '';
         }
         if (typeof displayValue !== 'string') {
             language = 'json';
@@ -7819,6 +9079,43 @@ function unwrapReadablePreview(readable) {
         // Plain-text readable content needs no additional processing.
     }
     return { content, imageDataUrl, language };
+}
+
+function decodeHPPrimeTextPreview(data) {
+    let bytes = data instanceof Uint8Array ? data : new Uint8Array(data || 0);
+    if (bytes.byteLength >= 2 && bytes[0] === 0xFF && bytes[1] === 0xFE) {
+        bytes = bytes.subarray(2);
+    }
+    if ((bytes.byteLength & 1) !== 0) {
+        throw new Error(t('hp_prime_text_preview_invalid'));
+    }
+    return new TextDecoder('utf-16le', { fatal: true }).decode(bytes)
+        .replace(/^\uFEFF/, '')
+        .replace(/\u0000+$/, '');
+}
+
+function createHPPrimePreview(entry, data) {
+    const kind = getHPPrimePreviewKind(entry);
+    if (kind === 'text') {
+        return {
+            readable: decodeHPPrimeTextPreview(data),
+            objectUrl: ''
+        };
+    }
+    if (kind === 'image') {
+        const bytes = data instanceof Uint8Array ? data : new Uint8Array(data || 0);
+        const pngSignature = [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A];
+        if (bytes.byteLength < pngSignature.length
+            || pngSignature.some((value, index) => bytes[index] !== value)) {
+            throw new Error(t('hp_prime_png_preview_invalid'));
+        }
+        const objectUrl = URL.createObjectURL(new Blob([bytes], { type: 'image/png' }));
+        return {
+            readable: JSON.stringify({ previewImageDataUrl: objectUrl }),
+            objectUrl
+        };
+    }
+    throw new Error(`Preview is not supported for ${entry?.name || 'this HP Prime file'}.`);
 }
 
 function isTIBasicPreviewEntry(entry, modelId) {
@@ -8020,7 +9317,62 @@ async function previewEntry(entry, actionButton) {
     let converterPath = '';
     let variable = null;
     let options = null;
+    let objectUrl = '';
     try {
+        const hpPreviewKind = getHPPrimePreviewKind(entry);
+        if (hpPreviewKind) {
+            if (!Number.isInteger(entry.hpIndex) || entry.hpIndex < 0) {
+                throw new Error(tFormat('hp_prime_missing_cache_index', { name: entry.name }));
+            }
+            if (entry.invalid
+                && !confirm(tFormat('hp_prime_confirm_invalid_crc', { name: entry.name }))) {
+                log(tFormat('hp_prime_invalid_crc_skipped', { name: entry.name }));
+                return;
+            }
+            module = await initModule();
+            if (!module.FS.analyzePath('/previews').exists) {
+                module.FS.mkdir('/previews');
+            }
+            const isAppChild = Number.isInteger(entry.hpAppChildIndex)
+                && entry.hpAppChildIndex >= 0;
+            receivedPath = isAppChild
+                ? `/previews/hp-prime-${entry.hpIndex}-child-${entry.hpAppChildIndex}.bin`
+                : `/previews/hp-prime-${entry.hpIndex}.bin`;
+            const result = isAppChild
+                ? await ccallAsync(module, 'hp_prime_download_cached_app_child', 'number',
+                    ['number', 'number', 'string'],
+                    [entry.hpIndex, entry.hpAppChildIndex, receivedPath], { timeoutMs: 8000 })
+                : await ccallAsync(module, 'hp_prime_download_cached_file', 'number',
+                    ['number', 'string'], [entry.hpIndex, receivedPath], { timeoutMs: 8000 });
+            if (result !== 0) {
+                throw new Error(tFormat('hp_prime_cached_download_failed', {
+                    error: formatHPPrimeError(module, result)
+                }));
+            }
+            const data = module.FS.readFile(receivedPath);
+            const extension = getEntryExtension(entry);
+            const safeName = String(entry.name || 'unnamed').replace(/[\\/\0-\x1F\x7F]/g, '_');
+            const downloadName = isAppChild || !extension
+                ? safeName : `${safeName}.${extension}`;
+            const preview = createHPPrimePreview(entry, data);
+            objectUrl = preview.objectUrl;
+            closePreviewModal();
+            previewSession = {
+                entry,
+                isTIBasic: false,
+                language: '',
+                module,
+                receivedPath,
+                downloadName,
+                objectUrl
+            };
+            receivedPath = '';
+            objectUrl = '';
+            openPreviewModal(entry, preview.readable);
+            log(`Previewed ${entry.name}.`);
+            return;
+        }
+
         const modelId = getActiveCalcModelId();
         await authorizeDevice();
         module = await initModule();
@@ -8119,6 +9471,9 @@ async function previewEntry(entry, actionButton) {
             } catch {
                 // ignore
             }
+        }
+        if (objectUrl) {
+            URL.revokeObjectURL(objectUrl);
         }
         if (module) {
             try {
@@ -8228,9 +9583,194 @@ async function createNewFolder() {
     }
 }
 
+function hpPrimePngPaethPredictor(left, above, upperLeft) {
+    const estimate = left + above - upperLeft;
+    const leftDistance = Math.abs(estimate - left);
+    const aboveDistance = Math.abs(estimate - above);
+    const upperLeftDistance = Math.abs(estimate - upperLeft);
+    if (leftDistance <= aboveDistance && leftDistance <= upperLeftDistance) {
+        return left;
+    }
+    return aboveDistance <= upperLeftDistance ? above : upperLeft;
+}
+
+function parseHPPrimeRgb555Png(png) {
+    const signature = [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A];
+    if (!(png instanceof Uint8Array)
+        || png.length < signature.length
+        || !signature.every((value, index) => png[index] === value)) {
+        throw new Error('The HP Prime returned an invalid PNG screenshot.');
+    }
+
+    const view = new DataView(png.buffer, png.byteOffset, png.byteLength);
+    let offset = signature.length;
+    let header = null;
+    const imageParts = [];
+    let imageSize = 0;
+    while (offset + 12 <= png.length) {
+        const size = view.getUint32(offset, false);
+        const dataStart = offset + 8;
+        const dataEnd = dataStart + size;
+        if (dataEnd + 4 > png.length) {
+            throw new Error('The HP Prime returned a truncated PNG screenshot.');
+        }
+        const type = String.fromCharCode(
+            png[offset + 4], png[offset + 5], png[offset + 6], png[offset + 7]
+        );
+        if (type === 'IHDR') {
+            if (size !== 13 || header) {
+                throw new Error('The HP Prime returned an invalid PNG header.');
+            }
+            header = {
+                width: view.getUint32(dataStart, false),
+                height: view.getUint32(dataStart + 4, false),
+                bitDepth: png[dataStart + 8],
+                colorType: png[dataStart + 9],
+                compression: png[dataStart + 10],
+                filter: png[dataStart + 11],
+                interlace: png[dataStart + 12]
+            };
+        } else if (type === 'IDAT') {
+            imageParts.push(png.subarray(dataStart, dataEnd));
+            imageSize += size;
+        } else if (type === 'IEND') {
+            break;
+        }
+        offset = dataEnd + 4;
+    }
+
+    if (!header) {
+        throw new Error('The HP Prime screenshot has no PNG header.');
+    }
+    // Prime format 8 labels native little-endian RGB555 words as PNG
+    // grayscale-16 samples. Standard PNG decoders therefore show a noisy
+    // grayscale image; preserve other formats for the browser to decode.
+    if (header.bitDepth !== 16 || header.colorType !== 0) {
+        return null;
+    }
+    if (!header.width || !header.height
+        || header.width > 4096 || header.height > 4096
+        || header.compression !== 0 || header.filter !== 0
+        || header.interlace !== 0 || imageParts.length === 0) {
+        throw new Error('The HP Prime returned an unsupported PNG screenshot.');
+    }
+
+    const compressed = new Uint8Array(imageSize);
+    let imageOffset = 0;
+    for (const part of imageParts) {
+        compressed.set(part, imageOffset);
+        imageOffset += part.length;
+    }
+    return { ...header, compressed };
+}
+
+async function decodeHPPrimeRgb555Png(png) {
+    const parsed = parseHPPrimeRgb555Png(png);
+    if (!parsed) {
+        return null;
+    }
+    if (typeof DecompressionStream !== 'function') {
+        throw new Error('This browser cannot decode HP Prime color screenshots.');
+    }
+
+    const stream = new Blob([parsed.compressed])
+        .stream()
+        .pipeThrough(new DecompressionStream('deflate'));
+    const inflated = new Uint8Array(await new Response(stream).arrayBuffer());
+    const bytesPerPixel = 2;
+    const stride = parsed.width * bytesPerPixel;
+    const expectedSize = (stride + 1) * parsed.height;
+    if (inflated.length !== expectedSize) {
+        throw new Error('The HP Prime returned incomplete PNG pixel data.');
+    }
+
+    const raw = new Uint8Array(stride * parsed.height);
+    let inputOffset = 0;
+    for (let y = 0; y < parsed.height; y += 1) {
+        const filter = inflated[inputOffset++];
+        if (filter > 4) {
+            throw new Error(`The HP Prime returned an unknown PNG filter (${filter}).`);
+        }
+        const rowOffset = y * stride;
+        const previousRowOffset = rowOffset - stride;
+        for (let x = 0; x < stride; x += 1) {
+            const encoded = inflated[inputOffset++];
+            const left = x >= bytesPerPixel ? raw[rowOffset + x - bytesPerPixel] : 0;
+            const above = y > 0 ? raw[previousRowOffset + x] : 0;
+            const upperLeft = y > 0 && x >= bytesPerPixel
+                ? raw[previousRowOffset + x - bytesPerPixel]
+                : 0;
+            let predictor = 0;
+            if (filter === 1) predictor = left;
+            else if (filter === 2) predictor = above;
+            else if (filter === 3) predictor = Math.floor((left + above) / 2);
+            else if (filter === 4) predictor = hpPrimePngPaethPredictor(left, above, upperLeft);
+            raw[rowOffset + x] = (encoded + predictor) & 0xFF;
+        }
+    }
+
+    const rgba = new Uint8ClampedArray(parsed.width * parsed.height * 4);
+    for (let source = 0, target = 0; source < raw.length; source += 2, target += 4) {
+        const rgb555 = raw[source] | (raw[source + 1] << 8);
+        const red = (rgb555 >> 10) & 0x1F;
+        const green = (rgb555 >> 5) & 0x1F;
+        const blue = rgb555 & 0x1F;
+        rgba[target] = (red << 3) | (red >> 2);
+        rgba[target + 1] = (green << 3) | (green >> 2);
+        rgba[target + 2] = (blue << 3) | (blue >> 2);
+        rgba[target + 3] = 0xFF;
+    }
+    return { width: parsed.width, height: parsed.height, rgba };
+}
+
+async function drawHPPrimeScreenshot(canvas, png) {
+    const decoded = await decodeHPPrimeRgb555Png(png);
+    if (decoded) {
+        canvas.width = decoded.width;
+        canvas.height = decoded.height;
+        const ctx = canvas.getContext('2d');
+        const imageData = ctx.createImageData(decoded.width, decoded.height);
+        imageData.data.set(decoded.rgba);
+        ctx.putImageData(imageData, 0, 0);
+        return;
+    }
+
+    const bitmap = await createImageBitmap(new Blob([png], { type: 'image/png' }));
+    canvas.width = bitmap.width;
+    canvas.height = bitmap.height;
+    canvas.getContext('2d').drawImage(bitmap, 0, 0);
+    bitmap.close?.();
+}
+
 async function takeScreenshot() {
     setButtonLoading(els.btnScreenshot, true);
     try {
+        if (isHPPrimeActive()) {
+            const module = await initModule();
+            const target = '/hp-prime-screenshot.png';
+            const result = await ccallAsync(module, 'hp_prime_screenshot', 'number', ['string', 'number'], [target, 8], {
+                timeoutMs: null,
+                useProgress: true,
+                progressLabel: t('hp_prime_progress_receiving_screenshot')
+            });
+            if (result !== 0) {
+                log(tFormat('hp_prime_screenshot_failed', {
+                    error: formatHPPrimeError(module, result)
+                }));
+                return;
+            }
+            const png = module.FS.readFile(target);
+            const canvas = els.screenshotCanvas;
+            await drawHPPrimeScreenshot(canvas, png);
+            canvas.classList.add('filled');
+            updateScreenshotCanvasScale();
+            module.FS.unlink(target);
+            log(tFormat('hp_prime_screenshot_captured', {
+                width: canvas.width,
+                height: canvas.height
+            }));
+            return;
+        }
         await authorizeDevice();
         const module = await initModule();
         const handle = await ensureHandle();
@@ -8398,12 +9938,22 @@ async function nukeConnection(tryReconnect = true) {
         setButtonLoading(els.btnNuke, true);
     }
     clearActiveOperations('Operation cancelled by emergency reset.');
-    try { await state.authorizedDevice?.reset(); } catch (e) {}
+    const wasHPPrime = isHPPrimeActive();
+    if (wasHPPrime && state.module) {
+        try {
+            await ccallAsync(state.module, 'hp_prime_disconnect', 'number', [], [], { timeoutMs: 8000 });
+        } catch (err) {
+            console.warn('[WebTILP] Failed to close HP Prime WebHID session cleanly', err);
+        }
+    }
+    if (!wasHPPrime) {
+        try { await state.authorizedDevice?.reset(); } catch (e) {}
+    }
     if (isNspireActive()) {
         try { await state.authorizedDevice?.forget(); } catch (e) {}
     }
     try {
-        if (state.module) {
+        if (state.module && !wasHPPrime) {
             try {
                 state.module._notify_usb_disconnect();
             } catch (err) {
@@ -8413,6 +9963,7 @@ async function nukeConnection(tryReconnect = true) {
     } finally {
         retireModule(state.module, 'emergency reset');
         state.handle = 0;
+        state.activeFamily = DEVICE_FAMILY_TI;
         state.module = null;
         state.cableOpen = false;
         state.authorizedDevice = null;
@@ -8421,6 +9972,7 @@ async function nukeConnection(tryReconnect = true) {
         state.needsReauthorize = false;
         state.silentReconnectInProgress = false;
         clearDeviceData();
+        applyActiveFamilyUiState();
         setConnected(false);
         setStatus('status_disconnected', false);
         log('Device disconnected.');
@@ -8916,10 +10468,12 @@ function handleTransportDisconnect() {
     state.connectInProgress = false;
     state.handlePromise = null;
     if (!silent) {
+        state.activeFamily = DEVICE_FAMILY_TI;
         retireModule(state.module, 'device disconnected');
         state.module = null;
         state.needsReauthorize = false;
         clearDeviceData();
+        applyActiveFamilyUiState();
         setConnected(false);
         setStatus('status_disconnected', false);
         log('Device disconnected.');
@@ -8936,10 +10490,12 @@ function handleTransportConnect() {
     state.cableOpen = false;
     state.authorizedDevice = null;
     state.connectInProgress = false;
+    state.activeFamily = DEVICE_FAMILY_TI;
     setConnected(false);
     setStatus('status_device_connected', false);
     log('Device connected. Reinitialize to use it.');
     clearDeviceData();
+    applyActiveFamilyUiState();
 }
 
 if (navigator.usb) {
@@ -8950,14 +10506,29 @@ if (navigator.serial) {
     navigator.serial.addEventListener('disconnect', handleTransportDisconnect);
     navigator.serial.addEventListener('connect', handleTransportConnect);
 }
+if (navigator.hid) {
+    navigator.hid.addEventListener('disconnect', event => {
+        if (isHPPrimeDevice(event.device)) {
+            handleTransportDisconnect();
+        }
+    });
+    navigator.hid.addEventListener('connect', event => {
+        if (isHPPrimeDevice(event.device)) {
+            handleTransportConnect();
+        }
+    });
+}
 if (!self.isSecureContext) {
     setStatus('status_insecure_context', false);
-    log('WebUSB/WebSerial requires HTTPS or localhost.');
+    log(t('transport_secure_context_error'));
 } else if (navigator.usb) {
     setStatus('idle', false);
 } else if (navigator.serial) {
     setStatus('status_webserial_only', false);
     log('WebUSB is not available in this browser. WebSerial-only mode supports TI-83/84 Evo calculators and explicitly selected GrayLink serial cables.');
+} else if (navigator.hid) {
+    setStatus('idle', false);
+    log(t('hp_prime_webhid_only_mode'));
 } else {
     setStatus('status_webusb_unsupported', false);
     log('WebUSB is not available in this browser. Use a WebUSB-compatible browser for full calculator support.');
