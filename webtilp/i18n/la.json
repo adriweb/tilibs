@@ -135,6 +135,7 @@
   "confirm_replug_after_device_info": "Post hoc cablum corpore avellendum et iterum inserendum erit. Pergere?",
   "confirm_load_dirlist_before_transfer": "Index directorii nondum onustus est. Ante translationes valde commendatur. Nunc onerare?",
   "confirm_overwrite_existing": "{name} iam ibi est. Supercribere?",
+  "confirm_cross_model_evo_os": "Fasciculus {file} ad {source} pertinet, sed calculator coniunctus systema operativum ad {target} exspectat. Systema alterius exemplaris mittere potest deficere. Pergere tamen?",
   "confirm_large_backup_continue_standard": "Data exempli tuti 65535 bytes superare et deficere possunt. TIGroup ad magna exempla tuta commendatur. Nihilominus forma standard pergere?",
   "confirm_receive_os_notice": "Hoc OS TI-Nspire e calculatrice accipiet. Pauca minuta capere potest.\nDeinde rogaberis ut fasciculum OS in computatro serves.\nAd initium, in Nspire preme [on] deinde [2] deinde [menu] deinde [A] (\"Send OS\").\nParatus, hic confirma / preme OK ut pergas.",
   "confirm_dump_rom_notice": "Contenta ROM iuribus a Texas Instruments teguntur.\nImagines ROM copiare et/vel distribuere non licet.\nPerge tantum si vincula iuridica intellegis.\n\nHoc programma dumper mittet et postea ROM leget.\nPergere?",
