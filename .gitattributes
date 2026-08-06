@@ -1,0 +1,3 @@
+# Preserve third-party snapshots byte-for-byte, including upstream whitespace.
+webtilp/third_party/upsilon-js/** -whitespace
+webtilp/third_party/webdfu/** -whitespace

@@ -9,8 +9,11 @@ const CABLE_SILVERLINK = '4';
 const CABLE_DIRECTLINK = '5';
 const DEVICE_FAMILY_TI = 'ti';
 const DEVICE_FAMILY_HP_PRIME = 'hp-prime';
+const DEVICE_FAMILY_NUMWORKS = 'numworks';
 const HP_VENDOR_ID = 0x03F0;
 const HP_PRIME_PRODUCT_IDS = new Set([0x0441, 0x1541, 0x2441]);
+const NUMWORKS_VENDOR_ID = 0x0483;
+const NUMWORKS_PRODUCT_ID = 0xA291;
 const HP_PRIME_UPLOAD_EXTENSIONS = new Set([
     'hpapp', 'hplist', 'hpmat', 'hpmatrix', 'hpnote', 'hpprgm',
     'hpappnote', 'hpappprgm', 'hpcomplex', 'hpreal'
@@ -40,6 +43,9 @@ function getWebUsbDeviceFamily(device) {
     if (isHPPrimeDevice(device)) {
         return DEVICE_FAMILY_HP_PRIME;
     }
+    if (isNumWorksDevice(device)) {
+        return DEVICE_FAMILY_NUMWORKS;
+    }
     if (device?.vendorId === TI_VENDOR_ID && TI_USB_PRODUCT_IDS.has(device.productId)) {
         return DEVICE_FAMILY_TI;
     }
@@ -55,13 +61,14 @@ function getSupportedWebUsbFilters() {
         ...[...HP_PRIME_PRODUCT_IDS].map(productId => ({
             vendorId: HP_VENDOR_ID,
             productId
-        }))
+        })),
+        { vendorId: NUMWORKS_VENDOR_ID, productId: NUMWORKS_PRODUCT_ID }
     ];
 }
 
 async function requestSupportedWebUsbDevice() {
     if (!navigator.usb) {
-        throw new Error(t('transport_unavailable_error'));
+        throw new Error(t('numworks_webusb_required'));
     }
     try {
         return await navigator.usb.requestDevice({
@@ -175,6 +182,48 @@ async function bindHPPrimeDeviceToModule(module, device) {
     state.device = device;
     state.reportSize = 0;
     module.__hplpWebHID = state;
+}
+
+function isNumWorksDevice(device) {
+    return globalThis.WebTILPNumWorks?.isNumWorksDevice?.(device)
+        ?? Boolean(device
+            && device.vendorId === NUMWORKS_VENDOR_ID
+            && device.productId === NUMWORKS_PRODUCT_ID);
+}
+
+function getNumWorksBackendClass() {
+    const Backend = globalThis.WebTILPNumWorks?.NumWorksBackend;
+    if (!Backend) {
+        throw new Error(t('numworks_backend_load_failed'));
+    }
+    return Backend;
+}
+
+async function requestNumWorksDevice() {
+    if (!navigator.usb) {
+        throw new Error(t('numworks_webusb_required'));
+    }
+    if (!self.isSecureContext) {
+        throw new Error('WebUSB requires HTTPS or localhost.');
+    }
+    try {
+        const Backend = getNumWorksBackendClass();
+        return await Backend.requestDevice();
+    } catch (error) {
+        if (error?.name === 'NotFoundError') {
+            console.warn('No NumWorks calculator was selected');
+            return null;
+        }
+        throw error;
+    }
+}
+
+async function getAuthorizedNumWorksDevices() {
+    if (!navigator.usb) {
+        return [];
+    }
+    const Backend = getNumWorksBackendClass();
+    return Backend.getAuthorizedDevices();
 }
 
 /**
@@ -407,6 +456,7 @@ const state = {
     hpFileRefreshGeneration: 0,
     hpFileRenderGeneration: 0,
     hpPrimeProtocolVersion: null,
+    numWorksBackend: null,
     selectedFiles: [],
     logLines: [],
     sort: { key: 'name', dir: 'asc', userDefined: false },
@@ -580,6 +630,62 @@ const I18N_EN = {
     "hp_prime_progress_receiving_screenshot": "Receiving HP Prime screenshot",
     "hp_prime_screenshot_failed": "HP Prime screenshot failed: {error}.",
     "hp_prime_screenshot_captured": "HP Prime screenshot captured ({width}x{height}).",
+    "numworks_family_hint": "NumWorks uses WebUSB/DFU for device info and Python script storage.",
+    "numworks_welcome_text": "Open USB mode on your NumWorks, then click \"Connect Calculator\" and authorize it through WebUSB.",
+    "numworks_webusb_unavailable_text": "NumWorks access requires WebUSB in a secure context; use a recent Chromium-based browser.",
+    "numworks_backend_load_failed": "The NumWorks WebUSB backend failed to load.",
+    "numworks_webusb_required": "NumWorks access requires WebUSB in a recent Chromium-based browser.",
+    "numworks_screenshot_unavailable": "NumWorks USB mode does not expose screenshots.",
+    "numworks_backup_tooltip": "Download a read-only backup of the complete NumWorks storage image",
+    "numworks_refresh_tooltip": "Refresh NumWorks Python scripts",
+    "numworks_dropzone_title": "Drop Python scripts to send",
+    "numworks_dropzone_subtitle": "NumWorks accepts .py scripts; names are normalized to Epsilon-compatible lowercase names.",
+    "numworks_scripts_title": "NumWorks Python Scripts",
+    "numworks_no_device_selected": "No NumWorks calculator selected.",
+    "numworks_type_python_auto": "Python script (auto-import)",
+    "numworks_type_python": "Python script",
+    "numworks_info_unavailable": "NumWorks device information is unavailable.",
+    "numworks_info_product_name": "Product name",
+    "numworks_info_usb_product": "USB product",
+    "numworks_info_firmware_version": "Firmware version",
+    "numworks_info_commit": "Commit",
+    "numworks_info_mode": "Mode",
+    "numworks_info_slot": "Slot",
+    "numworks_info_serial": "Serial",
+    "numworks_info_transfer_size": "DFU transfer size",
+    "numworks_info_storage_integrity": "Storage integrity",
+    "numworks_info_preserved_records": "Preserved non-script records",
+    "valid": "Valid",
+    "warning": "Warning",
+    "numworks_storage_summary": "Storage {used} / {total}",
+    "numworks_storage_usage": "{used}B used; {free}B free; {total}B capacity",
+    "numworks_storage_unreadable": "Storage unreadable — raw backup available",
+    "numworks_storage_parse_failed": "The NumWorks storage image could not be parsed.",
+    "numworks_connected": "Connected to {model} through WebUSB/DFU; {count} Python script(s) loaded.",
+    "numworks_storage_recovery_warning": "NumWorks script storage is damaged or full; mutations are disabled, but a raw backup is still available.",
+    "numworks_auto_connected": "Auto-connected to authorized NumWorks calculator.",
+    "numworks_auto_connect_failed": "NumWorks auto-connect failed",
+    "numworks_info_refreshed": "NumWorks device info refreshed.",
+    "numworks_scripts_refreshed": "NumWorks script storage refreshed: {count} Python script(s).",
+    "numworks_malformed_record": "Malformed Python storage record",
+    "numworks_keys_unavailable": "NumWorks USB mode does not expose remote key injection.",
+    "numworks_dropped_upload_failed": "Dropped NumWorks script upload failed",
+    "numworks_backend_not_connected": "NumWorks backend is not connected.",
+    "numworks_unsupported_file": "Unsupported NumWorks file {file}; only .py scripts can be sent.",
+    "numworks_duplicate_normalized": "Multiple selected files normalize to {name}.py.",
+    "numworks_confirm_overwrite": "“{file}” will replace the existing NumWorks script “{name}.py”. Continue?",
+    "numworks_overwrite_skipped": "Skipped {file}; overwrite was not confirmed.",
+    "numworks_name_normalized": "NumWorks script name normalized: {file} → {name}.py.",
+    "numworks_no_supported_scripts": "No supported NumWorks scripts were selected.",
+    "numworks_scripts_sent": "Sent {count} Python script(s) to NumWorks storage.",
+    "numworks_upload_failed": "NumWorks script upload failed",
+    "numworks_backup_received": "NumWorks read-only storage backup received ({size} bytes).",
+    "numworks_file_received": "Received {file} from NumWorks storage.",
+    "numworks_receive_selected_failed": "NumWorks receive selected failed",
+    "numworks_scripts_deleted": "Deleted {count} NumWorks script(s).",
+    "numworks_script_renamed": "Renamed {old}.py to {name}.py.",
+    "numworks_script_deleted": "Deleted {name}.py from NumWorks storage.",
+    "numworks_download_failed": "NumWorks download failed",
     "connect_calculator": "Connect Calculator",
     "welcome_title": "Welcome to WebTILP!",
     "welcome_text": "Plug in your calculator, then click \"Connect Calculator\"; WebTILP will detect its family automatically.",
@@ -947,8 +1053,13 @@ function hasHPPrimeWebHidTransport() {
     return Boolean(navigator.hid && self.isSecureContext);
 }
 
+function hasNumWorksWebUsbTransport() {
+    return Boolean(navigator.usb && self.isSecureContext && globalThis.WebTILPNumWorks);
+}
+
 function hasAnySupportedTransport() {
-    return hasWebUsbTransport() || hasEvoWebSerialTransport() || hasHPPrimeWebHidTransport();
+    return hasWebUsbTransport() || hasEvoWebSerialTransport()
+        || hasHPPrimeWebHidTransport() || hasNumWorksWebUsbTransport();
 }
 
 function showToast(message, type = 'error') {
@@ -4351,6 +4462,7 @@ function resetToSplashState() {
     clearActiveOperations();
     state.handle = 0;
     state.activeFamily = DEVICE_FAMILY_TI;
+    state.numWorksBackend = null;
     state.cableOpen = false;
     state.authorizedDevice = null;
     state.connectInProgress = false;
@@ -4433,6 +4545,10 @@ function isNspireActive() {
 
 function isHPPrimeActive() {
     return state.activeFamily === DEVICE_FAMILY_HP_PRIME;
+}
+
+function isNumWorksActive() {
+    return state.activeFamily === DEVICE_FAMILY_NUMWORKS;
 }
 
 function resetFamilySpecificUiText(clearActionTitles = true) {
@@ -4529,9 +4645,56 @@ function setHPPrimeUiState() {
     updateSelectionActionButtons();
 }
 
+function setNumWorksUiState() {
+    updateKeyControlsState(false);
+    if (els.keyCodeInput) {
+        els.keyCodeInput.removeAttribute('list');
+    }
+    clearKeyMapDataList();
+    if (els.fileInput) {
+        els.fileInput.disabled = false;
+        els.fileInput.accept = '.py,text/x-python,text/plain';
+    }
+    updateSendFilesButtonState();
+    [els.btnSyncClock, els.btnNewFolder].forEach(button => {
+        if (button) {
+            button.disabled = true;
+            button.classList.add('disabled');
+            button.title = '';
+        }
+    });
+    if (els.btnScreenshot) {
+        els.btnScreenshot.disabled = true;
+        els.btnScreenshot.classList.add('disabled');
+        els.btnScreenshot.title = t('numworks_screenshot_unavailable');
+    }
+    els.btnIsReady?.classList.add('hidden');
+    els.btnReceiveOs?.classList.add('hidden');
+    els.btnDownloadOsPartial?.classList.add('hidden');
+    els.btnDumpRom?.classList.add('hidden');
+    els.btnLeaveExam?.classList.add('hidden');
+    if (els.btnReceiveBackup) {
+        els.btnReceiveBackup.disabled = false;
+        els.btnReceiveBackup.classList.remove('disabled');
+        els.btnReceiveBackup.title = t('numworks_backup_tooltip');
+    }
+    if (els.btnRefreshDirlist) {
+        els.btnRefreshDirlist.disabled = false;
+        els.btnRefreshDirlist.classList.remove('disabled');
+        els.btnRefreshDirlist.title = t('numworks_refresh_tooltip');
+    }
+    setTextContent(document.getElementById('dropzoneTitle'), t('numworks_dropzone_title'));
+    setTextContent(document.getElementById('dropzoneSubtitle'),
+        t('numworks_dropzone_subtitle'));
+    setTextContent(document.getElementById('panelVarsTitle'), t('numworks_scripts_title'));
+    updateSelectionActionButtons();
+}
+
 function applyActiveFamilyUiState(options = {}) {
     if (isHPPrimeActive()) {
         setHPPrimeUiState();
+    } else if (isNumWorksActive()) {
+        setNumWorksUiState();
     } else {
         setTiUiState(Boolean(options.tiCapabilitiesKnown));
     }
@@ -4545,6 +4708,9 @@ function is84pFamilyActive() {
 function getActiveKeyMapConfig() {
     if (isHPPrimeActive()) {
         return KEYMAP_CONFIG_HP_PRIME;
+    }
+    if (isNumWorksActive()) {
+        return null;
     }
     if (isNspireActive()) {
         return KEYMAP_CONFIG_NSP;
@@ -4973,6 +5139,116 @@ function readHPPrimeInfo(module) {
     return info;
 }
 
+async function authorizeNumWorksDevice(forcePrompt = false) {
+    let device = !forcePrompt && isNumWorksDevice(state.authorizedDevice)
+        ? state.authorizedDevice
+        : null;
+    if (!device && !forcePrompt) {
+        const devices = await getAuthorizedNumWorksDevices();
+        device = devices[0] || null;
+    }
+    if (!device) {
+        device = await requestNumWorksDevice();
+    }
+    if (!device) {
+        const cancelError = new Error(t('numworks_no_device_selected'));
+        cancelError.silent = true;
+        throw cancelError;
+    }
+    state.authorizedDevice = device;
+    return device;
+}
+
+function applyNumWorksStorageSnapshot() {
+    const scripts = state.numWorksBackend?.listScripts() || [];
+    state.features = FEATURE_FLAGS.OPS_RENAME | FEATURE_FLAGS.OPS_DELVAR;
+    state.dirlist = scripts.map(script => ({
+        name: script.name,
+        type: 0,
+        type_name: script.autoImport ? t('numworks_type_python_auto') : t('numworks_type_python'),
+        size: script.size,
+        kind: 'numworks',
+        folder: '',
+        attr: script.autoImport ? 1 : 0,
+        is_folder: 0,
+        extension: 'py',
+        numWorksName: script.name,
+        invalid: !script.valid
+    }));
+    renderDirlist(state.dirlist);
+    return state.dirlist.length;
+}
+
+function readNumWorksInfo() {
+    const info = state.numWorksBackend?.getInfo();
+    if (!info) {
+        throw new Error(t('numworks_info_unavailable'));
+    }
+    const integrityOk = info.headerIntegrity && info.storageFooterValid && info.storageValid;
+    const entries = [
+        { key: t('numworks_info_product_name'), value: info.model || info.productName || 'NumWorks' },
+        { key: t('numworks_info_usb_product'), value: info.productName || 'NumWorks Calculator' },
+        { key: t('numworks_info_firmware_version'), value: info.firmwareVersion || t('unknown') },
+        { key: t('numworks_info_commit'), value: info.commit || t('unknown') },
+        { key: t('numworks_info_mode'), value: info.mode || t('unknown') },
+        { key: t('numworks_info_slot'), value: info.slot || t('unknown') },
+        { key: t('numworks_info_serial'), value: info.serialNumber || t('unknown') },
+        { key: t('numworks_info_transfer_size'), value: `${info.transferSize} B` },
+        { key: t('numworks_info_storage_integrity'), value: integrityOk ? t('valid') : t('warning') },
+        { key: t('numworks_info_preserved_records'), value: info.preservedRecordCount == null
+            ? t('unknown') : String(info.preservedRecordCount) }
+    ];
+    state.deviceInfoEntries = entries;
+    state.deviceModelName = info.model || 'NumWorks';
+    state.deviceInfoProductName = state.deviceModelName;
+    renderDeviceInfo(entries);
+    updateDeviceModelDisplay(state.deviceModelName);
+    if (info.storageValid) {
+        els.memoryInfo.textContent = tFormat('numworks_storage_summary', {
+            used: formatBytes(info.storageUsed),
+            total: formatBytes(info.storageSize)
+        });
+        els.memoryInfo.title = tFormat('numworks_storage_usage', {
+            used: info.storageUsed,
+            free: info.storageFree,
+            total: info.storageSize
+        });
+    } else {
+        els.memoryInfo.textContent = t('numworks_storage_unreadable');
+        els.memoryInfo.title = t('numworks_storage_parse_failed');
+    }
+    return info;
+}
+
+async function connectNumWorks(forcePrompt = true) {
+    const device = await authorizeNumWorksDevice(forcePrompt);
+    await state.numWorksBackend?.close().catch(error => {
+        console.warn('[WebTILP] Failed to close the previous NumWorks session.', error);
+    });
+    state.numWorksBackend = null;
+    const Backend = getNumWorksBackendClass();
+    const backend = new Backend({
+        onProgress() {
+            state.lastProgressTs = Date.now();
+        }
+    });
+    await backend.connect(device);
+    state.numWorksBackend = backend;
+    state.handle = 0;
+    state.cableOpen = true;
+    state.activeFamily = DEVICE_FAMILY_NUMWORKS;
+    state.hpFileSnapshotLoaded = false;
+    applyActiveFamilyUiState();
+    readNumWorksInfo();
+    const count = applyNumWorksStorageSnapshot();
+    setConnected(true);
+    setStatus('status_connected', true);
+    log(tFormat('numworks_connected', { model: state.deviceModelName, count }));
+    if (!backend.getInfo().storageValid) {
+        log(t('numworks_storage_recovery_warning'));
+    }
+}
+
 async function connectHPPrime(forcePrompt = true, discoveryUsbDevice = null) {
     const device = await authorizeHPPrimeDevice(forcePrompt, discoveryUsbDevice);
     const module = await initModule();
@@ -5012,6 +5288,19 @@ async function autoConnectIfAuthorized() {
     if (devices.length === 1) {
         const device = devices[0];
         const detectedFamily = getWebUsbDeviceFamily(device);
+        if (detectedFamily === DEVICE_FAMILY_NUMWORKS) {
+            try {
+                state.connectInProgress = true;
+                state.authorizedDevice = device;
+                await connectNumWorks(false);
+                log(t('numworks_auto_connected'));
+            } catch (err) {
+                logError(err, t('numworks_auto_connect_failed'));
+            } finally {
+                state.connectInProgress = false;
+            }
+            return;
+        }
         if (detectedFamily === DEVICE_FAMILY_HP_PRIME) {
             const hpDevices = await getAuthorizedHPPrimeDevices(device);
             if (hpDevices.length === 1) {
@@ -5358,6 +5647,10 @@ async function connect() {
             }
             const detectedFamily = getWebUsbDeviceFamily(device);
             state.authorizedDevice = device;
+            if (detectedFamily === DEVICE_FAMILY_NUMWORKS) {
+                await connectNumWorks(false);
+                return;
+            }
             if (detectedFamily === DEVICE_FAMILY_HP_PRIME) {
                 await connectHPPrime(true, device);
                 return;
@@ -5418,6 +5711,13 @@ async function getDeviceInfo() {
             const module = await initModule();
             readHPPrimeInfo(module);
             log(t('hp_prime_info_refreshed'));
+            return;
+        }
+        if (isNumWorksActive()) {
+            await state.numWorksBackend.refresh();
+            readNumWorksInfo();
+            applyNumWorksStorageSnapshot();
+            log(t('numworks_info_refreshed'));
             return;
         }
         if (isTi92Selected()) {
@@ -5860,6 +6160,13 @@ async function refreshDirlist() {
             log(tFormat('hp_prime_snapshot_loaded', { count }));
             return;
         }
+        if (isNumWorksActive()) {
+            await state.numWorksBackend.refresh();
+            readNumWorksInfo();
+            const count = applyNumWorksStorageSnapshot();
+            log(tFormat('numworks_scripts_refreshed', { count }));
+            return;
+        }
         await authorizeDevice();
         const module = await initModule();
         const handle = await ensureHandle();
@@ -5889,8 +6196,8 @@ async function refreshDirlist() {
 
 function renderDirlist(entries) {
     const filter = (els.filterInput.value || '').toLowerCase();
-    const showLocation = !isNspireActive() && !isHPPrimeActive();
-    const showKind = !isNspireActive() && !isHPPrimeActive();
+    const showLocation = !isNspireActive() && !isHPPrimeActive() && !isNumWorksActive();
+    const showKind = !isNspireActive() && !isHPPrimeActive() && !isNumWorksActive();
     const table = els.varTableBody.closest('table');
     if (table) {
         table.classList.toggle('hide-location', !showLocation);
@@ -5928,6 +6235,9 @@ function canPreviewVariable(entry, modelId = getActiveCalcModelId()) {
     if (getHPPrimePreviewKind(entry)) {
         return true;
     }
+    if (entry.kind === 'numworks') {
+        return !entry.invalid;
+    }
     if (entry.kind !== 'var') {
         return false;
     }
@@ -5964,6 +6274,9 @@ function getHPPrimePreviewKind(entry) {
 
 function formatVariableDisplayName(entry) {
     const name = entry.name || '';
+    if (entry.kind === 'numworks') {
+        return `${name}.py`;
+    }
     if (calcSupportsFolders() || entry.is_folder === 1) {
         return name;
     }
@@ -6053,11 +6366,13 @@ function renderTableView(entries, filter) {
         const safeName = escapeHtml(formatVariableDisplayName(entry));
         const appContainerInvalid = entry.kind === 'hp'
             && entry.hpAppContainerValid === false;
-        const integrityTitle = appContainerInvalid
-            ? t('hp_prime_app_invalid_container')
-            : 'CRC validation failed; the cached data may be corrupt';
+        const integrityTitle = entry.kind === 'numworks'
+            ? t('numworks_malformed_record')
+            : (appContainerInvalid
+                ? t('hp_prime_app_invalid_container')
+                : 'CRC validation failed; the cached data may be corrupt');
         const integrityWarning = entry.invalid || appContainerInvalid
-            ? `<span class="integrity-warning" title="${escapeHtml(integrityTitle)}" aria-label="Integrity validation failed">⚠ ${appContainerInvalid ? 'APP' : 'CRC'}</span>`
+            ? `<span class="integrity-warning" title="${escapeHtml(integrityTitle)}" aria-label="Integrity validation failed">⚠ ${entry.kind === 'numworks' ? 'DATA' : (appContainerInvalid ? 'APP' : 'CRC')}</span>`
             : '';
         const safeFolderPath = escapeHtml(normalizedFolderPath);
         row.dataset.folderTarget = normalizedFolderPath;
@@ -6118,6 +6433,7 @@ function renderTableView(entries, filter) {
             checkbox.dataset.hpAppChildEditable = entry.hpAppChildEditable ? '1' : '0';
             checkbox.dataset.extension = entry.extension || '';
             checkbox.dataset.invalid = entry.invalid ? '1' : '0';
+            checkbox.dataset.numWorksName = entry.numWorksName || '';
         }
         els.varTableBody.appendChild(row);
     };
@@ -6519,6 +6835,10 @@ function parseKeyCode(input) {
 }
 
 async function sendKey(code) {
+    if (isNumWorksActive()) {
+        log(t('numworks_keys_unavailable'));
+        return;
+    }
     const key = parseKeyCode(code);
     if (key === null) {
         log('Enter a valid key code (hex like 0x05 or decimal).');
@@ -6662,7 +6982,8 @@ function buildEntryFromCheckbox(checkbox) {
         hpAppPartKind: checkbox.dataset.hpAppPartKind || '',
         hpAppChildEditable: checkbox.dataset.hpAppChildEditable === '1',
         extension: checkbox.dataset.extension || '',
-        invalid: checkbox.dataset.invalid === '1'
+        invalid: checkbox.dataset.invalid === '1',
+        numWorksName: checkbox.dataset.numWorksName || ''
     };
 }
 
@@ -6971,6 +7292,14 @@ async function sendDroppedFiles(files, dropFolder) {
             await sendSelectedFiles();
         } catch (error) {
             logError(error, 'Dropped transfer failed');
+        }
+        return;
+    }
+    if (isNumWorksActive()) {
+        try {
+            await sendNumWorksFiles(files);
+        } catch (error) {
+            logError(error, t('numworks_dropped_upload_failed'));
         }
         return;
     }
@@ -8146,6 +8475,60 @@ async function performTransfers(plan, module, options) {
     return { successCount };
 }
 
+async function sendNumWorksFiles(files) {
+    const normalizeName = globalThis.WebTILPNumWorks?.normalizeScriptName;
+    if (!normalizeName || !state.numWorksBackend) {
+        throw new Error(t('numworks_backend_not_connected'));
+    }
+    const existing = new Map(state.dirlist
+        .filter(entry => entry.kind === 'numworks')
+        .map(entry => [String(entry.name).toLowerCase(), entry]));
+    const pending = [];
+    const pendingNames = new Set();
+    for (const file of files) {
+        if (!/\.py$/i.test(file.name || '')) {
+            log(tFormat('numworks_unsupported_file', { file: file.name }));
+            continue;
+        }
+        const normalized = normalizeName(file.name);
+        const key = normalized.toLowerCase();
+        if (pendingNames.has(key)) {
+            throw new Error(tFormat('numworks_duplicate_normalized', { name: normalized }));
+        }
+        const existingEntry = existing.get(key);
+        if (existingEntry
+            && !confirm(tFormat('numworks_confirm_overwrite', {
+                file: file.name,
+                name: normalized
+            }))) {
+            log(tFormat('numworks_overwrite_skipped', { file: file.name }));
+            continue;
+        }
+        const originalBase = String(file.name).replace(/\.py$/i, '');
+        if (originalBase !== normalized) {
+            log(tFormat('numworks_name_normalized', {
+                file: file.name,
+                name: normalized
+            }));
+        }
+        pendingNames.add(key);
+        pending.push({
+            name: normalized,
+            code: await file.text(),
+            autoImport: existingEntry ? Boolean(existingEntry.attr) : true
+        });
+    }
+    if (!pending.length) {
+        log(t('numworks_no_supported_scripts'));
+        return;
+    }
+    await state.numWorksBackend.upsertScripts(pending);
+    setSelectedFiles([]);
+    readNumWorksInfo();
+    applyNumWorksStorageSnapshot();
+    log(tFormat('numworks_scripts_sent', { count: pending.length }));
+}
+
 async function sendSelectedFiles() {
     const files = state.selectedFiles.length
         ? state.selectedFiles
@@ -8217,6 +8600,14 @@ async function sendSelectedFiles() {
             if (successCount > 0) {
                 setSelectedFiles([]);
                 await refreshDirlist();
+            }
+            return;
+        }
+        if (isNumWorksActive()) {
+            try {
+                await sendNumWorksFiles(files);
+            } catch (error) {
+                logError(error, t('numworks_upload_failed'));
             }
             return;
         }
@@ -8360,6 +8751,13 @@ async function receiveBackup() {
             triggerDownload('hp-prime-backup.zip', data);
             module.FS.unlink(target);
             log(tFormat('hp_prime_backup_received', { count: snapshotCount }));
+            return;
+        }
+        if (isNumWorksActive()) {
+            const data = await state.numWorksBackend.readRawStorageImage();
+            const stamp = new Date().toISOString().replace(/[-:]/g, '').replace(/\.\d{3}Z$/, 'Z');
+            triggerDownload(`numworks-storage-${stamp}.bin`, data);
+            log(tFormat('numworks_backup_received', { size: data.byteLength }));
             return;
         }
         await authorizeDevice();
@@ -8636,6 +9034,16 @@ async function downloadHPPrimeEntries(entries) {
     }
 }
 
+function downloadNumWorksEntry(entry) {
+    if (!state.numWorksBackend) {
+        throw new Error(t('numworks_backend_not_connected'));
+    }
+    const script = state.numWorksBackend.getScript(entry.numWorksName || entry.name);
+    triggerDownload(script.name, new TextEncoder().encode(script.code));
+    log(tFormat('numworks_file_received', { file: script.name }));
+    return true;
+}
+
 async function receiveSelected() {
     const selections = getSelectedVarInputs().map(buildEntryFromCheckbox);
     if (!selections.length) {
@@ -8646,6 +9054,19 @@ async function receiveSelected() {
         setButtonLoading(els.btnRecvSelected, true);
         try {
             await downloadHPPrimeEntries(selections);
+        } finally {
+            setButtonLoading(els.btnRecvSelected, false);
+        }
+        return;
+    }
+    if (isNumWorksActive()) {
+        setButtonLoading(els.btnRecvSelected, true);
+        try {
+            for (const entry of selections) {
+                downloadNumWorksEntry(entry);
+            }
+        } catch (err) {
+            logError(err, t('numworks_receive_selected_failed'));
         } finally {
             setButtonLoading(els.btnRecvSelected, false);
         }
@@ -8744,6 +9165,13 @@ async function deleteSelected() {
     }
     setButtonLoading(els.btnDeleteSelected, true);
     try {
+        if (isNumWorksActive()) {
+            await state.numWorksBackend.deleteScripts(selections.map(entry => entry.name));
+            readNumWorksInfo();
+            applyNumWorksStorageSnapshot();
+            log(tFormat('numworks_scripts_deleted', { count: selections.length }));
+            return;
+        }
         await authorizeDevice();
         const module = await initModule();
         const handle = await ensureHandle();
@@ -8834,6 +9262,13 @@ async function renameEntry(entry) {
             }));
             return;
         }
+        if (isNumWorksActive()) {
+            const renamed = await state.numWorksBackend.renameScript(currentName, trimmed);
+            readNumWorksInfo();
+            applyNumWorksStorageSnapshot();
+            log(tFormat('numworks_script_renamed', { old: currentName, name: renamed }));
+            return;
+        }
         await authorizeDevice();
         const module = await initModule();
         const handle = await ensureHandle();
@@ -8905,6 +9340,13 @@ async function deleteEntry(entry) {
             }));
             return;
         }
+        if (isNumWorksActive()) {
+            await state.numWorksBackend.deleteScripts([entry.name]);
+            readNumWorksInfo();
+            applyNumWorksStorageSnapshot();
+            log(tFormat('numworks_script_deleted', { name: entry.name }));
+            return;
+        }
         await authorizeDevice();
         const module = await initModule();
         const handle = await ensureHandle();
@@ -8939,6 +9381,17 @@ async function downloadEntry(entry) {
             await downloadHPPrimeEntry(entry);
         } catch (err) {
             logError(err, t('hp_prime_download_failed'));
+        } finally {
+            setButtonLoading(els.btnRecvSelected, false);
+        }
+        return;
+    }
+    if (isNumWorksActive()) {
+        setButtonLoading(els.btnRecvSelected, true);
+        try {
+            downloadNumWorksEntry(entry);
+        } catch (err) {
+            logError(err, t('numworks_download_failed'));
         } finally {
             setButtonLoading(els.btnRecvSelected, false);
         }
@@ -9249,11 +9702,15 @@ function refreshPreviewReindent() {
 
 function downloadPreviewFile() {
     const session = previewSession;
-    if (!session?.module || !session.receivedPath) {
+    if (!session) {
         return;
     }
     try {
-        const data = session.module.FS.readFile(session.receivedPath);
+        const data = session.data || (session.module && session.receivedPath
+            ? session.module.FS.readFile(session.receivedPath) : null);
+        if (!data) {
+            return;
+        }
         triggerDownload(session.downloadName, data);
     } catch (error) {
         logError(error, 'Preview download failed');
@@ -9319,6 +9776,25 @@ async function previewEntry(entry, actionButton) {
     let options = null;
     let objectUrl = '';
     try {
+        if (entry.kind === 'numworks') {
+            if (!state.numWorksBackend) {
+                throw new Error(t('numworks_backend_not_connected'));
+            }
+            const script = state.numWorksBackend.getScript(entry.numWorksName || entry.name);
+            const data = new TextEncoder().encode(script.code);
+            closePreviewModal();
+            previewSession = {
+                entry,
+                isTIBasic: false,
+                language: 'python',
+                data,
+                downloadName: script.name
+            };
+            openPreviewModal(entry, script.code);
+            log(`Previewed ${script.name}.`);
+            return;
+        }
+
         const hpPreviewKind = getHPPrimePreviewKind(entry);
         if (hpPreviewKind) {
             if (!Number.isInteger(entry.hpIndex) || entry.hpIndex < 0) {
@@ -9771,6 +10247,10 @@ async function takeScreenshot() {
             }));
             return;
         }
+        if (isNumWorksActive()) {
+            log(t('numworks_screenshot_unavailable'));
+            return;
+        }
         await authorizeDevice();
         const module = await initModule();
         const handle = await ensureHandle();
@@ -9939,6 +10419,7 @@ async function nukeConnection(tryReconnect = true) {
     }
     clearActiveOperations('Operation cancelled by emergency reset.');
     const wasHPPrime = isHPPrimeActive();
+    const wasNumWorks = isNumWorksActive();
     if (wasHPPrime && state.module) {
         try {
             await ccallAsync(state.module, 'hp_prime_disconnect', 'number', [], [], { timeoutMs: 8000 });
@@ -9946,14 +10427,21 @@ async function nukeConnection(tryReconnect = true) {
             console.warn('[WebTILP] Failed to close HP Prime WebHID session cleanly', err);
         }
     }
-    if (!wasHPPrime) {
+    if (wasNumWorks) {
+        try {
+            await state.numWorksBackend?.close();
+        } catch (err) {
+            console.warn('[WebTILP] Failed to close the NumWorks WebUSB session cleanly', err);
+        }
+    }
+    if (!wasHPPrime && !wasNumWorks) {
         try { await state.authorizedDevice?.reset(); } catch (e) {}
     }
     if (isNspireActive()) {
         try { await state.authorizedDevice?.forget(); } catch (e) {}
     }
     try {
-        if (state.module && !wasHPPrime) {
+        if (state.module && !wasHPPrime && !wasNumWorks) {
             try {
                 state.module._notify_usb_disconnect();
             } catch (err) {
@@ -9964,6 +10452,7 @@ async function nukeConnection(tryReconnect = true) {
         retireModule(state.module, 'emergency reset');
         state.handle = 0;
         state.activeFamily = DEVICE_FAMILY_TI;
+        state.numWorksBackend = null;
         state.module = null;
         state.cableOpen = false;
         state.authorizedDevice = null;
@@ -10459,7 +10948,11 @@ if ('serviceWorker' in navigator) {
         });
     });
 }
-function handleTransportDisconnect() {
+function handleTransportDisconnect(event = null) {
+    const numWorksBackend = state.numWorksBackend;
+    if (numWorksBackend && event?.device && event.device !== numWorksBackend.device) {
+        return;
+    }
     const silent = state.silentReconnectInProgress;
     clearActiveOperations(silent ? undefined : 'Active operation cancelled due to disconnect.');
     state.handle = 0;
@@ -10467,6 +10960,10 @@ function handleTransportDisconnect() {
     state.authorizedDevice = null;
     state.connectInProgress = false;
     state.handlePromise = null;
+    state.numWorksBackend = null;
+    numWorksBackend?.close().catch(error => {
+        console.warn('[WebTILP] Failed to close the disconnected NumWorks session.', error);
+    });
     if (!silent) {
         state.activeFamily = DEVICE_FAMILY_TI;
         retireModule(state.module, 'device disconnected');
@@ -10480,7 +10977,12 @@ function handleTransportDisconnect() {
     }
 }
 
-function handleTransportConnect() {
+function handleTransportConnect(event = null) {
+    const numWorksBackend = state.numWorksBackend;
+    if (numWorksBackend && event?.device
+        && event.device !== numWorksBackend.device) {
+        return;
+    }
     if (state.silentReconnectInProgress) {
         return;
     }
@@ -10490,6 +10992,10 @@ function handleTransportConnect() {
     state.cableOpen = false;
     state.authorizedDevice = null;
     state.connectInProgress = false;
+    state.numWorksBackend = null;
+    numWorksBackend?.close().catch(error => {
+        console.warn('[WebTILP] Failed to close the reconnected NumWorks session.', error);
+    });
     state.activeFamily = DEVICE_FAMILY_TI;
     setConnected(false);
     setStatus('status_device_connected', false);
@@ -10509,12 +11015,12 @@ if (navigator.serial) {
 if (navigator.hid) {
     navigator.hid.addEventListener('disconnect', event => {
         if (isHPPrimeDevice(event.device)) {
-            handleTransportDisconnect();
+            handleTransportDisconnect(event);
         }
     });
     navigator.hid.addEventListener('connect', event => {
         if (isHPPrimeDevice(event.device)) {
-            handleTransportConnect();
+            handleTransportConnect(event);
         }
     });
 }

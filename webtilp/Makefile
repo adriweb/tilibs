@@ -70,6 +70,11 @@ PREJS_DEV = webtilp_prejs_dev.js
 PREJS_PROD = webtilp_prejs_prod.js
 APP_JS_SRC = app.js
 APP_JS_BUNDLE = app.bundle.js
+NUMWORKS_JS_SRC = numworks_backend.js
+NUMWORKS_JS_ENTRY = numworks_backend_entry.mjs
+NUMWORKS_JS_BUNDLE = numworks_backend.bundle.js
+NUMWORKS_JS_MODULES = numworks_storage.js numworks_platform.js numworks_transport.js
+NUMWORKS_JS_BANNER = /*! Bundles Upsilon.js 1.5.0 and WebDFU 1.0.5 under MIT; see third_party/NUMWORKS-PROVENANCE.md. */
 BUILD_PROFILE_CSS = build-profile.css
 PYTHON_CONVERTER_ASSETS = TIVarsLib.js TIVarsLib.wasm WebLuna.js WebLuna.wasm
 
@@ -89,11 +94,13 @@ prod: prepare_prod
 prepare_dev: prepare_python_converters
 	cp -a $(PREJS_DEV) $(PREJS)
 	cp -a $(APP_JS_SRC) $(APP_JS_BUNDLE)
+	bun build $(NUMWORKS_JS_ENTRY) --outfile $(NUMWORKS_JS_BUNDLE) --format=iife --sourcemap=linked --banner='$(NUMWORKS_JS_BANNER)'
 	printf "%s\n" ".brand-mark { background: linear-gradient(135deg, #ff8a8a, #ff3b3b); box-shadow: 0 10px 24px rgba(255, 59, 59, 0.25); } .brand-mark > span.brand-beta { font-size: 0; } .brand-mark > span.brand-beta::after { content: \"DEV\"; font-size: 8px; }" > $(BUILD_PROFILE_CSS)
 
 prepare_prod: prepare_python_converters
 	cp -a $(PREJS_PROD) $(PREJS)
 	bun build $(APP_JS_SRC) --outfile $(APP_JS_BUNDLE) --minify --sourcemap=linked
+	bun build $(NUMWORKS_JS_ENTRY) --outfile $(NUMWORKS_JS_BUNDLE) --format=iife --minify --sourcemap=linked --banner='$(NUMWORKS_JS_BANNER)'
 	printf "%s\n" "/* prod build profile */" > $(BUILD_PROFILE_CSS)
 
 prepare_python_converters:
@@ -106,20 +113,25 @@ $(PREJS):
 	cp -a $(PREJS_DEV) $(PREJS)
 
 stamp:
-	@BUILD_SHA="$(BUILD_SHA)" BUILD_DATE="$(BUILD_DATE)" python3 -c "import hashlib, json, os, pathlib; root=pathlib.Path('.'); files=['app.css','build-profile.css','app.bundle.js','app.js','highlighter.min.js','webtilp.html','webtilp.js','webtilp.wasm','webtilp_prejs.js','TIVarsLib.js','TIVarsLib.wasm','WebLuna.js','WebLuna.wasm','site.webmanifest','sw.js.in']; files += [str(p.relative_to(root)) for p in sorted((root/'i18n').glob('*.json'))] if (root/'i18n').exists() else []; h=hashlib.sha256(); [h.update((root/f).read_bytes()) for f in files if (root/f).exists()]; content_hash=h.hexdigest()[:12]; build_sha=os.environ.get('BUILD_SHA','unknown'); build_date=os.environ.get('BUILD_DATE','unknown'); build_id=f'{build_sha}-{content_hash}'; version={'buildId':build_id,'gitSha':build_sha,'buildDate':build_date,'contentHash':content_hash}; (root/'version.json').write_text(json.dumps(version, indent=2)+'\\n', encoding='utf-8'); sw_in=root/'sw.js.in'; sw_out=root/'sw.js'; sw_out.write_text(sw_in.read_text(encoding='utf-8').replace('__BUILD_ID__', build_id), encoding='utf-8') if sw_in.exists() else None"
+	@BUILD_SHA="$(BUILD_SHA)" BUILD_DATE="$(BUILD_DATE)" python3 -c "import hashlib, json, os, pathlib; root=pathlib.Path('.'); files=['app.css','build-profile.css','app.bundle.js','app.js','numworks_backend.bundle.js','numworks_backend.js','highlighter.min.js','webtilp.html','webtilp.js','webtilp.wasm','webtilp_prejs.js','TIVarsLib.js','TIVarsLib.wasm','WebLuna.js','WebLuna.wasm','site.webmanifest','sw.js.in']; files += [str(p.relative_to(root)) for p in sorted((root/'i18n').glob('*.json'))] if (root/'i18n').exists() else []; h=hashlib.sha256(); [h.update((root/f).read_bytes()) for f in files if (root/f).exists()]; content_hash=h.hexdigest()[:12]; build_sha=os.environ.get('BUILD_SHA','unknown'); build_date=os.environ.get('BUILD_DATE','unknown'); build_id=f'{build_sha}-{content_hash}'; version={'buildId':build_id,'gitSha':build_sha,'buildDate':build_date,'contentHash':content_hash}; (root/'version.json').write_text(json.dumps(version, indent=2)+'\\n', encoding='utf-8'); sw_in=root/'sw.js.in'; sw_out=root/'sw.js'; sw_out.write_text(sw_in.read_text(encoding='utf-8').replace('__BUILD_ID__', build_id), encoding='utf-8') if sw_in.exists() else None"
 
 test:
 	$(CXX) -std=c++17 -Wall -Wextra -Werror hp_prime_app.cpp tests/test_hp_prime_app.cpp -o tests/test_hp_prime_app
 	./tests/test_hp_prime_app
 	rm -f tests/test_hp_prime_app
 	node --check $(APP_JS_SRC)
+	node --check $(NUMWORKS_JS_SRC)
+	@for file in $(NUMWORKS_JS_MODULES); do node --check $$file || exit 1; done
+	node --check $(NUMWORKS_JS_ENTRY)
 	node tests/test_hp_prime_frontend.js
+	node tests/test_numworks_backend.js
+	node tests/test_numworks_frontend.js
 	python3 i18n/check.py
 
 $(TARGET): $(SRC) $(LIBS) $(PREJS)
 	$(EMCC) $(CXXFLAGS) $(SRC) $(INCLUDES) $(LIBS) -o $(TARGET) $(EMCCFLAGS)
 
 clean:
-	rm -f $(TARGET) webtilp.wasm webtilp.worker.js sw.js version.json $(APP_JS_BUNDLE) $(BUILD_PROFILE_CSS) $(PYTHON_CONVERTER_ASSETS)
+	rm -f $(TARGET) webtilp.wasm webtilp.worker.js sw.js version.json $(APP_JS_BUNDLE) $(NUMWORKS_JS_BUNDLE) $(BUILD_PROFILE_CSS) $(PYTHON_CONVERTER_ASSETS)
 
-.PHONY: all dev prod prepare_dev prepare_prod prepare_python_converters clean stamp
+.PHONY: all dev prod prepare_dev prepare_prod prepare_python_converters test clean stamp

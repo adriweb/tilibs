@@ -63,6 +63,10 @@ jobs:
           VCPKG_DEFAULT_HOST_TRIPLET: ${{ matrix.arch }}-linux-release
           VCPKG_FORCE_SYSTEM_BINARIES: 1
 
+      - name: Test WebTILP JavaScript backends
+        if: matrix.os == 'ubuntu-22.04' && matrix.statictype == 'ON'
+        run: make -C webtilp test
+
       - name: Upload install folder
         uses: actions/upload-artifact@v4
         with:
