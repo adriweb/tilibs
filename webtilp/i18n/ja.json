@@ -135,6 +135,7 @@
   "confirm_replug_after_device_info": "この後、ケーブルを物理的に抜き差しする必要があります。続行しますか？",
   "confirm_load_dirlist_before_transfer": "ディレクトリー一覧が未取得です。転送前に取得することを強く推奨します。今読み込みますか？",
   "confirm_overwrite_existing": "{name} は既に存在します。上書きしますか？",
+  "confirm_cross_model_evo_os": "ファイル {file} は {source} 用ですが、接続中の電卓には {target} 用 OS が必要です。別モデル用の OS を送信すると失敗する可能性があります。それでも続行しますか？",
   "confirm_large_backup_continue_standard": "バックアップサイズが 65535 バイトを超えて失敗する可能性があります。大容量は TIGroup 推奨です。標準バックアップを続行しますか？",
   "confirm_receive_os_notice": "電卓から TI-Nspire OS を受信します。数分かかる場合があります。\nその後、OS ファイルをコンピューターに保存するダイアログが表示されます。\n開始するには Nspire で [on]→[2]→[menu]→[A] (\"Send OS\") を押してください。\n準備できたらここで OK を押して続行してください。",
   "confirm_dump_rom_notice": "ROM 内容は Texas Instruments の著作物です。\nROM イメージの複製や配布は許可されていません。\n法的制約を理解したうえでのみ続行してください。\n\nこの操作はダンパーを電卓に送信し、ROM を読み戻します。\n続行しますか？",
