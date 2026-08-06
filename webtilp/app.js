@@ -476,6 +476,7 @@ const I18N_EN = {
     "confirm_replug_after_device_info": "You will have to physically unplug and replug the cable after that. Continue?",
     "confirm_load_dirlist_before_transfer": "Directory listing has not been loaded yet. It is highly recommended before transfers. Load it now?",
     "confirm_overwrite_existing": "{name} already exists there. Overwrite?",
+    "confirm_cross_model_evo_os": "The file {file} is for {source}, but the connected calculator expects an OS for {target}. Sending an OS for another model may fail. Continue anyway?",
     "confirm_large_backup_continue_standard": "Backup data may exceed 65535 bytes and fail. TIGroup is recommended for large backups. Continue with standard backup anyway?",
     "confirm_receive_os_notice": "This will receive the TI-Nspire OS from the calculator. It should take a few minutes.\nYou will then be prompted to save the OS file on your computer.\nTo begin the process, on your Nspire, press [on] then [2] then [menu] then [A] (\"Send OS\").\nOnce done, confirm here / press OK to continue.",
     "confirm_dump_rom_notice": "ROM contents are copyrighted by Texas Instruments.\nYou are not allowed to copy and/or distribute ROM images.\nProceed only if you understand the legal restrictions.\n\nThis will send a dumper program to the calculator and then read back the ROM.\nContinue?",
@@ -4155,7 +4156,7 @@ function getActiveKeyMapConfig() {
     return null;
 }
 
-function getNspireOsExtensionFromModule(module) {
+function getFlashOsExtensionFromModule(module) {
     if (!module) {
         return null;
     }
@@ -4165,6 +4166,40 @@ function getNspireOsExtensionFromModule(module) {
         console.warn('[WebTILP] Failed to query flash OS extension', err);
         return null;
     }
+}
+
+const EVO_OS_MODEL_BY_EXTENSION = new Map([
+    ['84b2', 'TI-84 Evo'],
+    ['84pk2', 'TI-84 Evo'],
+    ['83b2', 'TI-83 Evo'],
+    ['83pk2', 'TI-83 Evo'],
+    ['84tb2', 'TI-84 Evo-T'],
+    ['84tpk2', 'TI-84 Evo-T']
+]);
+
+function getEvoOsModelFromExtension(extension) {
+    return EVO_OS_MODEL_BY_EXTENSION.get(String(extension || '').toLowerCase()) || null;
+}
+
+function getEvoOsModelFromFileName(fileName) {
+    const match = String(fileName || '').match(/\.([^.]+)$/);
+    return getEvoOsModelFromExtension(match?.[1]);
+}
+
+function confirmEvoOsModelMismatch(item, module) {
+    if (item?.fileClass !== 'os') {
+        return true;
+    }
+    const sourceModel = getEvoOsModelFromFileName(item.file?.name);
+    const targetModel = getEvoOsModelFromExtension(getFlashOsExtensionFromModule(module));
+    if (!sourceModel || !targetModel || sourceModel === targetModel) {
+        return true;
+    }
+    return confirm(tFormat('confirm_cross_model_evo_os', {
+        file: item.file?.name || 'OS file',
+        source: sourceModel,
+        target: targetModel
+    }));
 }
 
 function ensureSupportedTransport() {
@@ -6927,6 +6962,10 @@ async function performTransfers(plan, module, options) {
         try {
             const isVar = isVarFileClass(item.fileClass);
             const displayName = item.entryName ? `${item.file.name} (${item.entryName})` : item.file.name;
+            if (!confirmEvoOsModelMismatch(item, module)) {
+                log(`Skipped ${item.file.name}, because the cross-model OS transfer was declined.`);
+                continue;
+            }
             let targetName = item.entryName || '';
             const targetFolder = options.hasFolder ? (item.targetFolder || item.entryFolder || '') : '';
             const folderOverride = options.hasFolder && isVar && item.targetFolder && item.targetFolder !== item.entryFolder
@@ -7306,7 +7345,7 @@ async function receiveOs() {
         }
         state.nspireOsReceiveStarted = true;
         updateNspireOsButtons(true, (state.features & FEATURE_FLAGS.OPS_ROMDUMP) !== 0);
-        const extension = getNspireOsExtensionFromModule(module);
+        const extension = getFlashOsExtensionFromModule(module);
         const baseName = 'ti-nspire-os';
         const targetName = extension ? `${baseName}.${extension}` : 'ti-nspire-os.tnc';
         const target = `/downloads/${targetName}`;
