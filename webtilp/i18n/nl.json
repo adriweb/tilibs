@@ -135,6 +135,7 @@
   "confirm_replug_after_device_info": "Je moet de kabel daarna fysiek loskoppelen en opnieuw aansluiten. Doorgaan?",
   "confirm_load_dirlist_before_transfer": "De maplijst is nog niet geladen. Dit wordt sterk aanbevolen vóór overdrachten. Nu laden?",
   "confirm_overwrite_existing": "{name} bestaat daar al. Overschrijven?",
+  "confirm_cross_model_evo_os": "Het bestand {file} is bedoeld voor {source}, maar de aangesloten rekenmachine verwacht een besturingssysteem voor {target}. Een besturingssysteem voor een ander model verzenden kan mislukken. Toch doorgaan?",
   "confirm_large_backup_continue_standard": "Back-upgegevens kunnen groter zijn dan 65535 bytes en mislukken. TIGroup wordt aanbevolen voor grote back-ups. Toch doorgaan met een standaard back-up?",
   "confirm_receive_os_notice": "Dit ontvangt het TI-Nspire OS van de rekenmachine. Dit kan enkele minuten duren.\nDaarna kun je het OS-bestand op je computer opslaan.\nStart op je Nspire met [on], dan [2], dan [menu], dan [A] (\"Send OS\").\nBevestig hier / druk op OK om door te gaan.",
   "confirm_dump_rom_notice": "ROM-inhoud is auteursrechtelijk beschermd door Texas Instruments.\nJe mag ROM-images niet kopiëren en/of verspreiden.\nGa alleen verder als je de juridische beperkingen begrijpt.\n\nDit stuurt een dumper naar de rekenmachine en leest daarna de ROM terug.\nDoorgaan?",

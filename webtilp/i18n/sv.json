@@ -135,6 +135,7 @@
   "confirm_replug_after_device_info": "Du måste fysiskt koppla ur och ansluta kabeln igen efter detta. Fortsätta?",
   "confirm_load_dirlist_before_transfer": "Kataloglistan är inte laddad ännu. Den rekommenderas starkt före överföringar. Ladda nu?",
   "confirm_overwrite_existing": "{name} finns redan där. Skriva över?",
+  "confirm_cross_model_evo_os": "Filen {file} är avsedd för {source}, men den anslutna räknaren förväntar sig ett operativsystem för {target}. Att skicka ett operativsystem för en annan modell kan misslyckas. Fortsätta ändå?",
   "confirm_large_backup_continue_standard": "Backupdata kan överstiga 65535 byte och misslyckas. TIGroup rekommenderas för stora backuper. Fortsätt ändå med standardbackup?",
   "confirm_receive_os_notice": "Detta tar emot TI-Nspire OS från kalkylatorn. Det kan ta några minuter.\nDärefter blir du ombedd att spara OS-filen på din dator.\nFör att börja, tryck på Nspire [on], sedan [2], sedan [menu], sedan [A] (\"Send OS\").\nNär klart, bekräfta här / tryck OK för att fortsätta.",
   "confirm_dump_rom_notice": "ROM-innehåll är upphovsrättsskyddat av Texas Instruments.\nDu får inte kopiera och/eller distribuera ROM-avbilder.\nFortsätt endast om du förstår de juridiska begränsningarna.\n\nDetta skickar ett dumperprogram till kalkylatorn och läser sedan tillbaka ROM.\nFortsätta?",
