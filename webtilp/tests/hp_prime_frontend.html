@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>WebTILP HP Prime frontend test</title>
+</head>
+<body>
+<p id="loading">Loading WebTILP with HP Prime lifecycle controls…</p>
+<script>
+    localStorage.setItem('webtilp.settings', JSON.stringify({
+        cableModel: 'auto',
+        calcModel: 'auto',
+        cableTimeout: 10,
+        cableDelay: 10,
+        language: 'en',
+        convertPythonFiles: true
+    }));
+    fetch('../webtilp.html')
+        .then(response => {
+            if (!response.ok) {
+                throw new Error(`Failed to load WebTILP (${response.status}).`);
+            }
+            return response.text();
+        })
+        .then(html => {
+            const closingScript = '</scr' + 'ipt>';
+            const withBase = html
+                .replace('<head>', '<head><base href="../">')
+                .replace(`<script src="app.bundle.js">${closingScript}`,
+                    `<script src="app.js">${closingScript}<script src="tests/hp_prime_frontend_harness.js">${closingScript}`);
+            document.open();
+            document.write(withBase);
+            document.close();
+        })
+        .catch(error => {
+            document.getElementById('loading').textContent = error.message;
+            console.error(error);
+        });
+</script>
+</body>
+</html>
