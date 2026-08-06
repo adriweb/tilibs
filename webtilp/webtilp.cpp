@@ -17,6 +17,9 @@
 #define gssize ssize_t
 #endif
 
+extern "C" int hp_prime_library_init(void);
+extern "C" int hp_prime_library_exit(void);
+
 extern "C" {
 
 enum {
@@ -614,6 +617,12 @@ int init() {
     printf("tifiles_library_init: %d\n", result);
     result = ticalcs_library_init();
     printf("ticalcs_library_init: %d\n", result);
+    const int hp_result = hp_prime_library_init();
+    printf("hp_prime_library_init: %d\n", hp_result);
+    if (hp_result != 0) {
+        fprintf(stderr, "HP Prime support initialization failed (%d); continuing with TI support.\n",
+                hp_result);
+    }
 
     printf("tilibs init done!\n");
 
@@ -945,6 +954,7 @@ int close_cable(CableHandle* handle) {
 EMSCRIPTEN_KEEPALIVE
 int cleanup() {
     printf("library exits...\n");
+    const int result_hp = hp_prime_library_exit();
     if (g_calc_handle) {
         if (g_calc_attached) {
             ticalcs_cable_detach(g_calc_handle);
@@ -968,6 +978,10 @@ int cleanup() {
     printf("tifiles_library_exit: %d\n", result_tifiles);
     printf("ticalcs_library_exit: %d\n", result_ticalcs);
     printf("ticables_library_exit: %d\n", result_ticables);
+    printf("hp_prime_library_exit: %d\n", result_hp);
+    if (result_hp != 0) {
+        return result_hp;
+    }
     if (result_ticables != 0) {
         return result_ticables;
     }
