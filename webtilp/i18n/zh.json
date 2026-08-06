@@ -135,6 +135,7 @@
   "confirm_replug_after_device_info": "执行后你需要手动拔插一次线缆。是否继续？",
   "confirm_load_dirlist_before_transfer": "目录列表尚未加载。强烈建议在传输前加载。现在加载吗？",
   "confirm_overwrite_existing": "{name} 已存在。是否覆盖？",
+  "confirm_cross_model_evo_os": "文件 {file} 适用于 {source}，但已连接的计算器需要 {target} 的操作系统。发送其他型号的操作系统可能会失败。仍要继续吗？",
   "confirm_large_backup_continue_standard": "备份数据可能超过 65535 字节并失败。大备份建议使用 TIGroup。仍要继续标准备份吗？",
   "confirm_receive_os_notice": "此操作将从计算器接收 TI-Nspire OS，可能需要几分钟。\n随后会提示你将 OS 文件保存到电脑。\n开始前，请在 Nspire 上按 [on]、[2]、[menu]、[A]（\"Send OS\"）。\n准备好后，请在此确认 / 按 OK 继续。",
   "confirm_dump_rom_notice": "ROM 内容受 Texas Instruments 版权保护。\n你不得复制和/或分发 ROM 镜像。\n仅在你理解相关法律限制时继续。\n\n此操作会先向计算器发送 dumper 程序，然后读回 ROM。\n是否继续？",
