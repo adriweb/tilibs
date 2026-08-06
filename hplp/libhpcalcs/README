@@ -1,0 +1,315 @@
+hplp: code for communicating with recent HP calculators
+=======================================================
+
+hplp (still entirely in libhpcalcs for now) is the beginning of a toolkit for
+two-way communications with HP Prime calculators.
+
+See below for detailed build instructions. Note that
+the install_hplp.sh script provided alongside this README
+( https://raw.github.com/debrouxl/hplp/master/install_hplp.sh )
+automates part of the build process.
+
+
+Status (2014/06/03)
+-------------------
+The code base does:
+* work on Windows, Linux and MacOS X;
+* support communication with a single Prime calculator connected to the
+  computer. The communication is known to work with the following firmware
+  versions, but might not work with other older or newer versions, if HP
+  performs backwards-incompatible changes in the protocol (like TI does):
+  * "SDKV0.30" firmware version from mid-August 2013;
+  * "SDKV0.32" build 5447 firmware version from late November 2013;
+  * partial success with the V0.031.6030 / V0.032.6030 build 6030 firmware
+    versions published late May 2013.
+* implement 10 operations (without _known_ bugs):
+  * ready check;
+  * get calculator information;
+  * set date and time;
+  * receive screenshot;
+  * send file (for now, the leading metadata of *.hpprgm, if any, needs to be
+    stripped manually);
+  * receive file;
+  * receive backup;
+  * send key(s) (remote control);
+  * send chat;
+  * receive chat;
+* provide a terminal-based UI: the test program "test_hpcalcs".
+
+The code base doesn't:
+* perform color conversion on PNG screenshots (libhpcalcs should use libpng to
+  uncompress the files, mangle pixels, and recompress to PNG);
+* provide a user-friendly GUI for the above, but a GUI can definitely build
+  upon the library easily enough;
+* implement _proper_ conversion from UTF-16 LE to other charsets on its own:
+  that's a task for libicu, Qt or other libraries.
+
+
+Goals
+-----
+Laying the groundwork for GUIs dealing with two-way communication with HP
+Prime calculators, and possibly 39gII (Prime and 39gII are similar), using
+USB HID class, and possibly later fake MSD for firmware upgrades.
+
+
+Non-goals
+---------
+As far as I'm concerned, working _by myself_ on:
+* duplicating / replacing code targeting older, non-USB HID-based HP
+  calculators;
+* a GUI comparable to HP's Connectivity Kit. However, other people should
+  obviously do it, in order to make the software much more usable !
+
+
+Build process summary
+---------------------
+As mentioned above, the repository contains an script for automating the
+part of the build strictly related to libhpcalcs / hplp: install_hplp.sh .
+
+The build process is that of pretty much any autotools-based piece of
+software:
+$ autoreconf -i -f
+$ ./configure
+$ ./make check
+# make install
+
+The terminal-based test program is in tests/test_hpcalcs.
+
+For now, the main external dependency of libhpcalcs is HIDAPI:
+https://github.com/signal11/hidapi.git
+Unless your Linux distro packages it (few do), you need to compile and
+install it yourself (it is also an autotools-based project: configure,
+make, make install).
+
+
+Detailed build & configuration process for Debian, Ubuntu, Mint and derivatives
+(courtesy of Jonathan Cameron)
+-------------------------------------------------------------------------------
+
+1. Install build dependencies (packages required for building libhpcalcs).
+As root (with root shell, or sudo)
+# (sudo) apt-get install build-essential git autoconf automake autopoint libtool gettext xdg-utils libpng-dev libudev-dev libusb-1.0-0-dev autotools-dev
+
+2. Install hidapi:
+
+$ mkdir -p $HOME/lpg # or anywhere else you see fit
+$ cd $HOME/lpg
+$ git clone https://github.com/signal11/hidapi.git hidapi
+$ cd hidapi
+
+Follow the directions from the README.txt file:
+
+$ ./bootstrap
+$ ./configure --prefix=/usr
+$ make
+
+As root (with root shell, or sudo):
+# (sudo) make install     <----- as root, or using sudo
+
+3. Install libhpcalcs
+
+Download
+https://raw.github.com/debrouxl/hplp/master/install_hplp.sh
+and copy it to, for instance, $HOME/hplp
+
+$ cd $HOME/lpg
+$ chmod +x install_hplp.sh
+# (sudo) ./install_hplp.sh
+
+4. Test hplp
+
+As root, verify that you can run test_hpcalcs.
+Plug in your HP Prime to the computer and turn it on.
+Wait about 10 seconds and then run:
+
+$ $HOME/lpg/hplp/libhpcalcs/tests/test_hpcalcs
+
+You should see the menu of possible operations.
+If you do, hplp is working and you are successfully communicating with your Prime.
+
+5. Set up for normal users to access the Prime with the test software.
+
+   a. If you are on your own isolated computer (e.g, laptop),
+      then add the following udev rules to the new file
+      /etc/udev/rules.d/82-hp-prime.rules :
+
+        # HP Prime Calculator
+        SUBSYSTEM=="usb",  ATTRS{idVendor}=="03f0", ATTRS{idProduct}=="0441", MODE="0666"
+        KERNEL=="hidraw*", ATTRS{idVendor}=="03f0", ATTRS{idProduct}=="0441", MODE="0666"
+
+      Note that anyone on your system will be able to access your Prime with
+      the hplp software.
+
+      If you are on a shared system and you want to avoid anyone accessing the
+      device but you, do this instead:
+
+        # HP Prime Calculator
+        SUBSYSTEM=="usb",  ATTRS{idVendor}=="03f0", ATTRS{idProduct}=="0441", ACTION=="add", GROUP="dialout", MODE="0664"
+        KERNEL=="hidraw*", ATTRS{idVendor}=="03f0", ATTRS{idProduct}=="0441", ACTION=="add", GROUP="dialout", MODE="0664"
+
+        and add yourself to the 'dialout' group.  You may need to switch to
+        the new group for this to work (eg: newgrp dialout).
+
+      To activate the new udev rule, turn off your HP Prime, turn it back on,
+      and wait for about 10 seconds. Then, check the permissions for the device
+      (in /dev/hidraw? and /dev/usb/hiddev?).
+
+
+NOTES:
+  * technically, compilation doesn't require being root, only the 'make install'
+    commands for hidapi and libhpcalcs (embedded into install_hplp.sh) require
+    root (and even then, only if installing to /usr or some root-only location).
+    install_hplp.sh cannot use sudo on its own, as it's not necessarily
+    configured by default.
+  * in the above directions, the source location to be $HOME/lpg. You may prefer
+    some other location, just replace $HOME/lpg by your location.
+  * the install prefix is forced to /usr, so that you don't have to adjust the
+    LD_LIBRARY_PATH environment variable, or add a line in /etc/ld.so.conf, or
+    add a file in /etc/ld.so.conf.d.
+    The install prefix is controlled by using the --prefix option to configure,
+    for hidapi and within install_hplp.sh.
+
+
+Technical notes
+---------------
+The code leverages HIDAPI, and it was strongly inspired by the time-proven
+concepts and APIs of the libti* family, which I (Lionel Debroux) am the
+current maintainer of.
+The GPL'ed libti* family ( https://github.com/debrouxl/tilibs ) forms the
+back-end for TILP, TIEmu, TilEm and titools (mainly), and contains the only
+third-party portable FLOSS code with two-way communication support for all
+three series of TI-Z80, TI-68k and TI-Nspire graphing calculators.
+Putting together framework strongly inspired by libti* clearly took some work,
+but having such a foundation saves time in the longer term. IOW, it's worth
+the apparent complexity.
+
+Obviously, until the calculator's protocol is better documented, the API
+will change in backwards-incompatible manners (for instance, the output
+parameters of check ready and get infos operations).
+
+
+TODO list
+---------
+* ... hopefully attract _code_ contributors who have more free time than I do;
+* a GUI, but I won't be the one doing it.
+  Nowadays, Qt is the main choice for a portable, good-looking, fast UI
+  toolkit (for native code programs). GTK+ used to be a better choice wrt.
+  portability, but that was years ago, and in 2013-2015, a number of
+  applications and desktop environments are switching from GTK+ to Qt.
+  UIs based on Web technologies are another option, Qt provides support for
+  those (QtWebkit / QtWebEngine) as well.
+* strip out leading program metadata, if any, from .hpprgm files, like the
+  UTF-16LE BOM is already stripped.
+  Implementation notes:
+  * in a loop, attempt to read 4 bytes containing size, and seek forward of
+    that many bytes. If this leads the offset beyond EOF, break out.
+* add some form of packet parsing + validation API, which can be used for
+  both internal sanity checking and packet dissection;
+* add 39gII support, probably, as the Prime is similar to the 39gII. That's
+  where the usefulness of the cables / calcs separation and cables generic
+  API will become most obvious.
+  Implementation notes:
+  * move the upper layer from prime_cmd into a new file called by both
+    prime_cmd and the new file (like e.g. dusb_cmd in libticalcs).
+  * the 39gII has 00 00 CRC.
+* modify the way recv_backup works for more reliability.
+  Implementation notes:
+  * recv_backup should attempt to receive as much data as the calculator sends,
+    and then split the received data. The main heuristic would be to assume
+    that some packets were lost, and traverse backwards the contents of the
+    current file to find a (00) F7 01 xx xx xx xx packet ? While this could
+    fail in some circumstances, it should usually salvage more data.
+  * recv_file shall probably be refactored as well;
+  * Marcus Von Cube reported that when receiving a backup fails, the test
+    program crashes:
+"
+hpcalcs INFO: prime_send_data: send remaining failed
+hpcalcs ERROR: calc_prime_recv_backup: s_recv_backup failed
+hpcalcs ERROR: hpcalcs_calc_recv_backup: recv_backup failed
+hpfiles INFO: Displaying var entry 83EC8B55
+hpfiles INFO: Name: 
+"
+* implement screenshot color conversion, with libpng;
+* add progress feedback functionality, improved from libti*: the libti*
+  implementation is too complex.
+  Implementation notes:
+  * can information for current chunk of the transfer + information for the
+    transfer as a whole be passed through arguments of a single callback.
+* add port number functionality, known from libticables, in the API. That
+  will enable passthrough mode for communication between real and/or
+  emulated calculators;
+* fill in torture test;
+* add two APIs for dynamically building NULL-terminated const char * arrays
+  from the two first columns of typesprime.c::PRIME_CONST.
+* somehow gain better knowledge of the protocol, so as to be able to...
+* ... add more operations and data structures. 
+* add dissectors and session logs, improved from libticables.
+  Design goals:
+  * make it possible to trace packet flow direction;
+  * make it possible to validate (sanity check) packets , to begin with...
+  Implementation notes:
+  * new APIs for registering and unregistering (multiple) callbacks;
+  * call the registered callbacks upon packet send and packet receive;
+  * leverage the packet parsing / validation code.
+* add support for Prime in fake MSD mode, for firmware upgrades ? I've
+  already partially analyzed the protocol and published my notes at
+  http://tiplanet.org/hpwiki/index.php?title=HP_Prime/Linking_Protocol
+  but I'm not really confident about it ;)
+  Need to find a library for MSD. libusb does not recommend using it
+  in MSD mode.
+* certainly more... at least, if users and programmers think the software
+  fits a purpose :-)
+
+
+License
+-------
+Copyright (C) 2013-2015 Lionel Debroux
+
+This program is free software; you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation; either version 2 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License
+along with this program; if not, write to the Free Software Foundation,
+Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA.
+
+
+Changelog
+---------
+2013/11/03 - 2013/12/30: improve logging, create install_hplp.sh, improve
+error passing, fix bugs reported by more beta-testers, add more operations.
+2013/10/22 - 2013/11/03: Created autotools-based project and test client;
+vastly expand the code, to the point it becomes releasable (if not really
+usable). First public announcement (limited scope).
+2013/10/21: Split into multiple files, but still piggybacking hidtest.cpp.
+2013/10/20: First public PoC.
+2013/10/19: Project started.
+
+
+Credits (demoscene style)
+-------------------------
+* _many_ thanks to Xavier "critor" Andréani for testing many program versions
+  on his real Prime and providing many USB packet dumps (which I analyzed
+  with Wireshark) and terminal output sessions;
+* many thanks to Marcus Von Cube for providing USB packet dumps for the 39gII,
+  which show that it's quite similar to the Prime;
+* thanks to Jonathan Cameron for writing a more detailed build procedure for
+  Debian and derivatives;
+* thanks to other beta-testers who reported bugs on TI-Planet and MoHPC:
+  * with the Prime: persalteas (Linux), wawachief (Linux & MacOS X), DJ
+    Omnimaga (Windows), Adriweb (MacOS X & Windows), Jonathan Cameron (Linux),
+    Cristian Arezzini (Linux), LarsF (MacOS X), Egan Ford (MacOS X);
+  * with the 39gII: Marcus Von Cube;
+* greetings to the other TI-Planet ( http://tiplanet.org/ ) admins;
+* greetings to the HP Prime developer team at HP: some of its members spend
+  time attending user message boards and interacting with users and programmers,
+  even in communities traditionally interested in TI calcs (Omnimaga, Cemetech,
+  TI-Planet), which is a win-win move for both HP and its users;
+* fuck TI EdTech management imposing a closed-minded, lose-lose stance on the
+  Nspire platform, despite repeated community input since 2007.
