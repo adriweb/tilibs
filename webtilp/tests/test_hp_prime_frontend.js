@@ -87,6 +87,7 @@ async function testFamilyUiState() {
         els,
         DEVICE_FAMILY_TI: 'ti',
         DEVICE_FAMILY_HP_PRIME: 'hp-prime',
+        DEVICE_FAMILY_NUMWORKS: 'numworks',
         KEYMAP_CONFIG_HP_PRIME: { listId: 'hp-prime-keys', entries: [] },
         document: {
             getElementById(id) { return textElements[id] || null; }
@@ -108,8 +109,9 @@ async function testFamilyUiState() {
     };
     vm.createContext(context);
     for (const name of [
-        'isHPPrimeActive', 'resetFamilySpecificUiText', 'setTiUiState',
-        'setHPPrimeUiState', 'applyActiveFamilyUiState'
+        'isHPPrimeActive', 'isNumWorksActive', 'resetFamilySpecificUiText',
+        'setTiUiState', 'setHPPrimeUiState', 'setNumWorksUiState',
+        'applyActiveFamilyUiState'
     ]) {
         vm.runInContext(extractFunction(name), context);
     }
@@ -191,6 +193,12 @@ async function testFamilyUiState() {
         'translation refresh keeps the active keymap datalist binding');
     assert.equal(keyMapClears, keyMapClearsBeforeRefresh,
         'translation refresh does not clear the populated keymap datalist');
+
+    state.activeFamily = 'numworks';
+    context.applyActiveFamilyUiState();
+    assert.equal(textElements.panelVarsTitle.textContent,
+        'translated:numworks_scripts_title');
+    assert.equal(els.btnScreenshot.disabled, true);
 }
 
 async function testTableDropUsesPrimeTransferPath() {
