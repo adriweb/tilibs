@@ -828,6 +828,19 @@ body {
     gap: 6px;
 }
 
+.integrity-warning {
+    display: inline-block;
+    margin-left: 0.45rem;
+    color: #d29922;
+    font-size: 0.78em;
+    font-weight: 700;
+    white-space: nowrap;
+}
+
+tr.integrity-invalid {
+    box-shadow: inset 3px 0 0 #d29922;
+}
+
 .folder-toggle {
     border: 0;
     background: transparent;
