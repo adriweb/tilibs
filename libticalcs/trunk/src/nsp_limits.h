@@ -1,0 +1,13 @@
+#ifndef __TICALCS_NSP_LIMITS__
+#define __TICALCS_NSP_LIMITS__
+
+#include <stdint.h>
+
+#define NSP_OS_MAX_SIZE (128U << 20)
+
+static inline int nsp_os_receive_size_valid(uint32_t size)
+{
+	return size > 0 && size < NSP_OS_MAX_SIZE;
+}
+
+#endif
