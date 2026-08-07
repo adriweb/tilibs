@@ -41,6 +41,7 @@
 
 #include "nsp_vpkt.h"
 #include "nsp_cmd.h"
+#include "nsp_limits.h"
 
 // Helper function for multiple functions below.
 static gchar * build_path(CalcModel model, VarRequest * vr)
@@ -1368,7 +1369,7 @@ static int		recv_os    (CalcHandle* handle, FlashContent* content)
 				}
 
 				const uint32_t declared_size = ((uint32_t)pkt.data[1] << 24) | ((uint32_t)pkt.data[2] << 16) | ((uint32_t)pkt.data[3] << 8) | (uint32_t)pkt.data[4];
-				if (declared_size == 0)
+				if (!nsp_os_receive_size_valid(declared_size))
 				{
 					ret = ERR_INVALID_PACKET;
 					break;
