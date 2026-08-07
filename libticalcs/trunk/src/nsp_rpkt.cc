@@ -298,6 +298,12 @@ int TICALL nsp_recv(CalcHandle* handle, NSPRawPacket* pkt)
 			pkt->ack       = buf[13];
 			pkt->seq       = buf[14];
 			pkt->hdr_sum   = buf[15];
+			if (pkt->data_size > NSP_DATA_SIZE)
+			{
+				ticalcs_critical("%s: legacy NavNet data size %u exceeds the %u-byte packet buffer", __FUNCTION__, pkt->data_size, NSP_DATA_SIZE);
+				ret = ERR_INVALID_PACKET;
+				break;
+			}
 
 			if (pkt->src_port == 0x00fe || pkt->src_port == 0x00ff || pkt->src_port == 0x00d3)
 			{
