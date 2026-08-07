@@ -71,6 +71,18 @@ static int err_code(uint8_t code)
 	return 0;
 }
 
+int ticalcs_nsp_os_status_result(uint8_t status, uint8_t *progress)
+{
+	if (status == NSP_ERR_OK)
+	{
+		*progress = 100;
+		return 0;
+	}
+
+	*progress = status;
+	return ERR_CALC_ERROR3 + err_code(status);
+}
+
 /////////////----------------
 
 static int put_str(uint8_t *dst, const char *src)
@@ -944,7 +956,12 @@ int TICALL nsp_cmd_r_progress(CalcHandle *handle, uint8_t *value)
 			ticalcs_info("  %i/100", *value);
 			return 0;
 		case NSP_CMD_STATUS:
-			return ERR_CALC_ERROR3 + err_code(*value);
+			retval = ticalcs_nsp_os_status_result(*value, value);
+			if (!retval)
+			{
+				ticalcs_info("  OS status OK, assuming 100/100");
+			}
+			return retval;
 		default:
 			if (pkt->cmd == NSP_CMD_OS_OK)
 			{
