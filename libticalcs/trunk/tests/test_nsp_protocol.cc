@@ -4,8 +4,10 @@
 #include <string.h>
 
 #include "../src/error.h"
-#include "../src/nsp_limits.h"
 #include "../src/ticalcs.h"
+#include "../src/internal.h"
+#include "../src/nsp_cmd.h"
+#include "../src/nsp_limits.h"
 
 #define CHECK(condition) \
 	do { \
@@ -59,9 +61,21 @@ static void check_os_receive_size_limit(void)
 	CHECK(!nsp_os_receive_size_valid(UINT32_MAX));
 }
 
+static void check_os_status_result(void)
+{
+	uint8_t progress = 0;
+	CHECK(ticalcs_nsp_os_status_result(NSP_ERR_OK, &progress) == 0);
+	CHECK(progress == 100);
+
+	progress = 0;
+	CHECK(ticalcs_nsp_os_status_result(0x02, &progress) == ERR_CALC_ERROR3 + 1);
+	CHECK(progress == 0x02);
+}
+
 int main(void)
 {
 	check_oversized_legacy_packet_is_rejected_before_data_read();
 	check_os_receive_size_limit();
+	check_os_status_result();
 	return 0;
 }
