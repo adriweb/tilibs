@@ -491,6 +491,7 @@ uint8_t ticalcs_nsp_error_code_from_index(unsigned int index);
 unsigned int ticalcs_dusb_error_count(void);
 unsigned int ticalcs_dbus_error_count(void);
 unsigned int ticalcs_nsp_error_count(void);
+TICALCS_TESTABLE int ticalcs_nsp_os_status_result(uint8_t status, uint8_t *progress);
 
 // dusb_cmd.c
 
