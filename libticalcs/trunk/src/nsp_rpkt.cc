@@ -303,6 +303,7 @@ int TICALL nsp_recv(CalcHandle* handle, NSPRawPacket* pkt)
 			pkt->hdr_sum   = buf[15];
 			if (pkt->data_size > NSP_DATA_SIZE)
 			{
+				ticalcs_critical("%s: legacy NavNet data size %u exceeds the %u-byte packet buffer", __FUNCTION__, pkt->data_size, NSP_DATA_SIZE);
 				event_data = oversized_data;
 				ret = ticables_cable_recv(handle->cable, oversized_data, pkt->data_size);
 				if (!ret)
