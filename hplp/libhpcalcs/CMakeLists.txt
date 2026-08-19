@@ -21,8 +21,13 @@ set(HPCALCS_SOURCES
         src/prime_protocol_v2.c
         src/prime_cmd.c
         src/calc_prime.c
-        src/calc_none.c
-        src/link_prime_hid.c)
+        src/calc_none.c)
+
+if(EMSCRIPTEN)
+    list(APPEND HPCALCS_SOURCES src/link_prime_webhid.c)
+else()
+    list(APPEND HPCALCS_SOURCES src/link_prime_hid.c)
+endif()
 
 add_library(hpcalcs STATIC ${HPCALCS_SOURCES})
 target_include_directories(hpcalcs PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src")
@@ -33,14 +38,22 @@ target_compile_definitions(hpcalcs
             PACKAGE="libhpcalcs"
             GETTEXT_PACKAGE="libhpcalcs")
 
-find_package(ZLIB REQUIRED)
-find_package(PkgConfig REQUIRED)
-if(APPLE OR WIN32)
-    pkg_check_modules(HIDAPI REQUIRED IMPORTED_TARGET hidapi>=0.8.0)
+if(EMSCRIPTEN)
+    target_compile_definitions(hpcalcs PRIVATE __EMSCRIPTEN__=1)
+    # EM_ASYNC_JS WebHID calls suspend synchronous C operations while browser
+    # promises complete.  CMake consumers must therefore link with Asyncify;
+    # backup file payloads use Emscripten's zlib port.
+    target_link_options(hpcalcs INTERFACE -sASYNCIFY=1 -sUSE_ZLIB=1)
 else()
-    pkg_check_modules(HIDAPI REQUIRED IMPORTED_TARGET hidapi-hidraw>=0.8.0)
+    find_package(ZLIB REQUIRED)
+    find_package(PkgConfig REQUIRED)
+    if(APPLE OR WIN32)
+        pkg_check_modules(HIDAPI REQUIRED IMPORTED_TARGET hidapi>=0.8.0)
+    else()
+        pkg_check_modules(HIDAPI REQUIRED IMPORTED_TARGET hidapi-hidraw>=0.8.0)
+    endif()
+    target_link_libraries(hpcalcs PRIVATE PkgConfig::HIDAPI ZLIB::ZLIB)
 endif()
-target_link_libraries(hpcalcs PRIVATE PkgConfig::HIDAPI ZLIB::ZLIB)
 
 set_target_properties(hpcalcs PROPERTIES
         OUTPUT_NAME hpcalcs
@@ -67,4 +80,17 @@ if(BUILD_TESTS)
             DEPENDS hpcalcs_prime_transport_test hpcalcs_prime_protocol_v2_test
             WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
             COMMENT "Run libhpcalcs transport tests")
+endif()
+
+if(EMSCRIPTEN)
+    add_executable(hpcalcs_webhid_link_smoke EXCLUDE_FROM_ALL
+            tests/webhid_link_smoke.c)
+    target_link_libraries(hpcalcs_webhid_link_smoke PRIVATE hpcalcs)
+
+    add_executable(hpcalcs_webhid_mock_test EXCLUDE_FROM_ALL
+            tests/test_webhid_mock.c)
+    target_link_libraries(hpcalcs_webhid_mock_test PRIVATE hpcalcs)
+    target_link_options(hpcalcs_webhid_mock_test PRIVATE
+            --pre-js "${CMAKE_CURRENT_SOURCE_DIR}/tests/webhid_mock_pre.js"
+            -sEXIT_RUNTIME=1 -sASSERTIONS=1 -O0)
 endif()
