@@ -2,7 +2,7 @@
  * libhpcalcs: hand-helds support libraries.
  * Copyright (C) 2013 Lionel Debroux
  * Code patterns and snippets borrowed from libticables & libticalcs:
- * Copyright (C) 1999-2009 Romain Liévin
+ * Copyright (C) 1999-2009 Romain LiÃ©vin
  * Copyright (C) 2009-2013 Lionel Debroux
  * Copyright (C) 1999-2013 libti* contributors.
  *
@@ -40,6 +40,8 @@
 typedef struct _calc_fncts calc_fncts;
 //! Opaque type for internal _calc_handle.
 typedef struct _calc_handle calc_handle;
+//! Opaque HP Prime protocol state owned by a calculator handle.
+typedef struct _prime_protocol_state prime_protocol_state;
 
 //! Indices of the function pointers in _calc_fncts.
 typedef enum {
@@ -90,6 +92,15 @@ typedef struct {
     uint8_t * data;
 } calc_infos;
 
+//! HP Prime metadata and dynamically negotiated protocol state.
+typedef struct {
+    uint32_t build;
+    uint8_t protocol_version;
+    uint8_t supports_v2;
+    char version[17];
+    char serial[17];
+} calc_prime_protocol_info;
+
 //! Internal structure containing information about the calculator, and function pointers.
 struct _calc_fncts {
     calc_model model;
@@ -115,6 +126,7 @@ struct _calc_handle {
     void * handle;
     const calc_fncts * fncts;
     cable_handle * cable;
+    prime_protocol_state * prime; ///< Negotiated protocol and transfer state for HP Prime handles.
     int attached; // Should be made explicitly atomic with GCC >= 4.7 or Clang, but int is atomic on most ISAs anyway.
     int open; // Should be made explicitly atomic with GCC >= 4.7 or Clang, but int is atomic on most ISAs anyway.
     int busy; // Should be made explicitly atomic with GCC >= 4.7 or Clang, but int is atomic on most ISAs anyway.
@@ -136,7 +148,7 @@ typedef struct {
 typedef struct
 {
     uint32_t size;
-    uint8_t data[PRIME_RAW_HID_DATA_SIZE + 1];
+    uint8_t data[PRIME_RAW_HID_DATA_SIZE_MAX + 1];
 } prime_raw_hid_pkt;
 
 
@@ -248,6 +260,21 @@ HPEXPORT int HPCALL hpcalcs_cable_detach(calc_handle * handle);
  * \return NULL if an error occurred, otherwise a cable handle.
  **/
 HPEXPORT cable_handle * HPCALL hpcalcs_cable_get(calc_handle * handle);
+
+/**
+ * \brief Returns the HP Prime protocol metadata recorded by GET_INFOS.
+ * \param handle an HP Prime calculator handle.
+ * \param info output structure receiving build, version, serial and protocol state.
+ * \return 0 upon success, nonzero otherwise.
+ */
+HPEXPORT int HPCALL hpcalcs_prime_get_protocol_info(calc_handle * handle, calc_prime_protocol_info * info);
+/**
+ * \brief Dynamically negotiates the best supported HP Prime protocol.
+ * \param handle an attached HP Prime calculator handle after the initial legacy GET_INFOS exchange.
+ * \return 0 after a validated V2 or legacy round trip, nonzero if neither protocol could be validated.
+ * \note This library deliberately does not negotiate unproven protocol V3.
+ */
+HPEXPORT int HPCALL hpcalcs_prime_negotiate_protocol(calc_handle * handle);
 
 /**
  * \brief Checks whether the calculator is ready
