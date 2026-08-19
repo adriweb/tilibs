@@ -22,6 +22,10 @@
 #include "prime_cmd.h"
 #include "internal.h"
 
+#ifdef __EMSCRIPTEN__
+extern void prime_webhid_begin_exchange_js(void);
+#endif
+
 struct _prime_protocol_state {
     uint32_t build;
     uint32_t next_message_id;
@@ -532,6 +536,14 @@ static int prime_v2_send_message_with_retries(calc_handle *handle,
     if (out_message_id != NULL) {
         *out_message_id = message_id;
     }
+
+#ifdef __EMSCRIPTEN__
+    /* Clear only reports delivered before this request.  Delayed ACKs are
+     * common on the 64-byte G1 WebHID transport and can otherwise starve the
+     * new message's ACK.  Doing this before sendReport() preserves any reply
+     * emitted while the request write resolves. */
+    prime_webhid_begin_exchange_js();
+#endif
 
     res = prime_v2_send_frames_from(handle, message_id, data, size, 0,
                                     PRIME_V2_SEQUENCE_FIRST);
