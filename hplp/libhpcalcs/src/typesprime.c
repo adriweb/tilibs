@@ -2,7 +2,7 @@
  * libhpfiles: hand-helds support libraries.
  * Copyright (C) 2013 Lionel Debroux
  * Code patterns and snippets borrowed from libticables & libticalcs:
- * Copyright (C) 1999-2009 Romain Liévin
+ * Copyright (C) 1999-2009 Romain LiÃ©vin
  * Copyright (C) 2009-2013 Lionel Debroux
  * Copyright (C) 1999-2013 libti* contributors.
  *
@@ -24,7 +24,7 @@
 /**
  * \file typesprime.c Files: Prime file types and utility functions.
  */
- 
+
 #ifdef HAVE_CONFIG_H
 # include <config.h>
 #endif
@@ -50,7 +50,7 @@ const char * PRIME_CONST[][3] = {
     { "", "unknown", "Unknown" },
     { "APP", "hpapp", "Application" },
     { "LIST", "hplist", "List" },
-    { "MATRIX", "hpmatrix", "Matrix" },
+    { "MATRIX", "hpmat", "Matrix" },
     { "NOTE", "hpnote", "Note" },
     { "PRGM", "hpprgm", "Program" },
     { "APPNOTE", "hpappnote", "App Note" }, // XXX Tentative
@@ -135,7 +135,15 @@ int prime_parsesplitfilename(char * file, char * extension, uint8_t * out_type, 
     }
     else {
         if (extension != NULL && extension[0] == '.') {
-            type = prime_fext2byte(extension + 1); // Skip '.'
+            const char * extension_without_dot = extension + 1;
+            type = prime_fext2byte(extension_without_dot); // Skip '.'.
+            // Older HPLP builds exposed the non-standard .hpmatrix spelling.
+            // Keep accepting it for compatibility, but emit the Connectivity
+            // Kit spelling (.hpmat) through prime_byte2fext().
+            if (type == PRIME_TYPE_UNKNOWN
+                && !strcasecmp(extension_without_dot, "hpmatrix")) {
+                type = PRIME_TYPE_MATRIX;
+            }
         }
         else {
             hpfiles_error("%s: extension not found in filepath, unhandled type", __FUNCTION__);
