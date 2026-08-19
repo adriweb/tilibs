@@ -2,7 +2,7 @@
  * libhpfiles: hand-helds support libraries.
  * Copyright (C) 2013 Lionel Debroux
  * Code patterns and snippets borrowed from libticables & libticalcs:
- * Copyright (C) 1999-2009 Romain Liévin
+ * Copyright (C) 1999-2009 Romain LiÃ©vin
  * Copyright (C) 2009-2013 Lionel Debroux
  * Copyright (C) 1999-2013 libti* contributors.
  *
@@ -37,7 +37,9 @@
 // Since the only thing from this header libhpfiles uses (for now) is char16_t:
 // * on modern GCC and Clang (the main targets of this code base), use the builtin __CHAR16_TYPE__ preprocessor define;
 // * otherwise, fall back to uint16_t.
-#ifdef __CHAR16_TYPE__
+#if defined(__cplusplus)
+// char16_t is a built-in type in C++11 and later.
+#elif defined(__CHAR16_TYPE__)
 typedef __CHAR16_TYPE__ char16_t;
 #else
 typedef uint16_t char16_t;
@@ -50,7 +52,7 @@ typedef uint16_t char16_t;
 // Not sure the target calculators even support such long filenames...
 #define FILES_VARNAME_MAXLEN 128
 
-//! Generic structure for storing the contents of a variable, or requesting that a variable be sent. 
+//! Generic structure for storing the contents of a variable, or requesting that a variable be sent.
 typedef struct
 {
     char16_t name[FILES_VARNAME_MAXLEN+1];
