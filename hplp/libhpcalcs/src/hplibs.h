@@ -2,7 +2,7 @@
  * libhpfiles, libhpcables, libhpcalcs: hand-helds support libraries.
  * Copyright (C) 2013 Lionel Debroux
  * Code patterns and snippets borrowed from libticables & libticalcs:
- * Copyright (C) 1999-2009 Romain Liévin
+ * Copyright (C) 1999-2009 Romain LiÃ©vin
  * Copyright (C) 2009-2013 Lionel Debroux
  * Copyright (C) 1999-2013 libti* contributors.
  *
@@ -69,9 +69,17 @@ typedef struct {
 #define USB_PID_PRIME1 (0x0441)
 //! USB Product ID of the Prime calculator in firmware revisions >= 8151.
 #define USB_PID_PRIME2 (0x1541)
+//! USB Product ID of the second-generation Prime calculator.
+#define USB_PID_PRIME_G2 (0x2441)
 
-//! Size of a raw HID packet for the Prime.
-#define PRIME_RAW_HID_DATA_SIZE (64)
+//! Legacy Prime HID payload size, excluding the report ID byte.
+#define PRIME_RAW_HID_DATA_SIZE_LEGACY (64)
+//! G2 Prime HID payload size, excluding the report ID byte.
+#define PRIME_RAW_HID_DATA_SIZE_G2 (1024)
+//! Largest raw HID payload accepted by the library.
+#define PRIME_RAW_HID_DATA_SIZE_MAX PRIME_RAW_HID_DATA_SIZE_G2
+//! Compatibility alias used by the legacy packet implementation.
+#define PRIME_RAW_HID_DATA_SIZE PRIME_RAW_HID_DATA_SIZE_LEGACY
 
 #ifdef __cplusplus
 extern "C" {

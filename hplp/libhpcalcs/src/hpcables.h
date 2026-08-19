@@ -2,7 +2,7 @@
  * libhpcables: hand-helds support libraries.
  * Copyright (C) 2013 Lionel Debroux
  * Code patterns and snippets borrowed from libticables & libticalcs:
- * Copyright (C) 1999-2009 Romain Liévin
+ * Copyright (C) 1999-2009 Romain LiÃ©vin
  * Copyright (C) 2009-2013 Lionel Debroux
  * Copyright (C) 1999-2013 libti* contributors.
  *
@@ -57,6 +57,7 @@ struct _cable_handle {
     void * handle;
     const cable_fncts * fncts;
     int read_timeout;
+    uint32_t report_size; ///< HID payload bytes, excluding an unnumbered report ID byte.
     int open; // Should be made explicitly atomic with GCC >= 4.7 or Clang, but int is atomic on most ISAs anyway.
     int busy; // Should be made explicitly atomic with GCC >= 4.7 or Clang, but int is atomic on most ISAs anyway.
 };
@@ -172,6 +173,13 @@ HPEXPORT int HPCALL hpcables_options_get_read_timeout(cable_handle * handle);
  * \return 0 if the operation succeeded, nonzero otherwise.
  */
 HPEXPORT int HPCALL hpcables_options_set_read_timeout(cable_handle * handle, int timeout);
+
+/**
+ * \brief Gets the HID payload size used by the cable.
+ * \param handle the cable handle.
+ * \return Payload size in bytes, or the legacy 64-byte size if unavailable.
+ */
+HPEXPORT uint32_t HPCALL hpcables_options_get_report_size(cable_handle * handle);
 
 /**
  * \brief Probes the given cable.
