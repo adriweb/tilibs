@@ -31,7 +31,9 @@
 
 #include <stdlib.h>
 
-#include <hidapi.h>
+#ifndef __EMSCRIPTEN__
+# include <hidapi.h>
+#endif
 
 #include <hpcables.h>
 #include "internal.h"
@@ -100,7 +102,10 @@ HPEXPORT int HPCALL hpcables_init(hpcables_config * config) {
             }
             hpcables_info(_("hpcables library version %s"), hpcables_version_get());
 
+            res = 0;
+#ifndef __EMSCRIPTEN__
             res = hid_init();
+#endif
             if (res == 0) {
                 res = ERR_SUCCESS;
                 hpcables_info(_("%s: init succeeded"), __FUNCTION__);
@@ -130,7 +135,9 @@ HPEXPORT int HPCALL hpcables_exit(void) {
     }
     else {
         if (hpcables_instance_count == 1) {
+#ifndef __EMSCRIPTEN__
             hid_exit();
+#endif
         }
 
         hpcables_instance_count--;
