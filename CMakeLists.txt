@@ -62,7 +62,12 @@ project(tilibs C CXX)
 option(BUILD_TESTS "Whether to build tests" ON)
 option(BUILD_TIFILEUTIL "Whether to build the tifileutil tool" ON)
 option(BUILD_SHARED_LIBS "Whether to build shared libs instead of static ones" ON)
-option(BUILD_HPLP "Build the HP Prime communication libraries" OFF)
+if(EMSCRIPTEN)
+    option(BUILD_HPLP "Build the HP Prime communication libraries" ON)
+else()
+    option(BUILD_HPLP "Build the HP Prime communication libraries" OFF)
+endif()
+
 option(BUILD_ROM_DUMPERS "Whether to rebuild libticalcs ROM dumpers with cross-binutils" OFF)
 
 if(BUILD_ROM_DUMPERS AND NOT BUILD_TIFILEUTIL)
