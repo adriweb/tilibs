@@ -62,6 +62,7 @@ project(tilibs C CXX)
 option(BUILD_TESTS "Whether to build tests" ON)
 option(BUILD_TIFILEUTIL "Whether to build the tifileutil tool" ON)
 option(BUILD_SHARED_LIBS "Whether to build shared libs instead of static ones" ON)
+option(BUILD_HPLP "Build the HP Prime communication libraries" OFF)
 option(BUILD_ROM_DUMPERS "Whether to rebuild libticalcs ROM dumpers with cross-binutils" OFF)
 
 if(BUILD_ROM_DUMPERS AND NOT BUILD_TIFILEUTIL)
@@ -211,6 +212,10 @@ add_subdirectory(libticonv/trunk)
 add_subdirectory(libtifiles/trunk)
 add_subdirectory(libticables/trunk)
 
+if(BUILD_HPLP)
+    add_subdirectory(hplp/libhpcalcs)
+endif()
+
 if(BUILD_TIFILEUTIL)
     add_subdirectory(tifileutil)
 endif()
@@ -218,8 +223,13 @@ endif()
 add_subdirectory(libticalcs/trunk)
 
 if(BUILD_TESTS)
+    set(CHECK_DEPENDENCIES
+            ticonv_check tifiles2_check ticables2_check ticalcs2_check)
+    if(BUILD_HPLP)
+        list(APPEND CHECK_DEPENDENCIES hpcalcs_check)
+    endif()
     add_custom_target(check
-            DEPENDS ticonv_check tifiles2_check ticables2_check ticalcs2_check
+            DEPENDS ${CHECK_DEPENDENCIES}
             COMMENT "Run all torture tests"
             EXCLUDE_FROM_ALL
     )
