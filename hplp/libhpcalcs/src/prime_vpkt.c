@@ -41,6 +41,10 @@
 
 #define PRIME_LEGACY_MAX_STALE_REPORTS 4096U
 
+#ifdef __EMSCRIPTEN__
+extern void prime_webhid_begin_exchange_js(void);
+#endif
+
 // -----------------------------------------------
 // Calcs - HP Prime virtual packets
 // -----------------------------------------------
@@ -102,6 +106,16 @@ HPEXPORT int HPCALL prime_send_data(calc_handle * handle, prime_vtl_pkt * pkt) {
             report_size = PRIME_RAW_HID_DATA_SIZE_LEGACY;
         }
         payload_size = report_size - 1;
+
+#ifdef __EMSCRIPTEN__
+        /* Emscripten's WebHID backend queues input reports independently of
+         * the synchronous-looking C receive calls.  A fresh legacy command is
+         * the safe request boundary at which to discard reports left by the
+         * preceding exchange. */
+        if (report_size == PRIME_RAW_HID_DATA_SIZE_LEGACY) {
+            prime_webhid_begin_exchange_js();
+        }
+#endif
 
         memset((void *)&raw, 0, sizeof(raw));
         q = (pkt->size) / payload_size;
