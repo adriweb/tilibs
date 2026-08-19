@@ -64,7 +64,11 @@ project(tilibs C CXX)
 option(BUILD_TESTS "Whether to build tests" ON)
 option(BUILD_TIFILEUTIL "Whether to build the tifileutil tool" ON)
 option(BUILD_SHARED_LIBS "Whether to build shared libs instead of static ones" ON)
-option(BUILD_HPLP "Build the HP Prime communication libraries" OFF)
+if(EMSCRIPTEN)
+    option(BUILD_HPLP "Build the HP Prime communication libraries" ON)
+else()
+    option(BUILD_HPLP "Build the HP Prime communication libraries" OFF)
+endif()
 
 # Our modules
 list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/.cmake)
