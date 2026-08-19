@@ -2,7 +2,7 @@
  * libhpcables: hand-helds support libraries.
  * Copyright (C) 2013 Lionel Debroux
  * Code patterns and snippets borrowed from libticables & libticalcs:
- * Copyright (C) 1999-2009 Romain Liévin
+ * Copyright (C) 1999-2009 Romain LiÃ©vin
  * Copyright (C) 2009-2013 Lionel Debroux
  * Copyright (C) 1999-2013 libti* contributors.
  *
@@ -41,6 +41,7 @@ static int cable_nul_open(cable_handle * handle) {
     handle->handle = NULL;
     handle->fncts = NULL;
     handle->read_timeout = 0;
+    handle->report_size = PRIME_RAW_HID_DATA_SIZE_LEGACY;
     handle->open = 0;
     handle->busy = 0;
     return 0;
