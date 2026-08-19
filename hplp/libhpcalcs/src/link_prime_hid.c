@@ -2,7 +2,7 @@
  * libhpcables: hand-helds support libraries.
  * Copyright (C) 2013 Lionel Debroux
  * Code patterns and snippets borrowed from libticables & libticalcs:
- * Copyright (C) 1999-2009 Romain Liévin
+ * Copyright (C) 1999-2009 Romain LiÃ©vin
  * Copyright (C) 2009-2013 Lionel Debroux
  * Copyright (C) 1999-2013 libti* contributors.
  *
@@ -32,6 +32,9 @@
 #include <inttypes.h>
 
 #include <hidapi.h>
+#ifdef __APPLE__
+# include <hidapi_darwin.h>
+#endif
 
 #include <hplibs.h>
 #include <hpcalcs.h>
@@ -40,28 +43,29 @@
 
 extern const cable_fncts cable_prime_hid_fncts;
 
+static const unsigned short prime_product_ids[] = {
+    USB_PID_PRIME1,
+    USB_PID_PRIME2,
+    USB_PID_PRIME_G2
+};
+
 static int cable_prime_hid_probe(cable_handle * handle) {
-    int res;
+    int res = ERR_CABLE_PROBE_FAILED;
     // In fact, we're not using handle here, but let's nevertheless flag misuse of the API.
     if (handle != NULL) {
         // Enumerating the device seems to do the job.
-        struct hid_device_info * info = hid_enumerate(USB_VID_HP, USB_PID_PRIME1);
-        if (info != NULL) {
-            hid_free_enumeration(info);
-            res = ERR_SUCCESS;
-            hpcables_info("%s: cable probe succeeded, PID=%04X", __FUNCTION__, USB_PID_PRIME1);
-        }
-        else {
-            info = hid_enumerate(USB_VID_HP, USB_PID_PRIME2);
+        size_t i;
+        for (i = 0; i < sizeof(prime_product_ids) / sizeof(prime_product_ids[0]); i++) {
+            struct hid_device_info * info = hid_enumerate(USB_VID_HP, prime_product_ids[i]);
             if (info != NULL) {
                 hid_free_enumeration(info);
                 res = ERR_SUCCESS;
-                hpcables_info("%s: cable probe succeeded, PID=%04X", __FUNCTION__, USB_PID_PRIME2);
+                hpcables_info("%s: cable probe succeeded, PID=%04X", __FUNCTION__, prime_product_ids[i]);
+                break;
             }
-            else {
-                res = ERR_CABLE_PROBE_FAILED;
-                hpcables_error("%s: cable probe failed", __FUNCTION__);
-            }
+        }
+        if (res != ERR_SUCCESS) {
+            hpcables_error("%s: cable probe failed", __FUNCTION__);
         }
     }
     else {
@@ -72,32 +76,41 @@ static int cable_prime_hid_probe(cable_handle * handle) {
 }
 
 static int cable_prime_hid_open(cable_handle * handle) {
-    int res;
+    int res = ERR_CABLE_NOT_OPEN;
     if (handle != NULL) {
-        hid_device * device_handle = hid_open(USB_VID_HP, USB_PID_PRIME1, NULL);
-        unsigned int pid = USB_PID_PRIME1;
-        if (device_handle) {
-device_handle_ok:
+        hid_device * device_handle = NULL;
+        unsigned int pid = 0;
+        size_t i;
+#ifdef __APPLE__
+        hid_darwin_set_open_exclusive(0);
+#endif
+        for (i = 0; i < sizeof(prime_product_ids) / sizeof(prime_product_ids[0]); i++) {
+            device_handle = hid_open(USB_VID_HP, prime_product_ids[i], NULL);
+            if (device_handle != NULL) {
+                pid = prime_product_ids[i];
+                break;
+            }
+        }
+        if (device_handle != NULL) {
             handle->model = CABLE_PRIME_HID;
             handle->handle = (void *)device_handle;
             handle->fncts = &cable_prime_hid_fncts;
             // Especially screenshots can take a while before beginning to send data.
             handle->read_timeout = 8000;
+            handle->report_size = pid == USB_PID_PRIME_G2
+                ? PRIME_RAW_HID_DATA_SIZE_G2
+                : PRIME_RAW_HID_DATA_SIZE_LEGACY;
             handle->open = 1;
             handle->busy = 0;
             res = ERR_SUCCESS;
-            hpcables_info("%s: cable open succeeded, PID=%04X", __FUNCTION__, pid);
+            hpcables_info("%s: cable open succeeded, PID=%04X, report size=%" PRIu32,
+                          __FUNCTION__, pid, handle->report_size);
         }
         else {
-            device_handle = hid_open(USB_VID_HP, USB_PID_PRIME2, NULL);
-            pid = USB_PID_PRIME2;
-            if (device_handle) {
-                goto device_handle_ok;
-            }
-            else {
-                res = ERR_CABLE_NOT_OPEN;
-                hpcables_error("%s: cable open failed", __FUNCTION__);
-            }
+            const wchar_t * hid_message = hid_error(NULL);
+            hpcables_error("%s: cable open failed%s%ls", __FUNCTION__,
+                           hid_message != NULL ? ": " : "",
+                           hid_message != NULL ? hid_message : L"");
         }
     }
     else {
@@ -117,6 +130,7 @@ static int cable_prime_hid_close(cable_handle * handle) {
                 handle->model = CABLE_NUL;
                 handle->handle = NULL;
                 handle->fncts = NULL;
+                handle->report_size = PRIME_RAW_HID_DATA_SIZE_LEGACY;
                 handle->open = 0;
                 res = ERR_SUCCESS;
                 hpcables_info("%s: cable close succeeded", __FUNCTION__);
@@ -198,7 +212,7 @@ static int cable_prime_hid_recv(cable_handle * handle, uint8_t ** data, uint32_t
         hid_device * device_handle = (hid_device *)handle->handle;
         if (device_handle != NULL) {
             if (handle->open) {
-                res = hid_read_timeout(device_handle, *data, PRIME_RAW_HID_DATA_SIZE, handle->read_timeout);
+                res = hid_read_timeout(device_handle, *data, handle->report_size, handle->read_timeout);
                 if (res >= 0) {
                     *len = res;
                     res = ERR_SUCCESS;
