@@ -1,7 +1,7 @@
 /* libhpcalcs - hand-helds support library
  * Copyright (C) 2013 Lionel Debroux
  * Code patterns and snippets borrowed from libticables & libticalcs:
- * Copyright (C) 1999-2009 Romain Liévin
+ * Copyright (C) 1999-2009 Romain LiÃ©vin
  * Copyright (C) 2009-2013 Lionel Debroux
  * Copyright (C) 1999-2013 libti* contributors.
  *
@@ -138,6 +138,9 @@ HPEXPORT int HPCALL hpcalcs_error_get(int number, char **message) {
                     break;
                 case ERR_CALC_PROBE_FAILED:
                     *message = strdup(_("Calc probing failed"));
+                    break;
+                case ERR_CALC_UNSUPPORTED:
+                    *message = strdup(_("Operation is not supported by this calculator protocol"));
                     break;
                 default:
                     *message = strdup(_("<Unknown error code>"));

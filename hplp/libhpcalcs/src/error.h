@@ -2,7 +2,7 @@
  * libhpfiles: hand-helds support libraries.
  * Copyright (C) 2013 Lionel Debroux
  * Code patterns and snippets borrowed from libticables & libticalcs:
- * Copyright (C) 1999-2009 Romain Liévin
+ * Copyright (C) 1999-2009 Romain LiÃ©vin
  * Copyright (C) 2009-2013 Lionel Debroux
  * Copyright (C) 1999-2013 libti* contributors.
  *
@@ -62,6 +62,7 @@ typedef enum {
     ERR_CALC_PACKET_FORMAT,
     ERR_CALC_SPLIT_TIMESTAMP,
     ERR_CALC_PROBE_FAILED,
+    ERR_CALC_UNSUPPORTED,
     ERR_CALC_LAST = 511,
 
     ERR_OPER_FIRST = 512,
