@@ -2,7 +2,7 @@
  * libhpcalcs: hand-helds support libraries.
  * Copyright (C) 2013 Lionel Debroux
  * Code patterns and snippets borrowed from libticables & libticalcs:
- * Copyright (C) 1999-2009 Romain Liévin
+ * Copyright (C) 1999-2009 Romain LiÃ©vin
  * Copyright (C) 2009-2013 Lionel Debroux
  * Copyright (C) 1999-2013 libti* contributors.
  *
@@ -38,6 +38,7 @@
 #include "logging.h"
 #include "error.h"
 #include "gettext.h"
+#include "prime_protocol_v2.h"
 
 extern const calc_fncts calc_none_fncts;
 extern const calc_fncts calc_prime_fncts;
@@ -145,6 +146,16 @@ HPEXPORT calc_handle * HPCALL hpcalcs_handle_new(calc_model model) {
         if (handle != NULL) {
             handle->model = model;
             handle->fncts = hpcalcs_all_calcs[model];
+            if (model == CALC_PRIME) {
+                handle->prime = prime_protocol_state_new();
+                if (handle->prime == NULL) {
+                    (hpcalcs_alloc_funcs.free)(handle);
+                    handle = NULL;
+                    hpcalcs_error("%s: Prime protocol state allocation failed", __FUNCTION__);
+                }
+            }
+        }
+        if (handle != NULL) {
             hpcalcs_info("%s: calc handle allocation succeeded", __FUNCTION__);
         }
         else {
@@ -166,6 +177,9 @@ HPEXPORT int HPCALL hpcalcs_handle_del(calc_handle * handle) {
         else {
             res = ERR_SUCCESS;
         }
+
+        prime_protocol_state_del(handle->prime);
+        handle->prime = NULL;
 
         (hpcalcs_alloc_funcs.free)(handle->handle);
         handle->handle = NULL;
@@ -232,6 +246,27 @@ HPEXPORT cable_handle * HPCALL hpcalcs_cable_get(calc_handle * handle) {
         hpcalcs_error("%s: handle is NULL", __FUNCTION__);
     }
     return res;
+}
+
+HPEXPORT int HPCALL hpcalcs_prime_get_protocol_info(
+        calc_handle * handle, calc_prime_protocol_info * info) {
+    if (handle == NULL || info == NULL) {
+        return ERR_INVALID_PARAMETER;
+    }
+    if (handle->model != CALC_PRIME) {
+        return ERR_INVALID_MODEL;
+    }
+    return prime_protocol_get_info(handle, info);
+}
+
+HPEXPORT int HPCALL hpcalcs_prime_negotiate_protocol(calc_handle * handle) {
+    if (handle == NULL) {
+        return ERR_INVALID_HANDLE;
+    }
+    if (handle->model != CALC_PRIME) {
+        return ERR_INVALID_MODEL;
+    }
+    return prime_protocol_negotiate(handle);
 }
 
 HPEXPORT int HPCALL hpcalcs_handle_display(calc_handle * handle) {

@@ -2,7 +2,7 @@
  * libhpcables: hand-helds support libraries.
  * Copyright (C) 2013 Lionel Debroux
  * Code patterns and snippets borrowed from libticables & libticalcs:
- * Copyright (C) 1999-2009 Romain Liévin
+ * Copyright (C) 1999-2009 Romain LiÃ©vin
  * Copyright (C) 2009-2013 Lionel Debroux
  * Copyright (C) 1999-2013 libti* contributors.
  *
@@ -162,6 +162,7 @@ HPEXPORT cable_handle * HPCALL hpcables_handle_new(cable_model model) {
             handle->model = model;
             handle->handle = NULL;
             handle->fncts = hpcables_all_cables[model];
+            handle->report_size = PRIME_RAW_HID_DATA_SIZE_LEGACY;
             hpcables_info("%s: handle allocation for model %d succeeded", __FUNCTION__, model);
         }
         else {
@@ -252,6 +253,13 @@ HPEXPORT int HPCALL hpcables_options_get_read_timeout(cable_handle * handle) {
         hpcables_error("%s: handle is NULL", __FUNCTION__);
     }
     return timeout;
+}
+
+HPEXPORT uint32_t HPCALL hpcables_options_get_report_size(cable_handle * handle) {
+    if (handle != NULL && handle->report_size != 0) {
+        return handle->report_size;
+    }
+    return PRIME_RAW_HID_DATA_SIZE_LEGACY;
 }
 
 HPEXPORT int HPCALL hpcables_options_set_read_timeout(cable_handle * handle, int read_timeout) {
