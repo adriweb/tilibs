@@ -2,7 +2,7 @@
  * libhpcalcs: hand-helds support libraries.
  * Copyright (C) 2013 Lionel Debroux
  * Code patterns and snippets borrowed from libticables & libticalcs:
- * Copyright (C) 1999-2009 Romain Liévin
+ * Copyright (C) 1999-2009 Romain LiÃ©vin
  * Copyright (C) 2009-2013 Lionel Debroux
  * Copyright (C) 1999-2013 libti* contributors.
  *
@@ -31,6 +31,8 @@
 
 #include <hpcalcs.h>
 #include "prime_cmd.h"
+#include "prime_protocol_v2.h"
+#include "internal.h"
 #include "logging.h"
 #include "error.h"
 #include "utils.h"
@@ -39,6 +41,9 @@
 #include <stdlib.h>
 #include <string.h>
 #include <wchar.h>
+#include <zlib.h>
+
+#define PRIME_MAX_DECOMPRESSED_FILE_SIZE (64U * 1024U * 1024U)
 
 static inline uint16_t crc16_block(const uint8_t * buffer, uint32_t len) {
     static const uint16_t ccitt_crc16_table[256] = {
@@ -89,7 +94,18 @@ static int read_vtl_pkt(calc_handle * handle, uint8_t cmd, prime_vtl_pkt ** pkt,
     *pkt = prime_vtl_pkt_new(0);
     if (*pkt != NULL) {
         (*pkt)->cmd = cmd;
-        res = prime_recv_data(handle, *pkt);
+        if (prime_protocol_get_version(handle) == PRIME_PROTOCOL_V2) {
+            uint32_t message_id = 0;
+            res = prime_v2_recv_message(handle, &(*pkt)->data, &(*pkt)->size,
+                                        &message_id);
+            if (res == ERR_SUCCESS) {
+                hpcalcs_debug("%s: received V2 message %" PRIu32,
+                              __FUNCTION__, message_id);
+            }
+        }
+        else {
+            res = prime_recv_data(handle, *pkt);
+        }
         if (res == ERR_SUCCESS) {
             if ((*pkt)->size > 0) {
                 if ((*pkt)->data[0] == (*pkt)->cmd) {
@@ -117,20 +133,161 @@ static int read_vtl_pkt(calc_handle * handle, uint8_t cmd, prime_vtl_pkt ** pkt,
 }
 
 static int write_vtl_pkt(calc_handle * handle, prime_vtl_pkt * pkt) {
+    if (prime_protocol_get_version(handle) != PRIME_PROTOCOL_LEGACY) {
+        hpcalcs_error("%s: operation is not enabled for Prime protocol V2",
+                      __FUNCTION__);
+        return ERR_CALC_PACKET_FORMAT;
+    }
     return prime_send_data(handle, pkt);
+}
+
+static int write_readonly_vtl_pkt(calc_handle * handle, prime_vtl_pkt * pkt) {
+    if (prime_protocol_get_version(handle) == PRIME_PROTOCOL_V2) {
+        return prime_v2_send_message(handle, pkt->data, pkt->size, NULL);
+    }
+    return prime_send_data(handle, pkt);
+}
+
+static int inflate_v2_file_message(prime_vtl_pkt * pkt) {
+    z_stream stream;
+    uint8_t * decompressed = NULL;
+    uint8_t * rebuilt = NULL;
+    uint32_t compressed_size;
+    uint32_t expected_size;
+    uint32_t capacity;
+    int zres;
+    int res = ERR_SUCCESS;
+
+    if (pkt == NULL || pkt->data == NULL || pkt->size <= 11
+        || pkt->data[0] != CMD_PRIME_RECV_FILE || pkt->data[1] != 0x03
+        || (pkt->data[10] & 0x0FU) != Z_DEFLATED
+        || ((((uint16_t)pkt->data[10] << 8) | pkt->data[11]) % 31U) != 0) {
+        return ERR_SUCCESS;
+    }
+
+    /* Compressed V2 file replies replace the ordinary type/name/CRC fields
+     * with the little-endian size of the uncompressed file envelope.  Older
+     * captures used zero here, so retain bounded grow-as-needed support for
+     * that form while validating the size advertised by current firmware. */
+    expected_size = (uint32_t)pkt->data[6]
+        | ((uint32_t)pkt->data[7] << 8)
+        | ((uint32_t)pkt->data[8] << 16)
+        | ((uint32_t)pkt->data[9] << 24);
+    if (expected_size > PRIME_MAX_DECOMPRESSED_FILE_SIZE) {
+        return ERR_CALC_PACKET_FORMAT;
+    }
+    compressed_size = pkt->size - 10;
+    if (expected_size != 0) {
+        capacity = expected_size;
+    }
+    else {
+        capacity = compressed_size > 1024U ? compressed_size * 4U : 4096U;
+        if (capacity < compressed_size
+            || capacity > PRIME_MAX_DECOMPRESSED_FILE_SIZE) {
+            capacity = PRIME_MAX_DECOMPRESSED_FILE_SIZE;
+        }
+    }
+    decompressed = (uint8_t *)(hpcalcs_alloc_funcs.malloc)(capacity);
+    if (decompressed == NULL) {
+        return ERR_MALLOC;
+    }
+
+    memset(&stream, 0, sizeof(stream));
+    stream.next_in = pkt->data + 10;
+    stream.avail_in = compressed_size;
+    zres = inflateInit(&stream);
+    if (zres != Z_OK) {
+        res = ERR_CALC_PACKET_FORMAT;
+        goto cleanup;
+    }
+
+    for (;;) {
+        uint32_t used = (uint32_t)stream.total_out;
+        if (used == capacity) {
+            uint32_t new_capacity;
+            uint8_t * grown;
+            if (expected_size != 0
+                || capacity >= PRIME_MAX_DECOMPRESSED_FILE_SIZE) {
+                res = ERR_CALC_PACKET_FORMAT;
+                break;
+            }
+            new_capacity = capacity > PRIME_MAX_DECOMPRESSED_FILE_SIZE / 2U
+                ? PRIME_MAX_DECOMPRESSED_FILE_SIZE : capacity * 2U;
+            grown = (uint8_t *)(hpcalcs_alloc_funcs.realloc)(decompressed,
+                                                              new_capacity);
+            if (grown == NULL) {
+                res = ERR_MALLOC;
+                break;
+            }
+            decompressed = grown;
+            capacity = new_capacity;
+        }
+        stream.next_out = decompressed + stream.total_out;
+        stream.avail_out = capacity - (uint32_t)stream.total_out;
+        zres = inflate(&stream, Z_NO_FLUSH);
+        if (zres == Z_STREAM_END) {
+            uint32_t decompressed_size = (uint32_t)stream.total_out;
+            if (expected_size != 0 && decompressed_size != expected_size) {
+                res = ERR_CALC_PACKET_FORMAT;
+                break;
+            }
+            if (decompressed_size > PRIME_MAX_DECOMPRESSED_FILE_SIZE - 6U) {
+                res = ERR_CALC_PACKET_FORMAT;
+                break;
+            }
+            rebuilt = (uint8_t *)(hpcalcs_alloc_funcs.malloc)(
+                decompressed_size + 6U);
+            if (rebuilt == NULL) {
+                res = ERR_MALLOC;
+                break;
+            }
+            rebuilt[0] = CMD_PRIME_RECV_FILE;
+            rebuilt[1] = 0x03;
+            rebuilt[2] = (uint8_t)(decompressed_size >> 24);
+            rebuilt[3] = (uint8_t)(decompressed_size >> 16);
+            rebuilt[4] = (uint8_t)(decompressed_size >> 8);
+            rebuilt[5] = (uint8_t)decompressed_size;
+            memcpy(rebuilt + 6, decompressed, decompressed_size);
+            (hpcalcs_alloc_funcs.free)(pkt->data);
+            pkt->data = rebuilt;
+            pkt->size = decompressed_size + 6U;
+            rebuilt = NULL;
+            hpcalcs_info("%s: inflated Prime file payload to %" PRIu32
+                         " bytes", __FUNCTION__, pkt->size);
+            break;
+        }
+        if (zres != Z_OK || (stream.avail_in == 0 && stream.avail_out != 0)) {
+            res = ERR_CALC_PACKET_FORMAT;
+            break;
+        }
+    }
+    inflateEnd(&stream);
+
+cleanup:
+    (hpcalcs_alloc_funcs.free)(rebuilt);
+    (hpcalcs_alloc_funcs.free)(decompressed);
+    if (res != ERR_SUCCESS) {
+        hpcalcs_error("%s: invalid or oversized compressed Prime file",
+                      __FUNCTION__);
+    }
+    return res;
 }
 
 HPEXPORT int HPCALL calc_prime_s_check_ready(calc_handle * handle) {
     int res;
     if (handle != NULL) {
-        prime_vtl_pkt * pkt = prime_vtl_pkt_new(1);
+        int is_v2 = prime_protocol_get_version(handle) == PRIME_PROTOCOL_V2;
+        prime_vtl_pkt * pkt = prime_vtl_pkt_new(is_v2 ? 2 : 1);
         if (pkt != NULL) {
             uint8_t * ptr;
 
             pkt->cmd = CMD_PRIME_CHECK_READY;
             ptr = pkt->data;
             *ptr++ = CMD_PRIME_CHECK_READY;
-            res = write_vtl_pkt(handle, pkt);
+            if (is_v2) {
+                *ptr++ = 0x01;
+            }
+            res = write_readonly_vtl_pkt(handle, pkt);
             prime_vtl_pkt_del(pkt);
         }
         else {
@@ -173,14 +330,20 @@ HPEXPORT int HPCALL calc_prime_r_check_ready(calc_handle * handle, uint8_t ** ou
 HPEXPORT int HPCALL calc_prime_s_get_infos (calc_handle * handle) {
     int res;
     if (handle != NULL) {
-        prime_vtl_pkt * pkt = prime_vtl_pkt_new(1);
+        prime_vtl_pkt * pkt;
+        if (prime_protocol_get_version(handle) == PRIME_PROTOCOL_V2) {
+            hpcalcs_error("%s: GET_INFOS is only available before V2 negotiation",
+                          __FUNCTION__);
+            return ERR_CALC_PACKET_FORMAT;
+        }
+        pkt = prime_vtl_pkt_new(1);
         if (pkt != NULL) {
             uint8_t * ptr;
 
             pkt->cmd = CMD_PRIME_GET_INFOS;
             ptr = pkt->data;
             *ptr++ = CMD_PRIME_GET_INFOS;
-            res = write_vtl_pkt(handle, pkt);
+            res = write_readonly_vtl_pkt(handle, pkt);
             prime_vtl_pkt_del(pkt);
         }
         else {
@@ -201,6 +364,11 @@ HPEXPORT int HPCALL calc_prime_r_get_infos (calc_handle * handle, calc_infos * i
         prime_vtl_pkt * pkt;
         res = read_vtl_pkt(handle, CMD_PRIME_GET_INFOS, &pkt, 1);
         if (res == ERR_SUCCESS && pkt != NULL) {
+            int state_res = prime_protocol_record_infos(handle, pkt->data, pkt->size);
+            if (state_res != ERR_SUCCESS) {
+                hpcalcs_warning("%s: could not record Prime protocol capability state",
+                                __FUNCTION__);
+            }
             if (infos != NULL) {
                 infos->size = pkt->size;
                 infos->data = pkt->data; // Transfer ownership of the memory block to the caller.
@@ -240,15 +408,27 @@ HPEXPORT int HPCALL calc_prime_s_set_date_time(calc_handle * handle, time_t time
                 *ptr++ = (uint8_t)((size      ) & 0xFF);
                 *ptr++ = 0x00; // ?
                 *ptr++ = 0x00; // ?
-                *ptr++ = 0x54; // 84 decimal, ?
-                *ptr++ = 0x1E; // 30 decimal, ?
+                if (prime_protocol_get_version(handle) == PRIME_PROTOCOL_V2) {
+                    /* Current Connectivity Kit V2 packets use four reserved
+                     * zero bytes before the six-byte local timestamp. */
+                    *ptr++ = 0x00;
+                    *ptr++ = 0x00;
+                }
+                else {
+                    /* Preserve the legacy G1 payload exactly as observed by
+                     * HPLP; these bytes are not part of the V2 layout. */
+                    *ptr++ = 0x54;
+                    *ptr++ = 0x1E;
+                }
                 *ptr++ = brokendowntime->tm_year - (2000 - 1900); // tm_year: The number of years since 1900.
                 *ptr++ = brokendowntime->tm_mon + 1; // tm_mon: the number of months since January, in the range 0 to 11.
                 *ptr++ = brokendowntime->tm_mday;
                 *ptr++ = brokendowntime->tm_hour;
                 *ptr++ = brokendowntime->tm_min;
                 *ptr++ = brokendowntime->tm_sec;
-                res = write_vtl_pkt(handle, pkt);
+                res = prime_protocol_get_version(handle) == PRIME_PROTOCOL_V2
+                    ? prime_v2_send_message(handle, pkt->data, pkt->size, NULL)
+                    : write_vtl_pkt(handle, pkt);
                 prime_vtl_pkt_del(pkt);
             }
             else {
@@ -291,7 +471,7 @@ HPEXPORT int HPCALL calc_prime_s_recv_screen(calc_handle * handle, calc_screensh
             ptr = pkt->data;
             *ptr++ = CMD_PRIME_RECV_SCREEN;
             *ptr++ = (uint8_t)format;
-            res = write_vtl_pkt(handle, pkt);
+            res = write_readonly_vtl_pkt(handle, pkt);
             prime_vtl_pkt_del(pkt);
         }
         else {
@@ -325,7 +505,11 @@ HPEXPORT int HPCALL calc_prime_r_recv_screen(calc_handle * handle, calc_screensh
                 hpcalcs_info("%s: embedded=%" PRIX16 " computed=%" PRIX16, __FUNCTION__, embedded_crc, computed_crc);
                 if (computed_crc != embedded_crc) {
                     res = ERR_CALC_PACKET_FORMAT;
-                    hpcalcs_error("%s: CRC mismatch", __FUNCTION__);
+                    hpcalcs_error("%s: screenshot CRC mismatch"
+                                  " (embedded=%04" PRIX16 ", computed=%04" PRIX16
+                                  ", packet size=%" PRIu32 ")",
+                                  __FUNCTION__, embedded_crc, computed_crc,
+                                  pkt->size);
                 }
 
                 // Skip marker.
@@ -340,7 +524,10 @@ HPEXPORT int HPCALL calc_prime_r_recv_screen(calc_handle * handle, calc_screensh
                 }
                 else {
                     res = ERR_CALC_PACKET_FORMAT;
-                    hpcalcs_warning("%s: unknown marker at beginning of image", __FUNCTION__);
+                    hpcalcs_warning("%s: unknown screenshot marker"
+                                    " (%02X %02X %02X %02X %02X)",
+                                    __FUNCTION__, pkt->data[8], pkt->data[9],
+                                    pkt->data[10], pkt->data[11], pkt->data[12]);
                 }
             }
             else {
@@ -363,44 +550,68 @@ HPEXPORT int HPCALL calc_prime_r_recv_screen(calc_handle * handle, calc_screensh
 // Seems to be made of a series of CMD_PRIME_RECV_FILE.
 HPEXPORT int HPCALL calc_prime_s_send_file(calc_handle * handle, files_var_entry * file) {
     int res;
-    if (handle != NULL && file != NULL) {
-        uint8_t namelen = (uint8_t)char16_strlen(file->name) * 2;
-        uint32_t size = 10 - 6 + namelen + file->size; // Size of the data after the header.
-        prime_vtl_pkt * pkt = prime_vtl_pkt_new(size + 6); // Add size of the header.
-        hpcalcs_debug("Virtual packet has size %" PRIu32 " (%" PRIx32 ")\n", size, size);
+    if (handle != NULL && file != NULL
+        && (file->size == 0 || file->data != NULL)) {
+        uint32_t namechars = char16_strlen(file->name);
+        uint32_t offset = 0;
+        uint32_t payload_size;
+        uint32_t content_size;
+        uint8_t namelen;
+        prime_vtl_pkt * pkt;
+
+        if (namechars > 127U) {
+            hpcalcs_error("%s: Prime filename is too long", __FUNCTION__);
+            return ERR_INVALID_PARAMETER;
+        }
+        namelen = (uint8_t)(namechars * 2U);
+        // Some text editors add a UTF-16LE BOM which Prime program and note
+        // loaders reject. Do not inspect past an empty or one-byte file.
+        if ((file->type == PRIME_TYPE_PRGM || file->type == PRIME_TYPE_NOTE)
+            && file->size >= 2U && file->data[0] == 0xFF
+            && file->data[1] == 0xFE) {
+            offset = 2U;
+        }
+        if (file->size - offset > UINT32_MAX - 10U - namelen) {
+            return ERR_INVALID_PARAMETER;
+        }
+        payload_size = 10U + namelen + file->size - offset;
+        content_size = 4U + namelen + file->size - offset;
+        pkt = prime_vtl_pkt_new(payload_size);
+        hpcalcs_debug("Virtual packet has size %" PRIu32 " (%" PRIx32 ")\n",
+                      payload_size, payload_size);
         if (pkt != NULL) {
             uint8_t * ptr;
             uint16_t crc16;
-            uint32_t offset = 0;
-
-            // Some text editors add the UTF-16LE BOM at the beginning of the file, but the SDKV0.30 firmware version chokes on it.
-            // Therefore, skip the BOM.
-            if (   (file->type == PRIME_TYPE_PRGM || file->type == PRIME_TYPE_NOTE)
-                && (file->data[0] == 0xFF && file->data[1] == 0xFE)
-               ) {
-                offset = 2;
-                size -= 2;
-            }
 
             pkt->cmd = CMD_PRIME_RECV_FILE;
             ptr = pkt->data;
             *ptr++ = CMD_PRIME_RECV_FILE;
-            *ptr++ = 0x01;
-            *ptr++ = (uint8_t)((size >> 24) & 0xFF);
-            *ptr++ = (uint8_t)((size >> 16) & 0xFF);
-            *ptr++ = (uint8_t)((size >>  8) & 0xFF);
-            *ptr++ = (uint8_t)((size      ) & 0xFF);
+            *ptr++ = prime_protocol_get_version(handle) == PRIME_PROTOCOL_V2
+                ? 0x03 : 0x01;
+            *ptr++ = (uint8_t)((content_size >> 24) & 0xFF);
+            *ptr++ = (uint8_t)((content_size >> 16) & 0xFF);
+            *ptr++ = (uint8_t)((content_size >>  8) & 0xFF);
+            *ptr++ = (uint8_t)(content_size & 0xFF);
             *ptr++ = file->type;
             *ptr++ = namelen;
             *ptr++ = 0x00; // CRC16, set it to 0 for now.
             *ptr++ = 0x00;
             memcpy(ptr, file->name, namelen);
             ptr += namelen;
-            memcpy(ptr, file->data + offset, file->size - offset);
-            crc16 = crc16_block(pkt->data, size); // Yup, the last 6 bytes of the packet are excluded from the CRC.
+            if (file->size > offset) {
+                memcpy(ptr, file->data + offset, file->size - offset);
+            }
+            crc16 = crc16_block(pkt->data,
+                prime_protocol_get_version(handle) == PRIME_PROTOCOL_V2
+                    ? payload_size : content_size);
             pkt->data[8] = crc16 & 0xFF;
             pkt->data[9] = (crc16 >> 8) & 0xFF;
-            res = write_vtl_pkt(handle, pkt);
+            if (prime_protocol_get_version(handle) == PRIME_PROTOCOL_V2) {
+                res = prime_v2_send_message(handle, pkt->data, pkt->size, NULL);
+            }
+            else {
+                res = write_vtl_pkt(handle, pkt);
+            }
 
             prime_vtl_pkt_del(pkt);
         }
@@ -419,8 +630,11 @@ HPEXPORT int HPCALL calc_prime_s_send_file(calc_handle * handle, files_var_entry
 HPEXPORT int HPCALL calc_prime_r_send_file(calc_handle * handle) {
     int res;
     if (handle != NULL) {
-        // There doesn't seem to be anything to do, beyond eliminating packets starting with 0xFF.
-        res = calc_prime_r_check_ready(handle, NULL, NULL);
+        // The transport write completes a file send. V2 confirms its frames
+        // with transport ACKs, while legacy Prime firmware has no reliable
+        // application-level response here. Any legacy out-of-band reports are
+        // skipped by prime_recv_data when the next reply is received.
+        res = ERR_SUCCESS;
     }
     else {
         res = ERR_INVALID_HANDLE;
@@ -456,8 +670,10 @@ HPEXPORT int HPCALL calc_prime_s_recv_file(calc_handle * handle, files_var_entry
             crc16 = crc16_block(pkt->data, size); // Yup, the last 6 bytes are excluded from the CRC.
             pkt->data[8] = crc16 & 0xFF;
             pkt->data[9] = (crc16 >> 8) & 0xFF;
-            res = write_vtl_pkt(handle, pkt);
-            
+            res = prime_protocol_get_version(handle) == PRIME_PROTOCOL_V2
+                ? prime_v2_send_message(handle, pkt->data, pkt->size, NULL)
+                : write_vtl_pkt(handle, pkt);
+
             prime_vtl_pkt_del(pkt);
         }
         else {
@@ -479,6 +695,13 @@ HPEXPORT int HPCALL calc_prime_r_recv_file(calc_handle * handle, files_var_entry
     if (handle != NULL) {
         res = read_vtl_pkt(handle, CMD_PRIME_RECV_FILE, &pkt, 1);
         if (res == ERR_SUCCESS && pkt != NULL) {
+            res = inflate_v2_file_message(pkt);
+        }
+        if (res != ERR_SUCCESS && pkt != NULL) {
+            prime_vtl_pkt_del(pkt);
+            pkt = NULL;
+        }
+        if (res == ERR_SUCCESS && pkt != NULL) {
             if (pkt->size >= 11) {
                 // Packet has CRC
                 uint16_t computed_crc; // 0x0000 ?
@@ -487,7 +710,12 @@ HPEXPORT int HPCALL calc_prime_r_recv_file(calc_handle * handle, files_var_entry
                 // Reset CRC before computing
                 ptr[8] = 0x00;
                 ptr[9] = 0x00;
-                computed_crc = crc16_block(ptr, pkt->size - 6); // The CRC contains the initial 0x00, but not the final 6 bytes (...).
+                if (pkt->data[1] == 0x03) {
+                    computed_crc = crc16_block(ptr, pkt->size);
+                }
+                else {
+                    computed_crc = crc16_block(ptr, pkt->size - 6U);
+                }
                 hpcalcs_info("%s: embedded=%" PRIX16 " computed=%" PRIX16, __FUNCTION__, embedded_crc, computed_crc);
                 if (computed_crc != embedded_crc) {
                     hpcalcs_error("%s: CRC mismatch", __FUNCTION__);
@@ -501,30 +729,34 @@ HPEXPORT int HPCALL calc_prime_r_recv_file(calc_handle * handle, files_var_entry
                     *out_file = NULL;
                     filetype = pkt->data[6];
                     namelen = pkt->data[7];
-                    size = pkt->size - 10 - namelen;
-
-                    if (!(size & UINT32_C(0x80000000))) {
+                    if ((namelen & 1U) != 0 || namelen > pkt->size - 10U) {
+                        res = ERR_CALC_PACKET_FORMAT;
+                        hpcalcs_error("%s: invalid Prime filename length"
+                                      " (%u bytes in a %" PRIu32 "-byte packet)",
+                                      __FUNCTION__, (unsigned int)namelen,
+                                      pkt->size);
+                    }
+                    else {
+                        size = pkt->size - 10U - namelen;
                         *out_file = hpfiles_ve_create_with_data(&pkt->data[10 + namelen], size);
                         if (*out_file != NULL) {
                             (*out_file)->type = filetype;
                             memcpy((*out_file)->name, &pkt->data[10], namelen);
                             (*out_file)->invalid = (computed_crc != embedded_crc);
-                            hpcalcs_info("%s: created entry for %ls with size %" PRIu32 " and type %02X", __FUNCTION__, (*out_file)->name, (*out_file)->size, filetype);
+                            hpcalcs_info("%s: created entry with a %u-byte UTF-16LE name, size %" PRIu32 " and type %02X",
+                                         __FUNCTION__, (unsigned int)namelen,
+                                         (*out_file)->size, filetype);
                         }
                         else {
                             res = ERR_MALLOC;
                             hpcalcs_error("%s: couldn't create entry", __FUNCTION__);
                         }
                     }
-                    else {
-                        res = ERR_CALC_PACKET_FORMAT;
-                        hpcalcs_error("%s: weird size (packet too short ?)", __FUNCTION__);
-                        // TODO: change res.
-                    }
                 }
             }
             else {
-                if (pkt->data[0] != 0xF9) {
+                if (pkt->size == 0 || pkt->data == NULL
+                    || pkt->data[0] != CMD_PRIME_RECV_BACKUP) {
                     res = ERR_CALC_PACKET_FORMAT;
                     hpcalcs_info("%s: packet is too short: %" PRIu32 "bytes", __FUNCTION__, pkt->size);
                 }
@@ -558,7 +790,7 @@ HPEXPORT int HPCALL calc_prime_s_recv_backup(calc_handle * handle) {
             pkt->cmd = CMD_PRIME_RECV_FILE;
             ptr = pkt->data;
             *ptr++ = CMD_PRIME_RECV_BACKUP;
-            res = write_vtl_pkt(handle, pkt);
+            res = write_readonly_vtl_pkt(handle, pkt);
             prime_vtl_pkt_del(pkt);
         }
         else {
@@ -628,22 +860,37 @@ HPEXPORT int HPCALL calc_prime_r_recv_backup(calc_handle * handle, files_var_ent
 
 HPEXPORT int HPCALL calc_prime_s_send_key(calc_handle * handle, uint32_t code) {
     int res;
+    prime_vtl_pkt * pkt;
     if (handle != NULL) {
-        prime_vtl_pkt * pkt = prime_vtl_pkt_new(7);
+        if (code > 0xFFU) {
+            hpcalcs_error("%s: key code is outside the Prime byte range", __FUNCTION__);
+            return ERR_INVALID_PARAMETER;
+        }
+        pkt = prime_vtl_pkt_new(7);
         if (pkt != NULL) {
             uint8_t * ptr;
 
             pkt->cmd = CMD_PRIME_SEND_KEY;
             ptr = pkt->data;
             *ptr++ = CMD_PRIME_SEND_KEY;
-            *ptr++ = 0x01;
+            *ptr++ = prime_protocol_get_version(handle) == PRIME_PROTOCOL_V2
+                ? 0x03 : 0x01;
             *ptr++ = 0x00;
             *ptr++ = 0x00;
             *ptr++ = 0x00;
             *ptr++ = 0x01;
             *ptr++ = (uint8_t)code;
-            res = write_vtl_pkt(handle, pkt);
+            res = prime_protocol_get_version(handle) == PRIME_PROTOCOL_V2
+                ? prime_v2_send_message(handle, pkt->data, pkt->size, NULL)
+                : write_vtl_pkt(handle, pkt);
             prime_vtl_pkt_del(pkt);
+            if (res == ERR_SUCCESS
+                && prime_protocol_get_version(handle) == PRIME_PROTOCOL_V2) {
+                /* V2 key events are queued while the physical display sleeps.
+                 * The Connectivity Kit's clock update is the verified wake and
+                 * repaint operation on G2 firmware. */
+                res = calc_prime_s_set_date_time(handle, time(NULL));
+            }
         }
         else {
             res = ERR_MALLOC;
@@ -671,22 +918,32 @@ HPEXPORT int HPCALL calc_prime_r_send_key(calc_handle * handle) {
 
 HPEXPORT int HPCALL calc_prime_s_send_keys(calc_handle * handle, const uint8_t * data, uint32_t size) {
     int res;
-    if (handle != NULL) {
-        prime_vtl_pkt * pkt = prime_vtl_pkt_new(6 + size);
+    prime_vtl_pkt * pkt;
+    if (handle != NULL && (data != NULL || size == 0)) {
+        pkt = prime_vtl_pkt_new(6 + size);
         if (pkt != NULL) {
             uint8_t * ptr;
 
             pkt->cmd = CMD_PRIME_SEND_KEY;
             ptr = pkt->data;
             *ptr++ = CMD_PRIME_SEND_KEY;
-            *ptr++ = 0x01;
+            *ptr++ = prime_protocol_get_version(handle) == PRIME_PROTOCOL_V2
+                ? 0x03 : 0x01;
             *ptr++ = (uint8_t)((size >> 24) & 0xFF);
             *ptr++ = (uint8_t)((size >> 16) & 0xFF);
             *ptr++ = (uint8_t)((size >>  8) & 0xFF);
             *ptr++ = (uint8_t)((size      ) & 0xFF);
-            memcpy(ptr, data, size);
-            res = write_vtl_pkt(handle, pkt);
+            if (size != 0) {
+                memcpy(ptr, data, size);
+            }
+            res = prime_protocol_get_version(handle) == PRIME_PROTOCOL_V2
+                ? prime_v2_send_message(handle, pkt->data, pkt->size, NULL)
+                : write_vtl_pkt(handle, pkt);
             prime_vtl_pkt_del(pkt);
+            if (res == ERR_SUCCESS
+                && prime_protocol_get_version(handle) == PRIME_PROTOCOL_V2) {
+                res = calc_prime_s_set_date_time(handle, time(NULL));
+            }
         }
         else {
             res = ERR_MALLOC;
@@ -695,7 +952,7 @@ HPEXPORT int HPCALL calc_prime_s_send_keys(calc_handle * handle, const uint8_t *
     }
     else {
         res = ERR_INVALID_PARAMETER;
-        hpcalcs_error("%s: handle is NULL", __FUNCTION__);
+        hpcalcs_error("%s: an argument is NULL", __FUNCTION__);
     }
     return res;
 }
