@@ -10,6 +10,7 @@ const PRECACHE_URLS = [
   'sharp_files.js',
   'sharp_usb.js',
   'numworks_backend.bundle.js',
+  'hp_legacy_backend.js',
   'rm-loader.html',
   'rm_loader_backend.js',
   'rm_loader_ui.js',

@@ -107,6 +107,7 @@ function testTransportEventsAreScopedToActiveCasio() {
     const state = { authorizedDevice: casio, numWorksBackend: null };
     const context = {
         state,
+        isHPLegacyActive() { return false; },
         isCasioActive() { return true; }
     };
     vm.createContext(context);
