@@ -101,7 +101,7 @@ function stageAssets({ sourceDir = SOURCE_DIR, outputDir = path.join(DESKTOP_DIR
   for (const name of fs.readdirSync(path.join(sourceDir, 'i18n'))) {
     if (/^[a-z-]+\.json$/.test(name)) assets.add(`i18n/${name}`);
   }
-  for (const name of ['webtilp.worker.js', 'TIVarsLib.worker.js', 'WebLuna.worker.js', 'build-sources.json', 'webtilp-deps.txt', 'NUMWORKS.md']) {
+  for (const name of ['webtilp.worker.js', 'TIVarsLib.worker.js', 'WebLuna.worker.js', 'build-sources.json', 'webtilp-deps.txt', 'NUMWORKS.md', 'HP_LEGACY.md']) {
     if (regularFile(path.join(sourceDir, name))) assets.add(name);
   }
   const copies = new Map([...assets].sort().map(name => [assetPath(name), path.join(sourceDir, name)]));

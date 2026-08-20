@@ -51,8 +51,9 @@ and drivers:
 - **Windows:** raw WebUSB transfers need a WinUSB-compatible driver for the
   relevant calculator/cable interface. If using Zadig, select the exact
   calculator interface and retain a way to reinstall the vendor's driver.
-  HP Prime uses the system HID driver. Evo connections use their serial
-  drivers: preserve those drivers rather than replacing them with WinUSB.
+  HP Prime uses the system HID driver. Evo and serial HP connections use
+  their serial drivers: preserve those drivers rather than replacing them
+  with WinUSB.
 - **macOS:** HID and serial devices use the system driver or the adapter's
   supported serial driver. Close other calculator software before connecting
   so it releases the interface.
