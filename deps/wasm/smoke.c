@@ -8,6 +8,9 @@
 #include <string.h>
 #include <zlib.h>
 
+/* Require the module-local WebUSB selection extension in the linked archive. */
+extern int libusb_webusb_device_filter_supported(void);
+
 static GMutex mutex;
 static int counter;
 static int freed_items;
@@ -41,6 +44,7 @@ int main(void)
     assert(archive_version_number() == ARCHIVE_VERSION_NUMBER);
     assert(usb->major == 1 && usb->minor == 0 && usb->micro == 30);
     assert(usb->rc && usb->rc[0] == '\0');
+    assert(libusb_webusb_device_filter_supported() == 1);
     printf("GLib %u.%u.%u; zlib %s; libarchive %s; libusb %u.%u.%u\n",
            glib_major_version, glib_minor_version, glib_micro_version,
            zlibVersion(), archive_version_string(), usb->major, usb->minor, usb->micro);

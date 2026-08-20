@@ -24,7 +24,7 @@ not reused.
 | --- | --- | --- |
 | GLib | 2.88.3 + wasm-vips patches | Shared utility library |
 | zlib | 1.3.2 | Compressed calculator payloads and ZIP files |
-| libusb | 1.0.30 (unpatched upstream) | Browser USB transport |
+| libusb | 1.0.30 + module device filter | Browser USB transport |
 | libarchive | 3.8.9 | ZIP/group/backup file handling |
 | libffi | 3.8.0 | GLib's GObject build dependency; not linked into WebTILP |
 
@@ -53,9 +53,16 @@ prefix.
 - `glib-list-callbacks.patch` removes incompatible callback casts from
   `g_list_free_full` and `g_slist_free_full`. Destructors are called directly
   with their declared one-argument signature, as required by WASM.
-- libusb is built from the unmodified upstream release. The UniTI-specific
-  explicit-device registry patch from the old local checkout is not used by
-  WebTILP or applied by this recipe. The old checkout remains untouched.
+- `libusb-webusb-device-filter.patch` lets a caller temporarily constrain this
+  module's enumeration with `Module.webusbDeviceFilter`. Casio connection uses
+  exact `USBDevice` identity only while its native call owns the Asyncify
+  queue slot. It restores the previous filter when native execution ends,
+  including after a JavaScript timeout; other enumeration is unchanged. The required `libusb_webusb_device_filter_supported`
+  link symbol rejects older, unpatched archives. Rebuild into a new
+  `WASM_DEPS_PREFIX` when adding this patch, then rebuild tilibs and WebTILP.
+  The patch is applied to the pinned 1.0.30 release with zero fuzz, recorded in
+  the install manifest, and included in the dependency cache key. The old
+  checkout's UniTI explicit-device registry patch remains unused.
 - libusb's C configure probes enable Embind, which needs the C++ runtime.
   The recipe and C dependency smoke test explicitly select
   `-sDEFAULT_TO_CXX=1`; Emscripten 6.0.6 stopped linking that runtime implicitly
@@ -72,7 +79,9 @@ prefix.
 
 `test.sh` executes a Node/WASM smoke test of runtime/header versions, GLib
 Unicode conversion, threading and list destructors, zlib compression, and ZIP writing/reading.
-It does not access USB devices. Real browser/hardware transfer testing is
+It also runs a mocked WebUSB enumeration test with two identical calculators,
+checking selected-device identity, missing-device behavior, and filter removal.
+It does not access physical USB devices. Real browser/hardware transfer testing is
 still needed when qualifying a release.
 
 `webtilp/tests/test_wasm_startup.cjs` checks the built WebTILP module's

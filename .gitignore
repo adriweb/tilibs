@@ -4,6 +4,7 @@ aclocal.m4
 autom4te.cache/
 config.*
 !win32_config/config.h
+!/cahute/include/cahute/config.h.in
 configure
 depcomp
 install-sh
@@ -90,7 +91,7 @@ build-emscripten/
 build-wasm-deps/
 wasm-deps/
 glib-emscripten-built/
-libusb/
+/libusb/
 libarchive/
 tifileutil/testData/
 

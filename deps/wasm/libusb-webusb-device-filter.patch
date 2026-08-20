@@ -1,0 +1,28 @@
+--- a/libusb/os/emscripten_webusb.cpp
++++ b/libusb/os/emscripten_webusb.cpp
+@@ -616,6 +616,12 @@
+ 	// before going to LibUSB. Otherwise this list will be empty.
+ 	auto web_usb_devices =
+ 		co_await_try(navigator_usb.call<val>("getDevices"));
++	// A caller may constrain this module's enumeration to an explicitly
++	// selected USBDevice. Other libusb modules and navigator.usb are unchanged.
++	auto device_filter = val::module_property("webusbDeviceFilter");
++	if (!device_filter.isUndefined() && !device_filter.isNull()) {
++		web_usb_devices = web_usb_devices.call<val>("filter", device_filter);
++	}
+ 	for (auto&& web_usb_device : web_usb_devices) {
+ 		auto session_id = getDeviceSessionId(web_usb_device);
+ 
+@@ -866,6 +872,12 @@
+ }
+ 
+ }  // namespace
++
++// Consumers that require device selection link this symbol so an unpatched
++// dependency cannot silently ignore Module.webusbDeviceFilter.
++extern "C" int libusb_webusb_device_filter_supported(void) {
++	return 1;
++}
+ 
+ #pragma clang diagnostic ignored "-Wmissing-field-initializers"
+ extern "C" const usbi_os_backend usbi_backend = {

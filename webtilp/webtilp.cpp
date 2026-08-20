@@ -144,6 +144,8 @@ bool parse_ti_backup_vat(const std::vector<uint8_t>& file, int model,
 
 extern "C" int hp_prime_library_init(void);
 extern "C" int hp_prime_library_exit(void);
+extern "C" int casio_library_init(void);
+extern "C" int casio_library_exit(void);
 
 extern "C" {
 
@@ -769,6 +771,12 @@ int init() {
         fprintf(stderr, "HP Prime support initialization failed (%d); continuing with TI support.\n",
                 hp_result);
     }
+    const int casio_result = casio_library_init();
+    printf("casio_library_init: %d\n", casio_result);
+    if (casio_result != 0) {
+        fprintf(stderr, "Casio support initialization failed (%d); continuing with other families.\n",
+                casio_result);
+    }
 
     printf("tilibs init done!\n");
 
@@ -1113,6 +1121,7 @@ EMSCRIPTEN_KEEPALIVE
 int cleanup() {
     g_evo_python_type = 0;
     printf("library exits...\n");
+    const int result_casio = casio_library_exit();
     const int result_hp = hp_prime_library_exit();
     if (g_calc_handle) {
         if (g_calc_attached) {
@@ -1138,6 +1147,10 @@ int cleanup() {
     printf("ticalcs_library_exit: %d\n", result_ticalcs);
     printf("ticables_library_exit: %d\n", result_ticables);
     printf("hp_prime_library_exit: %d\n", result_hp);
+    printf("casio_library_exit: %d\n", result_casio);
+    if (result_casio != 0) {
+        return result_casio;
+    }
     if (result_hp != 0) {
         return result_hp;
     }
