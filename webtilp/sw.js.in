@@ -6,6 +6,7 @@ const PRECACHE_URLS = [
   'index.html',
   'app.bundle.js',
   'numworks_backend.bundle.js',
+  'hp_legacy_backend.js',
   'app.css',
   'highlighter.min.js',
   'build-profile.css',
