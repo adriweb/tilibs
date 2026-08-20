@@ -87,6 +87,7 @@ PREJS_DEV = webtilp_prejs_dev.js
 PREJS_PROD = webtilp_prejs_prod.js
 APP_JS_SRC = app.js
 APP_JS_BUNDLE = app.bundle.js
+HP_LEGACY_JS_SRC = hp_legacy_backend.js
 NUMWORKS_JS_SRC = numworks_backend.js
 NUMWORKS_JS_ENTRY = numworks_backend_entry.mjs
 NUMWORKS_JS_BUNDLE = numworks_backend.bundle.js
@@ -130,7 +131,7 @@ $(PREJS):
 	cp -a $(PREJS_DEV) $(PREJS)
 
 stamp:
-	@BUILD_SHA="$(BUILD_SHA)" BUILD_DATE="$(BUILD_DATE)" python3 -c "import hashlib, json, os, pathlib; root=pathlib.Path('.'); files=['app.css','build-profile.css','app.bundle.js','app.js','numworks_backend.bundle.js','numworks_backend.js','highlighter.min.js','webtilp.html','webtilp.js','webtilp.wasm','webtilp_prejs.js','TIVarsLib.js','TIVarsLib.wasm','WebLuna.js','WebLuna.wasm','site.webmanifest','sw.js.in']; files += [str(p.relative_to(root)) for p in sorted((root/'i18n').glob('*.json'))] if (root/'i18n').exists() else []; h=hashlib.sha256(); [h.update((root/f).read_bytes()) for f in files if (root/f).exists()]; content_hash=h.hexdigest()[:12]; build_sha=os.environ.get('BUILD_SHA','unknown'); build_date=os.environ.get('BUILD_DATE','unknown'); build_id=f'{build_sha}-{content_hash}'; version={'buildId':build_id,'gitSha':build_sha,'buildDate':build_date,'contentHash':content_hash}; (root/'version.json').write_text(json.dumps(version, indent=2)+'\\n', encoding='utf-8'); sw_in=root/'sw.js.in'; sw_out=root/'sw.js'; sw_out.write_text(sw_in.read_text(encoding='utf-8').replace('__BUILD_ID__', build_id), encoding='utf-8') if sw_in.exists() else None"
+	@BUILD_SHA="$(BUILD_SHA)" BUILD_DATE="$(BUILD_DATE)" python3 -c "import hashlib, json, os, pathlib; root=pathlib.Path('.'); files=['app.css','build-profile.css','app.bundle.js','app.js','numworks_backend.bundle.js','numworks_backend.js','hp_legacy_backend.js','highlighter.min.js','webtilp.html','webtilp.js','webtilp.wasm','webtilp_prejs.js','TIVarsLib.js','TIVarsLib.wasm','WebLuna.js','WebLuna.wasm','site.webmanifest','sw.js.in']; files += [str(p.relative_to(root)) for p in sorted((root/'i18n').glob('*.json'))] if (root/'i18n').exists() else []; h=hashlib.sha256(); [h.update((root/f).read_bytes()) for f in files if (root/f).exists()]; content_hash=h.hexdigest()[:12]; build_sha=os.environ.get('BUILD_SHA','unknown'); build_date=os.environ.get('BUILD_DATE','unknown'); build_id=f'{build_sha}-{content_hash}'; version={'buildId':build_id,'gitSha':build_sha,'buildDate':build_date,'contentHash':content_hash}; (root/'version.json').write_text(json.dumps(version, indent=2)+'\\n', encoding='utf-8'); sw_in=root/'sw.js.in'; sw_out=root/'sw.js'; sw_out.write_text(sw_in.read_text(encoding='utf-8').replace('__BUILD_ID__', build_id), encoding='utf-8') if sw_in.exists() else None"
 
 test:
 	$(CXX) -std=c++17 -Wall -Wextra -Werror hp_prime_app.cpp tests/test_hp_prime_app.cpp -o tests/test_hp_prime_app
@@ -139,6 +140,8 @@ test:
 	node --check < sw.js.in
 	node tests/test_service_worker.js
 	node --check $(APP_JS_SRC)
+	node --check $(HP_LEGACY_JS_SRC)
+	node --check tests/hp_legacy_frontend_harness.js
 	node --check $(NUMWORKS_JS_SRC)
 	@for file in $(NUMWORKS_JS_MODULES); do node --check $$file || exit 1; done
 	node --check $(NUMWORKS_JS_ENTRY)
@@ -146,6 +149,8 @@ test:
 	node tests/test_numworks_backend.js
 	node tests/test_numworks_frontend.js
 	node tests/test_casio_frontend.js
+	node tests/test_hp_legacy_backend.js
+	node tests/test_hp_legacy_frontend.js
 	python3 i18n/check.py
 
 $(TARGET): $(SRC) $(LIBS) $(PREJS)

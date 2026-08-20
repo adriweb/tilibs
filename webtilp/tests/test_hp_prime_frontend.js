@@ -106,6 +106,7 @@ async function testFamilyUiState() {
         updateSelectionActionButtons() {
             els.btnDeleteSelected.disabled = state.activeFamily === 'hp-prime';
         },
+        isHPLegacyActive() { return false; },
         isCasioActive() { return false; }
     };
     vm.createContext(context);
@@ -214,6 +215,7 @@ async function testTableDropUsesPrimeTransferPath() {
         logError(error) { throw error; },
         isHPPrimeActive() { return true; },
         isNumWorksActive() { return false; },
+        isHPLegacyActive() { return false; },
         isCasioActive() { return false; },
         findHPPrimeAppRoot() { return null; },
         setSelectedFiles(selected, source) {
@@ -299,6 +301,7 @@ async function testApplicationMappingAndDropDispatch() {
         logError(error) { throw error; },
         isHPPrimeActive() { return true; },
         isNumWorksActive() { return false; },
+        isHPLegacyActive() { return false; },
         isCasioActive() { return false; },
         findHPPrimeAppRoot(path) {
             assert.equal(path, 'synthese');
@@ -376,6 +379,7 @@ async function testApplicationMutationDispatch() {
         isNspireActive() { return false; },
         isHPPrimeActive() { return true; },
         isNumWorksActive() { return false; },
+        isHPLegacyActive() { return false; },
         isCasioActive() { return false; },
         prompt() { return 'renamed.png'; },
         confirm() { return true; },

@@ -4,14 +4,17 @@ const TI_VENDOR_ID = 0x0451; // Texas Instruments
 const PID_TI84_EVO_SERIAL = 0xE018;
 const SERIAL_KIND_EVO = 1;
 const SERIAL_KIND_GRAYLINK = 2;
+const SERIAL_KIND_HP_LEGACY = 3;
 const CABLE_GRAYLINK = '1';
 const CABLE_SILVERLINK = '4';
 const CABLE_DIRECTLINK = '5';
 const DEVICE_FAMILY_TI = 'ti';
 const DEVICE_FAMILY_HP_PRIME = 'hp-prime';
+const DEVICE_FAMILY_HP_LEGACY = 'hp-legacy';
 const DEVICE_FAMILY_NUMWORKS = 'numworks';
 const DEVICE_FAMILY_CASIO = 'casio';
 const HP_VENDOR_ID = 0x03F0;
+const HP_LEGACY_PRODUCT_ID = 0x0121;
 const HP_PRIME_PRODUCT_IDS = new Set([0x0441, 0x1541, 0x2441]);
 const NUMWORKS_VENDOR_ID = 0x0483;
 const NUMWORKS_PRODUCT_ID = 0xA291;
@@ -43,6 +46,9 @@ const TI_USB_DEVICES = [
 const TI_USB_PRODUCT_IDS = new Set(TI_USB_DEVICES.map(device => device.productId));
 
 function getWebUsbDeviceFamily(device) {
+    if (isHPLegacyDevice(device)) {
+        return DEVICE_FAMILY_HP_LEGACY;
+    }
     if (isHPPrimeDevice(device)) {
         return DEVICE_FAMILY_HP_PRIME;
     }
@@ -68,6 +74,7 @@ function getSupportedWebUsbFilters() {
             vendorId: HP_VENDOR_ID,
             productId
         })),
+        { vendorId: HP_VENDOR_ID, productId: HP_LEGACY_PRODUCT_ID },
         { vendorId: NUMWORKS_VENDOR_ID, productId: NUMWORKS_PRODUCT_ID },
         { vendorId: CASIO_VENDOR_ID, productId: CASIO_SERIAL_PRODUCT_ID }
     ];
@@ -109,6 +116,12 @@ function isHPPrimeDevice(device) {
     return device
         && device.vendorId === HP_VENDOR_ID
         && HP_PRIME_PRODUCT_IDS.has(device.productId);
+}
+
+function isHPLegacyDevice(device) {
+    return globalThis.WebTILPHPLegacy?.isHpLegacyUsbDevice?.(device)
+        ?? Boolean(device && device.vendorId === HP_VENDOR_ID
+            && device.productId === HP_LEGACY_PRODUCT_ID);
 }
 
 async function requestHPPrimeDevice(discoveryUsbDevice = null) {
@@ -342,6 +355,72 @@ function isGrayLinkSerialDevice(device = state.authorizedDevice) {
     return isSerialDevice(device) && device.serialKind === SERIAL_KIND_GRAYLINK;
 }
 
+function isHPLegacySerialDevice(device = state.authorizedDevice) {
+    return isSerialDevice(device) && device.serialKind === SERIAL_KIND_HP_LEGACY;
+}
+
+function isHPLegacySerialPortInfo(info) {
+    return info && info.usbVendorId === HP_VENDOR_ID
+        && info.usbProductId === HP_LEGACY_PRODUCT_ID;
+}
+
+function hpLegacySerialPortToDevice(port, usbDevice = null) {
+    return serialPortToDevice(port, {
+        usbDevice,
+        serialKind: SERIAL_KIND_HP_LEGACY,
+        productName: 'Legacy HP calculator (03f0:0121)',
+        vendorId: HP_VENDOR_ID,
+        productId: HP_LEGACY_PRODUCT_ID
+    });
+}
+
+async function requestHPLegacySerialDevice(usbDevice = null) {
+    if (!navigator.serial) throw new Error(t('hp_legacy_webserial_required'));
+    if (!self.isSecureContext) throw new Error(t('transport_secure_context_error'));
+    try {
+        const port = await navigator.serial.requestPort({
+            filters: [{ usbVendorId: HP_VENDOR_ID, usbProductId: HP_LEGACY_PRODUCT_ID }]
+        });
+        return hpLegacySerialPortToDevice(port, usbDevice);
+    } catch (error) {
+        if (error?.name === 'NotFoundError') return null;
+        throw error;
+    }
+}
+
+async function requestSupportedSerialCalculatorDevice() {
+    if (!navigator.serial) throw new Error('WebSerial is not supported in this browser.');
+    if (!self.isSecureContext) throw new Error(t('transport_secure_context_error'));
+    try {
+        const port = await navigator.serial.requestPort({ filters: [
+            { usbVendorId: HP_VENDOR_ID, usbProductId: HP_LEGACY_PRODUCT_ID },
+            { usbVendorId: TI_VENDOR_ID, usbProductId: PID_TI84_EVO_SERIAL }
+        ] });
+        const info = port.getInfo?.() || {};
+        return isHPLegacySerialPortInfo(info)
+            ? hpLegacySerialPortToDevice(port)
+            : serialPortToDevice(port, {
+                serialKind: SERIAL_KIND_EVO,
+                productName: 'TI-83/84 Evo'
+            });
+    } catch (error) {
+        if (error?.name === 'NotFoundError') return null;
+        throw error;
+    }
+}
+
+async function getAuthorizedHPLegacySerialDevices() {
+    if (!navigator.serial) return [];
+    try {
+        return (await navigator.serial.getPorts())
+            .filter(port => isHPLegacySerialPortInfo(port.getInfo?.() || {}))
+            .map(port => hpLegacySerialPortToDevice(port));
+    } catch (error) {
+        console.error('Failed to get authorized old-HP serial devices:', error);
+        return [];
+    }
+}
+
 function isEvoSerialDeviceInfo(info) {
     return info
         && info.usbVendorId === TI_VENDOR_ID
@@ -471,6 +550,10 @@ const state = {
     hpPrimeProtocolVersion: null,
     casioStorageSupported: false,
     casioFileSnapshotLoaded: false,
+    hpLegacyBackend: null,
+    hpLegacyKermitEnabled: false,
+    hpLegacyModelInfo: null,
+    hpLegacyConnectionGeneration: 0,
     numWorksBackend: null,
     selectedFiles: [],
     logLines: [],
@@ -560,8 +643,8 @@ const I18N_EN = {
     "brand_subtitle": "Universal linking, right from your browser!",
     "settings": "Settings",
     "calculator_family": "Calculator family",
-    "calculator_family_auto": "Auto-detect (TI, NumWorks, or Casio)",
-    "calculator_family_auto_hint": "TI, NumWorks, and vendor-specific Casio calculators are detected from one WebUSB chooser. HP Prime uses WebHID and can be selected here when needed.",
+    "calculator_family_auto": "Auto-detect (TI, HP, NumWorks, or Casio)",
+    "calculator_family_auto_hint": "TI, old HP, NumWorks, and vendor-specific Casio calculators are detected from one WebUSB chooser. HP Prime uses WebHID and can be selected here when needed.",
     "hp_prime_family_hint": "HP Prime uses WebHID for info, screenshots, backups, and file transfers.",
     "hp_prime_welcome_text": "Plug in your HP Prime, then click \"Connect Calculator\" and authorize it through WebHID.",
     "webhid_unavailable_title": "WebHID is not available in this browser.",
@@ -762,13 +845,41 @@ const I18N_EN = {
     "casio_rename_target_exists": "Cannot rename: {file} already exists in this Casio storage folder.",
     "casio_file_renamed": "Renamed {old} to {name} in Casio storage.",
     "casio_file_rename_failed": "Failed to rename {file} in Casio storage: {error}.",
+    "hp_legacy_backend_load_failed": "The old-HP Kermit backend failed to load.",
+    "hp_legacy_webserial_required": "This old HP calculator requires WebSerial because its USB interface is owned by the operating-system serial driver.",
+    "hp_legacy_no_device_selected": "No old HP calculator was selected.",
+    "hp_legacy_protocol_prompt": "This USB ID is shared by six HP models. For an HP 48gII, 49g+, or 50g, press OK first, then immediately exit and re-enter SERVER—even if Awaiting Server Cmd. is already displayed. WebTILP will already be waiting for the fresh SERVER session and will probe the model with VERSION. Press Cancel for an HP 39g+, 39gs, or 40gs transport-only connection.",
+    "hp_legacy_webusb_fallback_serial": "The operating system owns the HP USB interface; using its WebSerial port instead.",
+    "hp_legacy_connected_kermit": "Connected through classic Kermit after probing the calculator model with VERSION. HP 50g HOME listing is hardware-validated over WebUSB on macOS; other models and transports remain untested.",
+    "hp_legacy_connected_transport_only": "Connected to the shared old-HP USB identity in transport-only mode. HP 39/40-series XModem operations are not implemented yet.",
+    "hp_legacy_auto_connected": "Reconnected to the authorized old HP calculator.",
+    "hp_legacy_auto_connect_failed": "Old-HP auto-connect failed",
+    "hp_legacy_info_refreshed": "Old-HP transport information refreshed.",
+    "hp_legacy_feature_unavailable": "This operation is not part of the conservative old-HP Kermit capability set.",
+    "hp_legacy_refresh_tooltip": "Request the current HP RPL directory through Kermit RDIR.",
+    "hp_legacy_kermit_not_selected": "Kermit was not enabled because 03f0:0121 may be an HP 39/40-series calculator.",
+    "hp_legacy_dropzone_title": "Send HP object files",
+    "hp_legacy_dropzone_subtitle": "HP 48gII/49g+/50g only: start SERVER (Awaiting Server Cmd.) before transferring.",
+    "hp_legacy_xmodem_only_hint": "HP 39/40-series support currently stops at USB transport detection; its XModem file protocol is not implemented.",
+    "hp_legacy_files_title": "HP RPL directory objects",
+    "hp_legacy_files_loaded": "Loaded {count} old-HP object(s) from {path}.",
+    "hp_legacy_confirm_send": "Send {count} object file(s) through Kermit? The calculator's receive-overwrite flag controls conflicts.",
+    "hp_legacy_prompt_remote_name": "Calculator variable name for {file}:",
+    "hp_legacy_send_skipped": "Skipped {file}: no calculator variable name was supplied.",
+    "hp_legacy_file_sent": "Sent {file} as {name} through Kermit.",
+    "hp_legacy_upload_failed": "Old-HP Kermit upload failed",
+    "hp_legacy_file_received": "Received {file} through Kermit.",
+    "hp_legacy_download_failed": "Old-HP Kermit download failed",
+    "hp_legacy_directory_download_unavailable": "Recursive old-HP directory download is not implemented; open the directory on the calculator and refresh its listing.",
+    "hp_legacy_backup_unavailable": "Whole-calculator backup is not exposed for the old-HP Kermit backend.",
+    "hp_legacy_mutation_unavailable": "Delete and rename are deliberately not exposed through old-HP Kermit host commands.",
     "connect_calculator": "Connect Calculator",
     "welcome_title": "Welcome to WebTILP!",
     "welcome_text": "Plug in your calculator, then click \"Connect Calculator\"; WebTILP will detect its family automatically.",
     "webusb_unavailable_title": "WebUSB is not available in this browser.",
     "webusb_unavailable_text": "Please use a WebUSB-compatible browser like Chrome, Edge, or Brave.",
     "webserial_only_title": "WebUSB is not available; WebSerial support only.",
-    "webserial_only_text": "This browser supports WebSerial, so WebTILP can connect to TI-83/84 Evo calculators or an explicitly selected GrayLink serial cable. Use a WebUSB-enabled browser for all USB calculators.",
+    "webserial_only_text": "This browser supports WebSerial, so WebTILP can connect to TI-83/84 Evo, old HP 03f0:0121 calculators, or an explicitly selected GrayLink serial cable. Use a WebUSB-enabled browser for other USB calculators.",
     "device": "Device",
     "model": "Model",
     "free_memory": "Free Memory",
@@ -4664,6 +4775,10 @@ function isHPPrimeActive() {
     return state.activeFamily === DEVICE_FAMILY_HP_PRIME;
 }
 
+function isHPLegacyActive() {
+    return state.activeFamily === DEVICE_FAMILY_HP_LEGACY;
+}
+
 function isNumWorksActive() {
     return state.activeFamily === DEVICE_FAMILY_NUMWORKS;
 }
@@ -4766,6 +4881,47 @@ function setHPPrimeUiState() {
     updateSelectionActionButtons();
 }
 
+function setHPLegacyUiState() {
+    const kermitAvailable = state.hpLegacyKermitEnabled;
+    updateKeyControlsState(false);
+    if (els.keyCodeInput) els.keyCodeInput.removeAttribute('list');
+    clearKeyMapDataList();
+    if (els.fileInput) {
+        els.fileInput.disabled = !kermitAvailable;
+        els.fileInput.accept = '';
+    }
+    [els.btnSyncClock, els.btnNewFolder, els.btnDeleteSelected,
+        els.btnReceiveBackup].forEach(button => {
+        if (!button) return;
+        button.disabled = true;
+        button.classList.add('disabled');
+        button.title = t('hp_legacy_feature_unavailable');
+    });
+    if (els.btnScreenshot) {
+        els.btnScreenshot.disabled = !kermitAvailable;
+        els.btnScreenshot.classList.toggle('disabled', !kermitAvailable);
+        els.btnScreenshot.title = kermitAvailable
+            ? '' : t('hp_legacy_kermit_not_selected');
+    }
+    if (els.btnRefreshDirlist) {
+        els.btnRefreshDirlist.disabled = !kermitAvailable;
+        els.btnRefreshDirlist.classList.toggle('disabled', !kermitAvailable);
+        els.btnRefreshDirlist.title = kermitAvailable
+            ? t('hp_legacy_refresh_tooltip') : t('hp_legacy_kermit_not_selected');
+    }
+    els.btnIsReady?.classList.add('hidden');
+    els.btnReceiveOs?.classList.add('hidden');
+    els.btnDownloadOsPartial?.classList.add('hidden');
+    els.btnDumpRom?.classList.add('hidden');
+    els.btnLeaveExam?.classList.add('hidden');
+    setTextContent(document.getElementById('dropzoneTitle'), t('hp_legacy_dropzone_title'));
+    setTextContent(document.getElementById('dropzoneSubtitle'), kermitAvailable
+        ? t('hp_legacy_dropzone_subtitle') : t('hp_legacy_xmodem_only_hint'));
+    setTextContent(document.getElementById('panelVarsTitle'), t('hp_legacy_files_title'));
+    updateSendFilesButtonState();
+    updateSelectionActionButtons();
+}
+
 function setNumWorksUiState() {
     updateKeyControlsState(false);
     if (els.keyCodeInput) {
@@ -4857,6 +5013,8 @@ function setCasioUiState() {
 function applyActiveFamilyUiState(options = {}) {
     if (isHPPrimeActive()) {
         setHPPrimeUiState();
+    } else if (isHPLegacyActive()) {
+        setHPLegacyUiState();
     } else if (isNumWorksActive()) {
         setNumWorksUiState();
     } else if (isCasioActive()) {
@@ -4875,7 +5033,7 @@ function getActiveKeyMapConfig() {
     if (isHPPrimeActive()) {
         return KEYMAP_CONFIG_HP_PRIME;
     }
-    if (isNumWorksActive() || isCasioActive()) {
+    if (isHPLegacyActive() || isNumWorksActive() || isCasioActive()) {
         return null;
     }
     if (isNspireActive()) {
@@ -5217,6 +5375,123 @@ function readCasioInfo(module) {
     }
     applyActiveFamilyUiState();
     return info;
+}
+
+function readHPLegacyInfo() {
+    const detected = state.hpLegacyModelInfo;
+    const versionText = String(detected?.versionText || '').trim();
+    const serialText = String(detected?.serialText || '').trim();
+    const protocol = state.hpLegacyKermitEnabled
+        ? `Classic Kermit${detected?.modelName
+            ? ` (${detected.modelName})`
+            : detected ? ' (model unrecognized)' : ''}`
+        : 'Transport only; HP 39/40 XModem is not implemented';
+    const entries = [
+        { key: 'USB identity', value: '03f0:0121 (shared by six models)' },
+        detected?.modelName
+            ? { key: 'Detected model', value: detected.modelName }
+            : detected
+                ? { key: 'Model probe', value: 'Unrecognized VERSION response' }
+            : { key: 'Possible models', value: 'HP 39g+, 39gs, 40gs, 48gII, 49g+, or 50g' },
+        ...(serialText ? [{ key: 'SERIAL', value: serialText }] : []),
+        ...(versionText ? [{ key: 'VERSION response', value: versionText }] : []),
+        { key: 'Protocol', value: protocol }
+    ];
+    state.deviceInfoEntries = entries;
+    state.deviceModelName = detected?.modelName
+        || (detected
+            ? 'Legacy HP Kermit calculator (model unrecognized)'
+            : 'Legacy HP calculator (ambiguous USB identity)');
+    state.deviceInfoProductName = state.deviceModelName;
+    renderDeviceInfo(entries);
+    updateDeviceModelDisplay(state.deviceModelName);
+    if (els.memoryInfo) els.memoryInfo.textContent = '—';
+}
+
+async function connectHPLegacy(forcePrompt = true, selectedUsbDevice = null,
+    selectedSerialDevice = null) {
+    const Backend = globalThis.WebTILPHPLegacy?.HpLegacyBackend;
+    if (!Backend) throw new Error(t('hp_legacy_backend_load_failed'));
+    const connectionGeneration = ++state.hpLegacyConnectionGeneration;
+    let enableKermit = false;
+    let backend = null;
+    let modelInfo = null;
+    let activeDevice = selectedSerialDevice || selectedUsbDevice;
+    if (selectedSerialDevice) {
+        backend = new Backend({ serialPort: selectedSerialDevice.serialPort });
+        await backend.connect({ enableKermit: false });
+    } else {
+        const usbDevice = selectedUsbDevice || (forcePrompt
+            ? await navigator.usb?.requestDevice({ filters: [{
+                vendorId: HP_VENDOR_ID, productId: HP_LEGACY_PRODUCT_ID
+            }] }) : null);
+        if (!usbDevice) throw new Error(t('hp_legacy_no_device_selected'));
+        activeDevice = usbDevice;
+        backend = new Backend({ usbDevice });
+        try {
+            await backend.connect({ enableKermit: false });
+        } catch (usbError) {
+            if (!navigator.serial) throw usbError;
+            const authorized = (await getAuthorizedHPLegacySerialDevices())[0] || null;
+            const serialDevice = authorized || await requestHPLegacySerialDevice(usbDevice);
+            if (!serialDevice) throw usbError;
+            backend = new Backend({ serialPort: serialDevice.serialPort });
+            await backend.connect({ enableKermit: false });
+            activeDevice = serialDevice;
+            log(t('hp_legacy_webusb_fallback_serial'));
+        }
+    }
+    // Arm the asynchronous USB/serial read before the prompt.  The prompt
+    // tells the user to dismiss it before restarting SERVER, so initialize()
+    // has sent I0 and is waiting when the fresh session becomes ready.
+    enableKermit = confirm(t('hp_legacy_protocol_prompt'));
+    backend.setKermitEnabled(enableKermit);
+    if (enableKermit) {
+        try {
+            modelInfo = await backend.detectModel();
+        } catch (error) {
+            await backend.close().catch(() => {});
+            if (state.hpLegacyConnectionGeneration !== connectionGeneration) {
+                const cancelled = new Error('Old-HP connection attempt was cancelled.');
+                cancelled.silent = true;
+                cancelled.hpLegacyConnectionCancelled = true;
+                throw cancelled;
+            }
+            throw error;
+        }
+        if (state.hpLegacyConnectionGeneration === connectionGeneration) {
+            try {
+                modelInfo.serialText = await backend.readSerialNumber();
+            } catch (error) {
+                log(`HP SERIAL information unavailable: ${error?.message || String(error)}`);
+            }
+        }
+    }
+    if (state.hpLegacyConnectionGeneration !== connectionGeneration) {
+        await backend.close().catch(() => {});
+        const cancelled = new Error('Old-HP connection attempt was cancelled.');
+        cancelled.silent = true;
+        cancelled.hpLegacyConnectionCancelled = true;
+        throw cancelled;
+    }
+    state.hpLegacyBackend = backend;
+    state.hpLegacyKermitEnabled = enableKermit;
+    state.hpLegacyModelInfo = modelInfo;
+    state.authorizedDevice = activeDevice;
+    state.activeFamily = DEVICE_FAMILY_HP_LEGACY;
+    state.handle = 0;
+    state.cableOpen = true;
+    state.features = enableKermit
+        ? FEATURE_FLAGS.OPS_SCREEN | FEATURE_FLAGS.OPS_DIRLIST
+            | FEATURE_FLAGS.OPS_VARS : 0;
+    state.dirlist = [];
+    applyActiveFamilyUiState();
+    readHPLegacyInfo();
+    renderDirlist([]);
+    setConnected(true);
+    setStatus('status_connected', true);
+    log(enableKermit ? t('hp_legacy_connected_kermit')
+        : t('hp_legacy_connected_transport_only'));
 }
 
 async function connectCasio(forcePrompt = true, selectedUsbDevice = null) {
@@ -5620,6 +5895,19 @@ async function autoConnectIfAuthorized() {
             }
             return;
         }
+        if (detectedFamily === DEVICE_FAMILY_HP_LEGACY) {
+            try {
+                state.connectInProgress = true;
+                state.authorizedDevice = device;
+                await connectHPLegacy(false, device);
+                log(t('hp_legacy_auto_connected'));
+            } catch (err) {
+                logError(err, t('hp_legacy_auto_connect_failed'));
+            } finally {
+                state.connectInProgress = false;
+            }
+            return;
+        }
         if (detectedFamily === DEVICE_FAMILY_HP_PRIME) {
             const hpDevices = await getAuthorizedHPPrimeDevices(device);
             if (hpDevices.length === 1) {
@@ -5647,6 +5935,21 @@ async function autoConnectIfAuthorized() {
                 log(t('hp_prime_auto_connected'));
             } catch (err) {
                 logError(err, t('hp_prime_auto_connect_failed'));
+            } finally {
+                state.connectInProgress = false;
+            }
+            return;
+        }
+    }
+    if (devices.length === 0 && navigator.serial) {
+        const oldHpSerialDevices = await getAuthorizedHPLegacySerialDevices();
+        if (oldHpSerialDevices.length === 1) {
+            try {
+                state.connectInProgress = true;
+                await connectHPLegacy(false, null, oldHpSerialDevices[0]);
+                log(t('hp_legacy_auto_connected'));
+            } catch (err) {
+                logError(err, t('hp_legacy_auto_connect_failed'));
             } finally {
                 state.connectInProgress = false;
             }
@@ -5974,6 +6277,10 @@ async function connect() {
                 await connectCasio(false, device);
                 return;
             }
+            if (detectedFamily === DEVICE_FAMILY_HP_LEGACY) {
+                await connectHPLegacy(false, device);
+                return;
+            }
             if (detectedFamily === DEVICE_FAMILY_HP_PRIME) {
                 await connectHPPrime(true, device);
                 return;
@@ -5989,8 +6296,21 @@ async function connect() {
             await connectHPPrime(true);
             return;
         }
+        if (!wantsGrayLink && !hasWebUsbTransport() && navigator.serial) {
+            const serialDevice = await requestSupportedSerialCalculatorDevice();
+            if (!serialDevice) return;
+            if (isHPLegacySerialDevice(serialDevice)) {
+                await connectHPLegacy(false, null, serialDevice);
+            } else {
+                await connectTI(false, serialDevice);
+            }
+            return;
+        }
         await connectTI(true);
     } catch (err) {
+        if (err?.hpLegacyConnectionCancelled) {
+            return;
+        }
         if (hadWorkingConnection) {
             setStatus('status_connected', true);
         } else {
@@ -6034,6 +6354,11 @@ async function getDeviceInfo() {
             const module = await initModule();
             readHPPrimeInfo(module);
             log(t('hp_prime_info_refreshed'));
+            return;
+        }
+        if (isHPLegacyActive()) {
+            readHPLegacyInfo();
+            log(t('hp_legacy_info_refreshed'));
             return;
         }
         if (isNumWorksActive()) {
@@ -6388,11 +6713,14 @@ function updateClockInfoRow(clockInfo, settings, fallbackDate) {
 }
 
 function clearDeviceData() {
+    state.hpLegacyConnectionGeneration += 1;
     state.dirlist = [];
     state.hpFileSnapshotLoaded = false;
     state.hpFileRefreshGeneration += 1;
     state.hpFileRenderGeneration = 0;
     state.hpPrimeProtocolVersion = null;
+    state.hpLegacyKermitEnabled = false;
+    state.hpLegacyModelInfo = null;
     state.casioStorageSupported = false;
     state.casioFileSnapshotLoaded = false;
     setSelectedFiles([]);
@@ -6476,6 +6804,20 @@ async function refreshDirlist() {
             }
             const count = finishHPPrimeFileSnapshot(module, refresh, true);
             log(tFormat('hp_prime_snapshot_loaded', { count }));
+            return;
+        }
+        if (isHPLegacyActive()) {
+            if (!state.hpLegacyKermitEnabled) {
+                log(t('hp_legacy_kermit_not_selected'));
+                return;
+            }
+            const directory = await state.hpLegacyBackend.refresh();
+            state.dirlist = state.hpLegacyBackend.listEntries();
+            renderDirlist(state.dirlist);
+            log(tFormat('hp_legacy_files_loaded', {
+                count: state.dirlist.length,
+                path: directory.path || 'HOME'
+            }));
             return;
         }
         if (isNumWorksActive()) {
@@ -6617,6 +6959,9 @@ function getHPPrimePreviewKind(entry) {
 
 function formatVariableDisplayName(entry) {
     const name = entry.name || '';
+    if (entry.kind === 'hp-legacy') {
+        return name;
+    }
     if (entry.kind === 'numworks') {
         return `${name}.py`;
     }
@@ -6687,12 +7032,15 @@ function renderTableView(entries, filter) {
     const renderTableRow = (entry, depth, options = {}) => {
         const isArchived = entry.attr === 3;
         const isFolder = entry.is_folder === 1;
-        const location = entry.kind === 'app' ? 'Flash' : (isArchived ? 'Archive' : 'RAM');
+        const location = entry.kind === 'hp-legacy'
+            ? '-' : (entry.kind === 'app' ? 'Flash' : (isArchived ? 'Archive' : 'RAM'));
         const typeLabel = isFolder
             ? (entry.hpAppRoot ? entry.type_name : 'Directory')
             : (entry.type_name || `Unknown (${entry.type})`);
         const sizeValue = Number(entry.size) || 0;
-        const sizeLabel = options.sizeLabel ?? (isFolder ? '-' : formatBytes(sizeValue));
+        const sizeLabel = options.sizeLabel ?? (isFolder ? '-'
+            : (entry.kind === 'hp-legacy' && entry.hpSize
+                ? `${entry.hpSize}B` : formatBytes(sizeValue)));
         const indentBars = depth > 0
             ? `<span class="indent-bars">${'<span class="indent-bar"></span>'.repeat(depth)}</span>`
             : '';
@@ -6727,7 +7075,8 @@ function renderTableView(entries, filter) {
             row.title = t('hp_prime_app_folder_hint');
         }
         row.classList.toggle('integrity-invalid', Boolean(entry.invalid || appContainerInvalid));
-        const mutableStorageEntry = !(isCasioActive() && isFolder);
+        const mutableStorageEntry = !isHPLegacyActive()
+            && !(isCasioActive() && isFolder);
         const canRename = mutableStorageEntry
             && ((entry.hpAppChildEditable && state.hpFileSnapshotLoaded)
                 || (state.features & FEATURE_FLAGS.OPS_RENAME) !== 0);
@@ -6738,7 +7087,7 @@ function renderTableView(entries, filter) {
         const rowActions = `
             <div class="row-actions">
                 ${canPreview ? `<button class="btn ghost btn-inline action-preview" title="${escapeHtml(t('preview'))}" aria-label="${escapeHtml(t('preview'))}">👁️</button>` : ''}
-                <button class="btn ghost btn-inline action-download" title="Download">⬇️</button>
+                ${isHPLegacyActive() && isFolder ? '' : '<button class="btn ghost btn-inline action-download" title="Download">⬇️</button>'}
                 ${canRename ? '<button class="btn ghost btn-inline action-rename" title="Rename">✏️</button>' : ''}
                 ${canDelete ? '<button class="btn ghost btn-inline action-delete" title="Delete">🗑️</button>' : ''}
             </div>`;
@@ -7108,7 +7457,8 @@ function updateSendFilesButtonState() {
         return;
     }
     const hasFiles = state.selectedFiles.length || (els.fileInput && els.fileInput.files && els.fileInput.files.length);
-    const available = !isCasioActive() || state.casioStorageSupported;
+    const available = (!isCasioActive() || state.casioStorageSupported)
+        && (!isHPLegacyActive() || state.hpLegacyKermitEnabled);
     els.btnSendFiles.disabled = !hasFiles || !available;
     els.btnSendFiles.classList.toggle('primary', !!hasFiles && available);
     els.btnSendFiles.classList.toggle('subtle', !hasFiles || !available);
@@ -7122,7 +7472,7 @@ function updateSelectionActionButtons() {
         els.btnRecvSelected.disabled = !hasSelection;
     }
     if (els.btnDeleteSelected) {
-        const disabled = !hasSelection || isHPPrimeActive();
+        const disabled = !hasSelection || isHPPrimeActive() || isHPLegacyActive();
         els.btnDeleteSelected.disabled = disabled;
         els.btnDeleteSelected.classList.toggle('disabled', disabled);
     }
@@ -7628,6 +7978,14 @@ async function sendDroppedFiles(files, dropFolder) {
         return;
     }
     log(`Dropped ${files.length} file(s) for transfer.`);
+    if (isHPLegacyActive()) {
+        try {
+            await sendHPLegacyFiles(files);
+        } catch (error) {
+            logError(error, t('hp_legacy_upload_failed'));
+        }
+        return;
+    }
     if (isCasioActive()) {
         try {
             await sendCasioFiles(files, dropFolder || '');
@@ -7668,6 +8026,32 @@ async function sendDroppedFiles(files, dropFolder) {
         useModal: false,
         errorContext: 'Dropped transfer failed'
     });
+}
+
+async function sendHPLegacyFiles(files) {
+    if (!state.hpLegacyKermitEnabled) {
+        throw new Error(t('hp_legacy_kermit_not_selected'));
+    }
+    if (!confirm(tFormat('hp_legacy_confirm_send', { count: files.length }))) return;
+    let successCount = 0;
+    for (const file of files) {
+        const suggestedName = String(file.name || '').replace(/\.[^.]+$/, '') || 'OBJECT';
+        const remoteName = prompt(tFormat('hp_legacy_prompt_remote_name', {
+            file: file.name
+        }), suggestedName)?.trim();
+        if (!remoteName) {
+            log(tFormat('hp_legacy_send_skipped', { file: file.name }));
+            continue;
+        }
+        await state.hpLegacyBackend.sendFile(remoteName,
+            new Uint8Array(await file.arrayBuffer()));
+        successCount += 1;
+        log(tFormat('hp_legacy_file_sent', { file: file.name, name: remoteName }));
+    }
+    if (successCount) {
+        setSelectedFiles([]);
+        await refreshDirlist();
+    }
 }
 
 function getDirlistFolders() {
@@ -8981,6 +9365,14 @@ async function sendSelectedFiles() {
     }
     setButtonLoading(els.btnSendFiles, true);
     try {
+        if (isHPLegacyActive()) {
+            try {
+                await sendHPLegacyFiles(files);
+            } catch (error) {
+                logError(error, t('hp_legacy_upload_failed'));
+            }
+            return;
+        }
         if (isCasioActive()) {
             try {
                 await sendCasioFiles(files);
@@ -9171,6 +9563,10 @@ async function processIncomingTransfers(files, options = {}) {
 async function receiveBackup() {
     setButtonLoading(els.btnReceiveBackup, true);
     try {
+        if (isHPLegacyActive()) {
+            log(t('hp_legacy_backup_unavailable'));
+            return;
+        }
         if (isCasioActive()) {
             log(t('casio_backup_unavailable'));
             return;
@@ -9568,10 +9964,34 @@ async function downloadCasioEntries(selections) {
     }
 }
 
+async function downloadHPLegacyEntry(entry) {
+    if (entry.isFolder || entry.is_folder === 1) {
+        throw new Error(t('hp_legacy_directory_download_unavailable'));
+    }
+    const received = await state.hpLegacyBackend.receiveFile(entry.name);
+    const filename = String(received.name || entry.name || 'hp-object')
+        .replace(/[\\/]/g, '_');
+    triggerDownload(filename, received.data);
+    log(tFormat('hp_legacy_file_received', { file: entry.name }));
+}
+
 async function receiveSelected() {
     const selections = getSelectedVarInputs().map(buildEntryFromCheckbox);
     if (!selections.length) {
         log('No variables selected.');
+        return;
+    }
+    if (isHPLegacyActive()) {
+        setButtonLoading(els.btnRecvSelected, true);
+        try {
+            for (const entry of selections) {
+                if (!entry.isFolder) await downloadHPLegacyEntry(entry);
+            }
+        } catch (err) {
+            logError(err, t('hp_legacy_download_failed'));
+        } finally {
+            setButtonLoading(els.btnRecvSelected, false);
+        }
         return;
     }
     if (isCasioActive()) {
@@ -9693,6 +10113,10 @@ async function deleteSelected() {
         log('No variables selected.');
         return;
     }
+    if (isHPLegacyActive()) {
+        log(t('hp_legacy_mutation_unavailable'));
+        return;
+    }
     if (isCasioActive()) {
         const files = selections.filter(entry => !entry.isFolder);
         if (!files.length) {
@@ -9773,6 +10197,10 @@ async function deleteSelected() {
 }
 
 async function renameEntry(entry) {
+    if (isHPLegacyActive()) {
+        log(t('hp_legacy_mutation_unavailable'));
+        return;
+    }
     if (entry.isFolder && !isNspireActive()) {
         log('Folder renaming is only supported on TI-Nspire.');
         return;
@@ -9904,6 +10332,10 @@ async function renameEntry(entry) {
 }
 
 async function deleteEntry(entry) {
+    if (isHPLegacyActive()) {
+        log(t('hp_legacy_mutation_unavailable'));
+        return;
+    }
     if (!confirm(tFormat('confirm_delete_entry', {
         kind: t(entry.isFolder ? 'kind_folder' : 'kind_item'),
         name: entry.name
@@ -10008,6 +10440,17 @@ async function deleteEntry(entry) {
 }
 
 async function downloadEntry(entry) {
+    if (isHPLegacyActive()) {
+        setButtonLoading(els.btnRecvSelected, true);
+        try {
+            await downloadHPLegacyEntry(entry);
+        } catch (err) {
+            logError(err, t('hp_legacy_download_failed'));
+        } finally {
+            setButtonLoading(els.btnRecvSelected, false);
+        }
+        return;
+    }
     if (isCasioActive()) {
         setButtonLoading(els.btnRecvSelected, true);
         try {
@@ -10895,6 +11338,31 @@ async function takeScreenshot() {
             }));
             return;
         }
+        if (isHPLegacyActive()) {
+            if (!state.hpLegacyKermitEnabled || !state.hpLegacyBackend) {
+                log(t('hp_legacy_kermit_not_selected'));
+                return;
+            }
+            const backend = state.hpLegacyBackend;
+            const connectionGeneration = state.hpLegacyConnectionGeneration;
+            const screenshot = await backend.captureScreenshot();
+            if (state.hpLegacyBackend !== backend
+                || state.hpLegacyConnectionGeneration !== connectionGeneration
+                || !state.connected || !isHPLegacyActive()) {
+                return;
+            }
+            const canvas = els.screenshotCanvas;
+            canvas.width = screenshot.width;
+            canvas.height = screenshot.height;
+            const ctx = canvas.getContext('2d');
+            const imageData = ctx.createImageData(screenshot.width, screenshot.height);
+            imageData.data.set(screenshot.rgba);
+            ctx.putImageData(imageData, 0, 0);
+            canvas.classList.add('filled');
+            updateScreenshotCanvasScale();
+            log(`Screenshot captured (${screenshot.width}x${screenshot.height}).`);
+            return;
+        }
         if (isNumWorksActive()) {
             log(t('numworks_screenshot_unavailable'));
             return;
@@ -11067,6 +11535,7 @@ async function nukeConnection(tryReconnect = true) {
     }
     clearActiveOperations('Operation cancelled by emergency reset.');
     const wasHPPrime = isHPPrimeActive();
+    const wasHPLegacy = isHPLegacyActive();
     const wasNumWorks = isNumWorksActive();
     const wasCasio = isCasioActive();
     if (wasHPPrime && state.module) {
@@ -11074,6 +11543,13 @@ async function nukeConnection(tryReconnect = true) {
             await ccallAsync(state.module, 'hp_prime_disconnect', 'number', [], [], { timeoutMs: 8000 });
         } catch (err) {
             console.warn('[WebTILP] Failed to close HP Prime WebHID session cleanly', err);
+        }
+    }
+    if (wasHPLegacy) {
+        try {
+            await state.hpLegacyBackend?.close({ finish: true });
+        } catch (err) {
+            console.warn('[WebTILP] Failed to close the old-HP Kermit session cleanly', err);
         }
     }
     if (wasNumWorks) {
@@ -11092,14 +11568,14 @@ async function nukeConnection(tryReconnect = true) {
             console.warn('[WebTILP] Failed to close the Cahute session cleanly', err);
         }
     }
-    if (!wasHPPrime && !wasNumWorks && !wasCasio) {
+    if (!wasHPPrime && !wasHPLegacy && !wasNumWorks && !wasCasio) {
         try { await state.authorizedDevice?.reset(); } catch (e) {}
     }
     if (isNspireActive()) {
         try { await state.authorizedDevice?.forget(); } catch (e) {}
     }
     try {
-        if (state.module && !wasHPPrime && !wasNumWorks && !wasCasio) {
+        if (state.module && !wasHPPrime && !wasHPLegacy && !wasNumWorks && !wasCasio) {
             try {
                 state.module._notify_usb_disconnect();
             } catch (err) {
@@ -11110,6 +11586,9 @@ async function nukeConnection(tryReconnect = true) {
         retireModule(state.module, 'emergency reset');
         state.handle = 0;
         state.activeFamily = DEVICE_FAMILY_TI;
+        state.hpLegacyBackend = null;
+        state.hpLegacyKermitEnabled = false;
+        state.hpLegacyModelInfo = null;
         state.numWorksBackend = null;
         state.module = null;
         state.cableOpen = false;
@@ -11652,8 +12131,13 @@ bootstrap().catch(err => {
 
 function isTransportEventForActiveDevice(event = null) {
     if (!event?.device) {
+        if (isHPLegacyActive() && event?.target) {
+            return event.target === state.authorizedDevice?.serialPort
+                || event.target === state.authorizedDevice;
+        }
         return true;
     }
+    if (isHPLegacyActive()) return event.device === state.authorizedDevice;
     if (isCasioActive()) {
         return event.device === state.authorizedDevice;
     }
@@ -11666,6 +12150,7 @@ function handleTransportDisconnect(event = null) {
         return;
     }
     const numWorksBackend = state.numWorksBackend;
+    const hpLegacyBackend = state.hpLegacyBackend;
     const silent = state.silentReconnectInProgress;
     clearActiveOperations(silent ? undefined : 'Active operation cancelled due to disconnect.');
     state.handle = 0;
@@ -11674,6 +12159,12 @@ function handleTransportDisconnect(event = null) {
     state.connectInProgress = false;
     state.handlePromise = null;
     state.numWorksBackend = null;
+    state.hpLegacyBackend = null;
+    state.hpLegacyKermitEnabled = false;
+    state.hpLegacyModelInfo = null;
+    hpLegacyBackend?.close().catch(error => {
+        console.warn('[WebTILP] Failed to close the disconnected old-HP session.', error);
+    });
     numWorksBackend?.close().catch(error => {
         console.warn('[WebTILP] Failed to close the disconnected NumWorks session.', error);
     });
@@ -11695,6 +12186,7 @@ function handleTransportConnect(event = null) {
         return;
     }
     const numWorksBackend = state.numWorksBackend;
+    const hpLegacyBackend = state.hpLegacyBackend;
     if (state.silentReconnectInProgress) {
         return;
     }
@@ -11705,6 +12197,12 @@ function handleTransportConnect(event = null) {
     state.authorizedDevice = null;
     state.connectInProgress = false;
     state.numWorksBackend = null;
+    state.hpLegacyBackend = null;
+    state.hpLegacyKermitEnabled = false;
+    state.hpLegacyModelInfo = null;
+    hpLegacyBackend?.close().catch(error => {
+        console.warn('[WebTILP] Failed to close the reconnected old-HP session.', error);
+    });
     numWorksBackend?.close().catch(error => {
         console.warn('[WebTILP] Failed to close the reconnected NumWorks session.', error);
     });
@@ -11743,7 +12241,7 @@ if (!self.isSecureContext) {
     setStatus('idle', false);
 } else if (navigator.serial) {
     setStatus('status_webserial_only', false);
-    log('WebUSB is not available in this browser. WebSerial-only mode supports TI-83/84 Evo calculators and explicitly selected GrayLink serial cables.');
+    log('WebUSB is not available in this browser. WebSerial-only mode supports TI-83/84 Evo, old HP 03f0:0121 calculators, and explicitly selected GrayLink serial cables.');
 } else if (navigator.hid) {
     setStatus('idle', false);
     log(t('hp_prime_webhid_only_mode'));
