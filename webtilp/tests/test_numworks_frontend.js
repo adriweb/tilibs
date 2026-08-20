@@ -45,6 +45,7 @@ async function testRawBackupBypassesStorageParser() {
         els: { btnReceiveBackup: {} },
         isHPPrimeActive() { return false; },
         isNumWorksActive() { return true; },
+        isHPLegacyActive() { return false; },
         isCasioActive() { return false; },
         setButtonLoading() {},
         triggerDownload(name, data) { download = { name, data }; },
@@ -131,6 +132,7 @@ async function testTransportConnectClosesMatchingBackendOnly() {
         log() {},
         clearDeviceData() { resets += 1; },
         applyActiveFamilyUiState() {},
+        isHPLegacyActive() { return false; },
         isCasioActive() { return false; }
     };
     vm.createContext(context);
@@ -164,6 +166,7 @@ async function testCombinedWebUsbChooserAndFamilyDetection() {
         TI_USB_PRODUCT_IDS: new Set(tiDevices.map(device => device.productId)),
         TI_VENDOR_ID: 0x0451,
         HP_VENDOR_ID: 0x03F0,
+        HP_LEGACY_PRODUCT_ID: 0x0121,
         HP_PRIME_PRODUCT_IDS: hpProductIds,
         NUMWORKS_VENDOR_ID: 0x0483,
         NUMWORKS_PRODUCT_ID: 0xA291,
@@ -171,6 +174,7 @@ async function testCombinedWebUsbChooserAndFamilyDetection() {
         CASIO_SERIAL_PRODUCT_ID: 0x6101,
         DEVICE_FAMILY_TI: 'ti',
         DEVICE_FAMILY_HP_PRIME: 'hp-prime',
+        DEVICE_FAMILY_HP_LEGACY: 'hp-legacy',
         DEVICE_FAMILY_NUMWORKS: 'numworks',
         DEVICE_FAMILY_CASIO: 'casio',
         navigator: {
@@ -190,6 +194,9 @@ async function testCombinedWebUsbChooserAndFamilyDetection() {
         },
         isHPPrimeDevice(device) {
             return device?.vendorId === 0x03F0 && hpProductIds.has(device?.productId);
+        },
+        isHPLegacyDevice(device) {
+            return device?.vendorId === 0x03F0 && device?.productId === 0x0121;
         }
     };
     vm.createContext(context);
@@ -203,6 +210,7 @@ async function testCombinedWebUsbChooserAndFamilyDetection() {
     assert.equal(context.getWebUsbDeviceFamily(selected), 'numworks');
     assert.equal(context.getWebUsbDeviceFamily({ vendorId: 0x0451, productId: 0xE022 }), 'ti');
     assert.equal(context.getWebUsbDeviceFamily({ vendorId: 0x03F0, productId: 0x2441 }), 'hp-prime');
+    assert.equal(context.getWebUsbDeviceFamily({ vendorId: 0x03F0, productId: 0x0121 }), 'hp-legacy');
     assert.equal(context.getWebUsbDeviceFamily({ vendorId: 0x1234, productId: 0x5678 }), null);
     assert.equal(await context.requestSupportedWebUsbDevice(), selected);
     assert.deepEqual(
@@ -210,6 +218,7 @@ async function testCombinedWebUsbChooserAndFamilyDetection() {
         [
             [0x0451, 0xE003], [0x0451, 0xE022],
             [0x03F0, 0x0441], [0x03F0, 0x1541], [0x03F0, 0x2441],
+            [0x03F0, 0x0121],
             [0x0483, 0xA291], [0x07CF, 0x6101]
         ],
         'the WebUSB chooser receives the union of supported calculator filters'
@@ -238,6 +247,7 @@ async function testAutoConnectDispatchesSelectedWebUsbFamily() {
         els: { btnConnect: {} },
         DEVICE_FAMILY_TI: 'ti',
         DEVICE_FAMILY_HP_PRIME: 'hp-prime',
+        DEVICE_FAMILY_HP_LEGACY: 'hp-legacy',
         DEVICE_FAMILY_NUMWORKS: 'numworks',
         DEVICE_FAMILY_CASIO: 'casio',
         CABLE_GRAYLINK: '1',
@@ -255,6 +265,9 @@ async function testAutoConnectDispatchesSelectedWebUsbFamily() {
         async connectNumWorks(forcePrompt) { calls.push(['numworks', forcePrompt]); },
         async connectHPPrime(forcePrompt, discoveryDevice) {
             calls.push(['hp-prime', forcePrompt, discoveryDevice]);
+        },
+        async connectHPLegacy(forcePrompt, device) {
+            calls.push(['hp-legacy', forcePrompt, device]);
         },
         async connectCasio(forcePrompt, device) {
             calls.push(['casio', forcePrompt, device]);
