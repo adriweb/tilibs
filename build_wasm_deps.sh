@@ -92,6 +92,7 @@ meson compile -C _build -j "$JOBS"
 meson install -C _build --tags devel
 
 cd "$BUILD/libusb-1.0.30"
+patch --batch --fuzz=0 -p1 < "$RECIPE/libusb-webusb-device-filter.patch"
 # libusb adds Embind to its C configure probes. Emscripten >= 6.0.6 no
 # longer links the C++ runtime implicitly when those probes use emcc.
 LDFLAGS="$LDFLAGS -sDEFAULT_TO_CXX=1" emconfigure ./configure --host=wasm32-emscripten --prefix="$PREFIX" \
@@ -133,7 +134,8 @@ recipe = pathlib.Path(sys.argv[1])
 print('# Local build inputs (sha256)')
 for path in [recipe.parent.parent / 'build_wasm_deps.sh',
              recipe / 'emscripten-cross.ini',
-             recipe / 'glib-list-callbacks.patch']:
+             recipe / 'glib-list-callbacks.patch',
+             recipe / 'libusb-webusb-device-filter.patch']:
     print(path.name, hashlib.sha256(path.read_bytes()).hexdigest())
 PY
 } > "$PREFIX/webtilp-deps.txt.tmp"
