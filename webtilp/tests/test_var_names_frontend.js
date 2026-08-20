@@ -21,6 +21,7 @@ async function check() {
         state, console, Number, Error, URL,
         els: {btnRecvSelected: {}, btnDeleteSelected: {}},
         PROGRESS_IDLE_TIMEOUT_MS: 5000,
+        isCasioActive: () => false,
         isHPPrimeActive: () => false, isNumWorksActive: () => false,
         isNspireActive: () => false, isTI89TActive: () => true,
         authorizeDevice: async () => {}, initModule: async () => module,

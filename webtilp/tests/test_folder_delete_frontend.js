@@ -29,6 +29,7 @@ async function run(selections, vars, options = {}) {
         els: {btnDeleteSelected: {}}, PROGRESS_IDLE_TIMEOUT_MS: 5000,
         getActiveCalcModelId: () => options.model ?? 9,
         isHPPrimeActive: () => false, isNumWorksActive: () => false,
+        isCasioActive: () => false,
         getSelectedVarInputs: () => selections.map(checkbox),
         authorizeDevice: async () => {}, initModule: async () => module, ensureHandle: async () => 42,
         setButtonLoading() {}, refreshDirlist: async () => {refreshes++;},
