@@ -7,6 +7,7 @@ const PRECACHE_URLS = [
   'app.bundle.js',
   'evo_webusb_serial.js',
   'numworks_backend.bundle.js',
+  'hp_legacy_backend.js',
   'rm-loader.html',
   'rm_loader_backend.js',
   'rm_loader_ui.js',

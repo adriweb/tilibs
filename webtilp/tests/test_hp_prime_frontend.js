@@ -109,6 +109,7 @@ async function testFamilyUiState() {
         },
         HP_PRIME_UPLOAD_EXTENSIONS: new Set(['hpprgm', 'hpapp']),
         getActiveCalcModelId: () => 0,
+        isHPLegacyActive() { return false; },
         isCasioActive() { return false; }
     };
     vm.createContext(context);
@@ -215,11 +216,13 @@ async function testTableDropUsesPrimeTransferPath() {
     let primeSends = 0;
     let tiTransfers = 0;
     const context = {
+        state: { activeFamily: 'hp-prime' },
         console,
         log() {},
         logError(error) { throw error; },
         isHPPrimeActive() { return true; },
         isNumWorksActive() { return false; },
+        isHPLegacyActive() { return false; },
         isCasioActive() { return false; },
         findHPPrimeAppRoot() { return null; },
         setSelectedFiles(selected, source) {
@@ -300,11 +303,13 @@ async function testApplicationMappingAndDropDispatch() {
     let appDrop = null;
     let topLevelSends = 0;
     const dropContext = {
+        state: { activeFamily: 'hp-prime' },
         console,
         log() {},
         logError(error) { throw error; },
         isHPPrimeActive() { return true; },
         isNumWorksActive() { return false; },
+        isHPLegacyActive() { return false; },
         isCasioActive() { return false; },
         findHPPrimeAppRoot(path) {
             assert.equal(path, 'synthese');
@@ -385,6 +390,7 @@ async function testApplicationMutationDispatch() {
         isNspireActive() { return false; },
         isHPPrimeActive() { return true; },
         isNumWorksActive() { return false; },
+        isHPLegacyActive() { return false; },
         isCasioActive() { return false; },
         prompt() { return 'renamed.png'; },
         confirm() { return true; },
