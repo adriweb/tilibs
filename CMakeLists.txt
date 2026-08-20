@@ -66,8 +66,10 @@ option(BUILD_TIFILEUTIL "Whether to build the tifileutil tool" ON)
 option(BUILD_SHARED_LIBS "Whether to build shared libs instead of static ones" ON)
 if(EMSCRIPTEN)
     option(BUILD_HPLP "Build the HP Prime communication libraries" ON)
+    option(BUILD_CAHUTE "Build the Casio communication library" ON)
 else()
     option(BUILD_HPLP "Build the HP Prime communication libraries" OFF)
+    option(BUILD_CAHUTE "Build the Casio communication library" OFF)
 endif()
 
 # Our modules
@@ -216,6 +218,32 @@ add_subdirectory(libticalcs/trunk)
 
 if(BUILD_HPLP)
     add_subdirectory(hplp/libhpcalcs)
+endif()
+
+if(BUILD_CAHUTE)
+    set(CAHUTE_CLI OFF CACHE BOOL "Build Cahute command-line tools" FORCE)
+    set(CAHUTE_GIT OFF CACHE BOOL "Embed Cahute Git metadata" FORCE)
+    set(CAHUTE_LIBUSB ON CACHE BOOL "Use libusb for Cahute" FORCE)
+    set(CAHUTE_PKGCONF OFF CACHE BOOL "Install Cahute pkg-config files" FORCE)
+    set(CAHUTE_SDL OFF CACHE BOOL "Use SDL in Cahute tools" FORCE)
+    set(CAHUTE_SHARED OFF CACHE BOOL "Build Cahute shared library" FORCE)
+    set(CAHUTE_STATIC ON CACHE BOOL "Build Cahute static library" FORCE)
+    set(CAHUTE_STATIC_PIC OFF CACHE BOOL "Build Cahute PIC static library" FORCE)
+    set(CAHUTE_UDEV OFF CACHE BOOL "Install Cahute udev rules" FORCE)
+    # The top-level project uses LINUX for every UNIX-like target, including
+    # Emscripten. Cahute still needs its POSIX file backend for MEMFS, but it
+    # must not compile Linux /dev serial discovery into a browser build.
+    set(_TILIBS_LINUX "${LINUX}")
+    if(EMSCRIPTEN)
+        set(LINUX FALSE)
+        set(HAVE_LINUX_SERIAL_H 0 CACHE INTERNAL
+            "linux/serial.h is unavailable to Emscripten" FORCE)
+        set(HAVE_DDK_NTDDSCSI_H 0 CACHE INTERNAL
+            "Windows DDK headers are unavailable to Emscripten" FORCE)
+    endif()
+    add_subdirectory(cahute)
+    set(LINUX "${_TILIBS_LINUX}")
+    unset(_TILIBS_LINUX)
 endif()
 
 if(BUILD_TIFILEUTIL)

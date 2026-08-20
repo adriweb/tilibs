@@ -10,10 +10,13 @@ const CABLE_DIRECTLINK = '5';
 const DEVICE_FAMILY_TI = 'ti';
 const DEVICE_FAMILY_HP_PRIME = 'hp-prime';
 const DEVICE_FAMILY_NUMWORKS = 'numworks';
+const DEVICE_FAMILY_CASIO = 'casio';
 const HP_VENDOR_ID = 0x03F0;
 const HP_PRIME_PRODUCT_IDS = new Set([0x0441, 0x1541, 0x2441]);
 const NUMWORKS_VENDOR_ID = 0x0483;
 const NUMWORKS_PRODUCT_ID = 0xA291;
+const CASIO_VENDOR_ID = 0x07CF;
+const CASIO_SERIAL_PRODUCT_ID = 0x6101;
 const HP_PRIME_UPLOAD_EXTENSIONS = new Set([
     'hpapp', 'hplist', 'hpmat', 'hpmatrix', 'hpnote', 'hpprgm',
     'hpappnote', 'hpappprgm', 'hpcomplex', 'hpreal'
@@ -46,6 +49,9 @@ function getWebUsbDeviceFamily(device) {
     if (isNumWorksDevice(device)) {
         return DEVICE_FAMILY_NUMWORKS;
     }
+    if (isCasioDevice(device)) {
+        return DEVICE_FAMILY_CASIO;
+    }
     if (device?.vendorId === TI_VENDOR_ID && TI_USB_PRODUCT_IDS.has(device.productId)) {
         return DEVICE_FAMILY_TI;
     }
@@ -62,7 +68,8 @@ function getSupportedWebUsbFilters() {
             vendorId: HP_VENDOR_ID,
             productId
         })),
-        { vendorId: NUMWORKS_VENDOR_ID, productId: NUMWORKS_PRODUCT_ID }
+        { vendorId: NUMWORKS_VENDOR_ID, productId: NUMWORKS_PRODUCT_ID },
+        { vendorId: CASIO_VENDOR_ID, productId: CASIO_SERIAL_PRODUCT_ID }
     ];
 }
 
@@ -189,6 +196,12 @@ function isNumWorksDevice(device) {
         ?? Boolean(device
             && device.vendorId === NUMWORKS_VENDOR_ID
             && device.productId === NUMWORKS_PRODUCT_ID);
+}
+
+function isCasioDevice(device) {
+    return Boolean(device
+        && device.vendorId === CASIO_VENDOR_ID
+        && device.productId === CASIO_SERIAL_PRODUCT_ID);
 }
 
 function getNumWorksBackendClass() {
@@ -456,6 +469,8 @@ const state = {
     hpFileRefreshGeneration: 0,
     hpFileRenderGeneration: 0,
     hpPrimeProtocolVersion: null,
+    casioStorageSupported: false,
+    casioFileSnapshotLoaded: false,
     numWorksBackend: null,
     selectedFiles: [],
     logLines: [],
@@ -545,8 +560,8 @@ const I18N_EN = {
     "brand_subtitle": "Universal linking, right from your browser!",
     "settings": "Settings",
     "calculator_family": "Calculator family",
-    "calculator_family_auto": "Auto-detect (TI or NumWorks)",
-    "calculator_family_auto_hint": "TI and NumWorks are detected from one WebUSB chooser. HP Prime uses WebHID and can be selected here when needed.",
+    "calculator_family_auto": "Auto-detect (TI, NumWorks, or Casio)",
+    "calculator_family_auto_hint": "TI, NumWorks, and vendor-specific Casio calculators are detected from one WebUSB chooser. HP Prime uses WebHID and can be selected here when needed.",
     "hp_prime_family_hint": "HP Prime uses WebHID for info, screenshots, backups, and file transfers.",
     "hp_prime_welcome_text": "Plug in your HP Prime, then click \"Connect Calculator\" and authorize it through WebHID.",
     "webhid_unavailable_title": "WebHID is not available in this browser.",
@@ -686,6 +701,67 @@ const I18N_EN = {
     "numworks_script_renamed": "Renamed {old}.py to {name}.py.",
     "numworks_script_deleted": "Deleted {name}.py from NumWorks storage.",
     "numworks_download_failed": "NumWorks download failed",
+    "casio_webusb_required": "Casio access requires WebUSB in a secure context; use a recent Chromium-based browser.",
+    "casio_unsupported_usb_device": "The selected WebUSB device is not a supported vendor-specific Casio calculator.",
+    "casio_no_device_selected": "No compatible Casio calculator selected.",
+    "casio_error_unknown": "unknown Cahute error",
+    "casio_error_code": "Cahute error {code}",
+    "casio_progress_connecting": "Connecting to Casio calculator through Cahute",
+    "casio_connection_failed": "Casio connection failed: {error}",
+    "casio_connected": "Connected to {model} through WebUSB using {protocol}.",
+    "casio_auto_connected": "Auto-connected to authorized Casio calculator.",
+    "casio_auto_connect_failed": "Casio auto-connect failed",
+    "casio_info_unavailable": "Casio device information is unavailable.",
+    "casio_info_refreshed": "Casio device information refreshed.",
+    "casio_info_product": "Product",
+    "casio_info_protocol": "Protocol",
+    "casio_info_os_version": "OS version",
+    "casio_info_hardware_id": "Hardware ID",
+    "casio_info_cpu_id": "CPU ID",
+    "casio_info_username": "Username",
+    "casio_info_organisation": "Organisation",
+    "casio_storage_free": "Storage {free} free",
+    "casio_storage_unavailable_short": "Storage unavailable",
+    "casio_storage_protocol_unavailable": "This calculator uses CAS300. Cahute can identify it, but Protocol 7.00 storage operations are unavailable.",
+    "casio_feature_unavailable": "This operation is not available through the current Cahute WebUSB integration.",
+    "casio_screenshot_unavailable": "Screenshot streaming is not available through the current Cahute WebUSB integration.",
+    "casio_backup_unavailable": "Whole-calculator backups are not available through the current Cahute WebUSB integration.",
+    "casio_keys_unavailable": "Remote key injection is not available through the current Cahute WebUSB integration.",
+    "casio_refresh_tooltip": "Refresh Protocol 7.00 storage files",
+    "casio_dropzone_title": "Drop files to send to Casio storage",
+    "casio_dropzone_subtitle": "Any file type can be sent; Protocol 7.00 names must be printable ASCII and at most 22 characters.",
+    "casio_files_title": "Casio Storage Files",
+    "casio_type_directory": "Directory",
+    "casio_type_storage_file": "Storage file",
+    "casio_progress_loading_files": "Loading Casio storage files",
+    "casio_files_loaded": "Casio storage loaded: {count} entries.",
+    "casio_file_listing_failed": "Casio storage listing failed: {error}.",
+    "casio_confirm_unchecked_overwrite": "The Casio file list has not been refreshed, so WebTILP cannot detect overwrites. Sending may replace a file with the same name. Continue?",
+    "casio_upload_cancelled": "Casio upload cancelled before overwrite preflight.",
+    "casio_invalid_filename": "Invalid Casio storage filename: {file}. Use at most 22 printable ASCII characters without slashes.",
+    "casio_invalid_folder": "Invalid Casio storage folder: {folder}.",
+    "casio_duplicate_filename": "Skipped duplicate Casio upload filename {file}.",
+    "casio_confirm_overwrite": "“{file}” already exists in {folder}. Replace it?",
+    "casio_overwrite_skipped": "Skipped {file}; overwrite was not confirmed.",
+    "casio_storage_root": "storage root",
+    "casio_progress_sending_file": "Sending {file} to Casio storage",
+    "casio_file_sent": "Sent {file} to Casio storage.",
+    "casio_file_send_failed": "Failed to send {file} to Casio storage: {error}.",
+    "casio_upload_failed": "Casio upload failed",
+    "casio_progress_receiving_file": "Receiving {file} from Casio storage",
+    "casio_file_received": "Received {file} from Casio storage.",
+    "casio_file_receive_failed": "Failed to receive {file} from Casio storage: {error}.",
+    "casio_download_failed": "Casio download failed",
+    "casio_no_files_selected": "No Casio storage files selected.",
+    "casio_progress_deleting_file": "Deleting {file} from Casio storage",
+    "casio_file_deleted": "Deleted {file} from Casio storage.",
+    "casio_file_delete_failed": "Failed to delete {file} from Casio storage: {error}.",
+    "casio_delete_failed": "Casio delete failed",
+    "casio_directory_delete_unavailable": "Deleting Casio storage directories is not supported; delete their files individually.",
+    "casio_progress_renaming_file": "Renaming {file} in Casio storage",
+    "casio_rename_target_exists": "Cannot rename: {file} already exists in this Casio storage folder.",
+    "casio_file_renamed": "Renamed {old} to {name} in Casio storage.",
+    "casio_file_rename_failed": "Failed to rename {file} in Casio storage: {error}.",
     "connect_calculator": "Connect Calculator",
     "welcome_title": "Welcome to WebTILP!",
     "welcome_text": "Plug in your calculator, then click \"Connect Calculator\"; WebTILP will detect its family automatically.",
@@ -1156,6 +1232,22 @@ function formatHPPrimeError(module, code) {
     }
     return message ? `${message} (${numericCode})`
         : tFormat('hp_prime_error_code', { code: numericCode });
+}
+
+function formatCasioError(module, code) {
+    if (code === null || code === undefined || Number.isNaN(Number(code))) {
+        return t('casio_error_unknown');
+    }
+    const numericCode = Number(code);
+    let message = '';
+    try {
+        message = module?.ccall('casio_get_error_message', 'string',
+            ['number'], [numericCode]) || '';
+    } catch (err) {
+        console.warn('[WebTILP] Failed to resolve Cahute error message', err);
+    }
+    return message ? `${message} (${numericCode})`
+        : tFormat('casio_error_code', { code: numericCode });
 }
 
 function clearNativeWarnings() {
@@ -4576,6 +4668,10 @@ function isNumWorksActive() {
     return state.activeFamily === DEVICE_FAMILY_NUMWORKS;
 }
 
+function isCasioActive() {
+    return state.activeFamily === DEVICE_FAMILY_CASIO;
+}
+
 function resetFamilySpecificUiText(clearActionTitles = true) {
     setTextContent(document.getElementById('dropzoneTitle'), t('dropzone_title'));
     setTextContent(document.getElementById('dropzoneSubtitle'), t('dropzone_subtitle'));
@@ -4715,11 +4811,56 @@ function setNumWorksUiState() {
     updateSelectionActionButtons();
 }
 
+function setCasioUiState() {
+    const storageAvailable = state.casioStorageSupported;
+    updateKeyControlsState(false);
+    if (els.keyCodeInput) {
+        els.keyCodeInput.removeAttribute('list');
+    }
+    clearKeyMapDataList();
+    if (els.fileInput) {
+        els.fileInput.disabled = !storageAvailable;
+        els.fileInput.accept = '';
+    }
+    updateSendFilesButtonState();
+    [els.btnSyncClock, els.btnNewFolder, els.btnReceiveBackup].forEach(button => {
+        if (button) {
+            button.disabled = true;
+            button.classList.add('disabled');
+            button.title = t('casio_feature_unavailable');
+        }
+    });
+    if (els.btnRefreshDirlist) {
+        els.btnRefreshDirlist.disabled = !storageAvailable;
+        els.btnRefreshDirlist.classList.toggle('disabled', !storageAvailable);
+        els.btnRefreshDirlist.title = storageAvailable
+            ? t('casio_refresh_tooltip') : t('casio_storage_protocol_unavailable');
+    }
+    if (els.btnScreenshot) {
+        els.btnScreenshot.disabled = true;
+        els.btnScreenshot.classList.add('disabled');
+        els.btnScreenshot.title = t('casio_screenshot_unavailable');
+    }
+    els.btnIsReady?.classList.add('hidden');
+    els.btnReceiveOs?.classList.add('hidden');
+    els.btnDownloadOsPartial?.classList.add('hidden');
+    els.btnDumpRom?.classList.add('hidden');
+    els.btnLeaveExam?.classList.add('hidden');
+    setTextContent(document.getElementById('dropzoneTitle'), t('casio_dropzone_title'));
+    setTextContent(document.getElementById('dropzoneSubtitle'),
+        storageAvailable ? t('casio_dropzone_subtitle')
+            : t('casio_storage_protocol_unavailable'));
+    setTextContent(document.getElementById('panelVarsTitle'), t('casio_files_title'));
+    updateSelectionActionButtons();
+}
+
 function applyActiveFamilyUiState(options = {}) {
     if (isHPPrimeActive()) {
         setHPPrimeUiState();
     } else if (isNumWorksActive()) {
         setNumWorksUiState();
+    } else if (isCasioActive()) {
+        setCasioUiState();
     } else {
         setTiUiState(Boolean(options.tiCapabilitiesKnown));
     }
@@ -4734,7 +4875,7 @@ function getActiveKeyMapConfig() {
     if (isHPPrimeActive()) {
         return KEYMAP_CONFIG_HP_PRIME;
     }
-    if (isNumWorksActive()) {
+    if (isNumWorksActive() || isCasioActive()) {
         return null;
     }
     if (isNspireActive()) {
@@ -4982,6 +5123,144 @@ async function authorizeHPPrimeDevice(forcePrompt = false, discoveryUsbDevice = 
     }
     state.authorizedDevice = device;
     return device;
+}
+
+async function authorizeCasioDevice(forcePrompt = false, selectedUsbDevice = null) {
+    let device = selectedUsbDevice;
+    if (device && !isCasioDevice(device)) {
+        throw new Error(t('casio_unsupported_usb_device'));
+    }
+    if (!device && !forcePrompt && isCasioDevice(state.authorizedDevice)) {
+        device = state.authorizedDevice;
+    }
+    if (!device && !forcePrompt && navigator.usb) {
+        const devices = await navigator.usb.getDevices();
+        device = devices.find(isCasioDevice) || null;
+    }
+    if (!device && forcePrompt) {
+        if (!navigator.usb || !self.isSecureContext) {
+            throw new Error(t('casio_webusb_required'));
+        }
+        try {
+            device = await navigator.usb.requestDevice({
+                filters: [{
+                    vendorId: CASIO_VENDOR_ID,
+                    productId: CASIO_SERIAL_PRODUCT_ID
+                }]
+            });
+        } catch (error) {
+            if (error?.name !== 'NotFoundError') {
+                throw error;
+            }
+        }
+    }
+    if (!device) {
+        const cancelError = new Error(t('casio_no_device_selected'));
+        cancelError.silent = true;
+        throw cancelError;
+    }
+    state.authorizedDevice = device;
+    return device;
+}
+
+function applyCasioStorageSnapshot(module) {
+    const filesText = module.ccall('casio_get_files_json', 'string', [], []);
+    const files = JSON.parse(filesText || '[]');
+    state.features = state.casioStorageSupported
+        ? FEATURE_FLAGS.FTS_FOLDER | FEATURE_FLAGS.OPS_RENAME
+            | FEATURE_FLAGS.OPS_DELVAR
+        : 0;
+    state.dirlist = files.map(entry => ({
+        ...entry,
+        type_name: entry.is_folder === 1
+            ? t('casio_type_directory') : t('casio_type_storage_file')
+    }));
+    state.casioFileSnapshotLoaded = true;
+    renderDirlist(state.dirlist);
+    return state.dirlist.length;
+}
+
+function readCasioInfo(module) {
+    const infoText = module.ccall('casio_get_info_json', 'string', [], []);
+    if (!infoText) {
+        throw new Error(t('casio_info_unavailable'));
+    }
+    const info = JSON.parse(infoText);
+    state.casioStorageSupported = Boolean(info.storageSupported);
+    state.features = state.casioStorageSupported
+        ? FEATURE_FLAGS.FTS_FOLDER | FEATURE_FLAGS.OPS_RENAME
+            | FEATURE_FLAGS.OPS_DELVAR
+        : 0;
+    const model = info.productId || state.authorizedDevice?.productName || 'Casio';
+    const entries = [
+        { key: t('casio_info_product'), value: model },
+        { key: t('casio_info_protocol'), value: info.protocol || t('unknown') },
+        { key: t('casio_info_os_version'), value: info.osVersion || t('unknown') },
+        { key: t('casio_info_hardware_id'), value: info.hwid || t('unknown') },
+        { key: t('casio_info_cpu_id'), value: info.cpuid || t('unknown') },
+        { key: t('casio_info_username'), value: info.username || t('unknown') },
+        { key: t('casio_info_organisation'), value: info.organisation || t('unknown') }
+    ];
+    state.deviceInfoEntries = entries;
+    state.deviceModelName = model;
+    state.deviceInfoProductName = model;
+    renderDeviceInfo(entries);
+    updateDeviceModelDisplay(model);
+    if (state.casioStorageSupported) {
+        els.memoryInfo.textContent = tFormat('casio_storage_free', {
+            free: formatBytes(Number(info.storageFree) || 0)
+        });
+        els.memoryInfo.title = `${Number(info.storageFree) || 0}B`;
+    } else {
+        els.memoryInfo.textContent = t('casio_storage_unavailable_short');
+        els.memoryInfo.title = t('casio_storage_protocol_unavailable');
+    }
+    applyActiveFamilyUiState();
+    return info;
+}
+
+async function connectCasio(forcePrompt = true, selectedUsbDevice = null) {
+    const device = await authorizeCasioDevice(forcePrompt, selectedUsbDevice);
+    const module = await initModule();
+    const result = await ccallAsync(module, 'casio_connect', 'number', [], [], {
+        timeoutMs: 30000,
+        useProgress: true,
+        progressLabel: t('casio_progress_connecting')
+    });
+    if (result !== 0) {
+        throw new Error(tFormat('casio_connection_failed', {
+            error: formatCasioError(module, result)
+        }));
+    }
+    state.handle = 0;
+    state.cableOpen = true;
+    state.activeFamily = DEVICE_FAMILY_CASIO;
+    state.casioFileSnapshotLoaded = false;
+    const info = readCasioInfo(module);
+    const model = state.deviceModelName;
+    if (state.casioStorageSupported) {
+        const listResult = await ccallAsync(module, 'casio_refresh_files', 'number', [], [], {
+            timeoutMs: null,
+            useProgress: true,
+            progressLabel: t('casio_progress_loading_files')
+        });
+        if (listResult === 0) {
+            const count = applyCasioStorageSnapshot(module);
+            log(tFormat('casio_files_loaded', { count }));
+        } else {
+            log(tFormat('casio_file_listing_failed', {
+                error: formatCasioError(module, listResult)
+            }));
+        }
+    } else {
+        state.features = 0;
+        state.dirlist = [];
+        renderDirlist(state.dirlist);
+        log(t('casio_storage_protocol_unavailable'));
+    }
+    setConnected(true);
+    setStatus('status_connected', true);
+    log(tFormat('casio_connected', { model, protocol: info.protocol }));
 }
 
 function getHPPrimeModelName(device = state.authorizedDevice) {
@@ -5323,6 +5602,19 @@ async function autoConnectIfAuthorized() {
                 log(t('numworks_auto_connected'));
             } catch (err) {
                 logError(err, t('numworks_auto_connect_failed'));
+            } finally {
+                state.connectInProgress = false;
+            }
+            return;
+        }
+        if (detectedFamily === DEVICE_FAMILY_CASIO) {
+            try {
+                state.connectInProgress = true;
+                state.authorizedDevice = device;
+                await connectCasio(false, device);
+                log(t('casio_auto_connected'));
+            } catch (err) {
+                logError(err, t('casio_auto_connect_failed'));
             } finally {
                 state.connectInProgress = false;
             }
@@ -5678,6 +5970,10 @@ async function connect() {
                 await connectNumWorks(false);
                 return;
             }
+            if (detectedFamily === DEVICE_FAMILY_CASIO) {
+                await connectCasio(false, device);
+                return;
+            }
             if (detectedFamily === DEVICE_FAMILY_HP_PRIME) {
                 await connectHPPrime(true, device);
                 return;
@@ -5745,6 +6041,12 @@ async function getDeviceInfo() {
             readNumWorksInfo();
             applyNumWorksStorageSnapshot();
             log(t('numworks_info_refreshed'));
+            return;
+        }
+        if (isCasioActive()) {
+            const module = await initModule();
+            readCasioInfo(module);
+            log(t('casio_info_refreshed'));
             return;
         }
         if (isTi92Selected()) {
@@ -6091,6 +6393,8 @@ function clearDeviceData() {
     state.hpFileRefreshGeneration += 1;
     state.hpFileRenderGeneration = 0;
     state.hpPrimeProtocolVersion = null;
+    state.casioStorageSupported = false;
+    state.casioFileSnapshotLoaded = false;
     setSelectedFiles([]);
     state.nspireOsReceiveStarted = false;
     updateNspireOsButtons(false, false);
@@ -6181,6 +6485,29 @@ async function refreshDirlist() {
             log(tFormat('numworks_scripts_refreshed', { count }));
             return;
         }
+        if (isCasioActive()) {
+            if (!state.casioStorageSupported) {
+                log(t('casio_storage_protocol_unavailable'));
+                return;
+            }
+            const module = await initModule();
+            state.casioFileSnapshotLoaded = false;
+            const result = await ccallAsync(module, 'casio_refresh_files', 'number', [], [], {
+                timeoutMs: null,
+                useProgress: true,
+                progressLabel: t('casio_progress_loading_files')
+            });
+            if (result !== 0) {
+                log(tFormat('casio_file_listing_failed', {
+                    error: formatCasioError(module, result)
+                }));
+                return;
+            }
+            const count = applyCasioStorageSnapshot(module);
+            readCasioInfo(module);
+            log(tFormat('casio_files_loaded', { count }));
+            return;
+        }
         await authorizeDevice();
         const module = await initModule();
         const handle = await ensureHandle();
@@ -6210,8 +6537,10 @@ async function refreshDirlist() {
 
 function renderDirlist(entries) {
     const filter = (els.filterInput.value || '').toLowerCase();
-    const showLocation = !isNspireActive() && !isHPPrimeActive() && !isNumWorksActive();
-    const showKind = !isNspireActive() && !isHPPrimeActive() && !isNumWorksActive();
+    const showLocation = !isNspireActive() && !isHPPrimeActive()
+        && !isNumWorksActive() && !isCasioActive();
+    const showKind = !isNspireActive() && !isHPPrimeActive()
+        && !isNumWorksActive() && !isCasioActive();
     const table = els.varTableBody.closest('table');
     if (table) {
         table.classList.toggle('hide-location', !showLocation);
@@ -6398,10 +6727,13 @@ function renderTableView(entries, filter) {
             row.title = t('hp_prime_app_folder_hint');
         }
         row.classList.toggle('integrity-invalid', Boolean(entry.invalid || appContainerInvalid));
-        const canRename = (entry.hpAppChildEditable && state.hpFileSnapshotLoaded)
-            || (state.features & FEATURE_FLAGS.OPS_RENAME) !== 0;
-        const canDelete = (entry.hpAppChildEditable && state.hpFileSnapshotLoaded)
-            || (state.features & FEATURE_FLAGS.OPS_DELVAR) !== 0;
+        const mutableStorageEntry = !(isCasioActive() && isFolder);
+        const canRename = mutableStorageEntry
+            && ((entry.hpAppChildEditable && state.hpFileSnapshotLoaded)
+                || (state.features & FEATURE_FLAGS.OPS_RENAME) !== 0);
+        const canDelete = mutableStorageEntry
+            && ((entry.hpAppChildEditable && state.hpFileSnapshotLoaded)
+                || (state.features & FEATURE_FLAGS.OPS_DELVAR) !== 0);
         const canPreview = canPreviewVariable(entry, previewModelId);
         const rowActions = `
             <div class="row-actions">
@@ -6776,10 +7108,11 @@ function updateSendFilesButtonState() {
         return;
     }
     const hasFiles = state.selectedFiles.length || (els.fileInput && els.fileInput.files && els.fileInput.files.length);
-    els.btnSendFiles.disabled = !hasFiles;
-    els.btnSendFiles.classList.toggle('primary', !!hasFiles);
-    els.btnSendFiles.classList.toggle('subtle', !hasFiles);
-    els.btnSendFiles.classList.toggle('send-idle', !hasFiles);
+    const available = !isCasioActive() || state.casioStorageSupported;
+    els.btnSendFiles.disabled = !hasFiles || !available;
+    els.btnSendFiles.classList.toggle('primary', !!hasFiles && available);
+    els.btnSendFiles.classList.toggle('subtle', !hasFiles || !available);
+    els.btnSendFiles.classList.toggle('send-idle', !hasFiles || !available);
 }
 
 function updateSelectionActionButtons() {
@@ -6851,6 +7184,10 @@ function parseKeyCode(input) {
 async function sendKey(code) {
     if (isNumWorksActive()) {
         log(t('numworks_keys_unavailable'));
+        return;
+    }
+    if (isCasioActive()) {
+        log(t('casio_keys_unavailable'));
         return;
     }
     const key = parseKeyCode(code);
@@ -7291,6 +7628,14 @@ async function sendDroppedFiles(files, dropFolder) {
         return;
     }
     log(`Dropped ${files.length} file(s) for transfer.`);
+    if (isCasioActive()) {
+        try {
+            await sendCasioFiles(files, dropFolder || '');
+        } catch (error) {
+            logError(error, t('casio_upload_failed'));
+        }
+        return;
+    }
     if (isHPPrimeActive()) {
         const appRoot = findHPPrimeAppRoot(dropFolder);
         if (appRoot) {
@@ -8542,6 +8887,90 @@ async function sendNumWorksFiles(files) {
     log(tFormat('numworks_scripts_sent', { count: pending.length }));
 }
 
+function isValidCasioStorageName(name) {
+    return Boolean(name && name.length <= 22
+        && name !== '.' && name !== '..'
+        && !/[\\/\x00-\x1F\x7F-\uFFFF]/.test(name));
+}
+
+async function sendCasioFiles(files, directory = '') {
+    if (!state.casioStorageSupported) {
+        throw new Error(t('casio_storage_protocol_unavailable'));
+    }
+    const module = await initModule();
+    if (!state.casioFileSnapshotLoaded
+        && !confirm(t('casio_confirm_unchecked_overwrite'))) {
+        log(t('casio_upload_cancelled'));
+        return;
+    }
+    const normalizedDirectory = normalizeFolderPath(directory || '');
+    if (normalizedDirectory.includes('/')
+        || (normalizedDirectory && !isValidCasioStorageName(normalizedDirectory))) {
+        throw new Error(tFormat('casio_invalid_folder', { folder: directory }));
+    }
+    const pendingNames = new Set();
+    let successCount = 0;
+    for (let index = 0; index < files.length; index++) {
+        const file = files[index];
+        const name = String(file.name || '').split(/[\\/]/).pop();
+        const key = `${normalizedDirectory}\u0000${name}`.toLowerCase();
+        if (!isValidCasioStorageName(name)) {
+            log(tFormat('casio_invalid_filename', { file: file.name }));
+            continue;
+        }
+        if (pendingNames.has(key)) {
+            log(tFormat('casio_duplicate_filename', { file: name }));
+            continue;
+        }
+        pendingNames.add(key);
+        const existing = state.casioFileSnapshotLoaded
+            ? state.dirlist.find(entry => entry.kind === 'casio'
+                && entry.is_folder !== 1
+                && String(entry.folder || '').toLowerCase()
+                    === normalizedDirectory.toLowerCase()
+                && String(entry.name || '').toLowerCase() === name.toLowerCase())
+            : null;
+        if (existing && !confirm(tFormat('casio_confirm_overwrite', {
+            file: name,
+            folder: normalizedDirectory || t('casio_storage_root')
+        }))) {
+            log(tFormat('casio_overwrite_skipped', { file: name }));
+            continue;
+        }
+        const path = `/casio-upload-${index}.bin`;
+        try {
+            module.FS.writeFile(path, new Uint8Array(await file.arrayBuffer()));
+            const result = await ccallAsync(module, 'casio_send_file', 'number',
+                ['string', 'string', 'string'],
+                [path, normalizedDirectory, name], {
+                    timeoutMs: null,
+                    useProgress: true,
+                    progressLabel: tFormat('casio_progress_sending_file', { file: name })
+                });
+            if (result === 0) {
+                successCount += 1;
+                state.casioFileSnapshotLoaded = false;
+                log(tFormat('casio_file_sent', { file: name }));
+            } else {
+                log(tFormat('casio_file_send_failed', {
+                    file: name,
+                    error: formatCasioError(module, result)
+                }));
+            }
+        } finally {
+            try {
+                module.FS.unlink(path);
+            } catch {
+                // Best-effort cleanup.
+            }
+        }
+    }
+    if (successCount > 0) {
+        setSelectedFiles([]);
+        await refreshDirlist();
+    }
+}
+
 async function sendSelectedFiles() {
     const files = state.selectedFiles.length
         ? state.selectedFiles
@@ -8552,6 +8981,14 @@ async function sendSelectedFiles() {
     }
     setButtonLoading(els.btnSendFiles, true);
     try {
+        if (isCasioActive()) {
+            try {
+                await sendCasioFiles(files);
+            } catch (error) {
+                logError(error, t('casio_upload_failed'));
+            }
+            return;
+        }
         if (isHPPrimeActive()) {
             const module = await initModule();
             let successCount = 0;
@@ -8734,6 +9171,10 @@ async function processIncomingTransfers(files, options = {}) {
 async function receiveBackup() {
     setButtonLoading(els.btnReceiveBackup, true);
     try {
+        if (isCasioActive()) {
+            log(t('casio_backup_unavailable'));
+            return;
+        }
         if (isHPPrimeActive()) {
             const module = await initModule();
             if (!module.FS.analyzePath('/downloads').exists) {
@@ -9057,10 +9498,89 @@ function downloadNumWorksEntry(entry) {
     return true;
 }
 
+async function downloadCasioEntry(entry, index = 0) {
+    if (!state.casioStorageSupported || entry.isFolder || entry.is_folder === 1) {
+        return false;
+    }
+    const module = await initModule();
+    if (!module.FS.analyzePath('/downloads').exists) {
+        module.FS.mkdir('/downloads');
+    }
+    const target = `/downloads/casio-${index}.bin`;
+    try {
+        try {
+            module.FS.unlink(target);
+        } catch {
+            // The temporary target usually does not exist yet.
+        }
+        const result = await ccallAsync(module, 'casio_receive_file', 'number',
+            ['string', 'string', 'string'],
+            [entry.folder || '', entry.name, target], {
+                timeoutMs: null,
+                useProgress: true,
+                progressLabel: tFormat('casio_progress_receiving_file', {
+                    file: entry.name
+                })
+            });
+        if (result !== 0) {
+            throw new Error(formatCasioError(module, result));
+        }
+        const data = module.FS.readFile(target);
+        triggerDownload(entry.name, data);
+        log(tFormat('casio_file_received', { file: entry.name }));
+        return true;
+    } finally {
+        try {
+            module.FS.unlink(target);
+        } catch {
+            // Best-effort cleanup.
+        }
+    }
+}
+
+async function downloadCasioEntries(selections) {
+    const selectedFolders = selections
+        .filter(entry => entry.isFolder || entry.is_folder === 1)
+        .map(entry => normalizeFolderPath(entry.folderPath || entry.name))
+        .filter(Boolean);
+    const files = state.dirlist.filter(entry => entry.kind === 'casio'
+        && entry.is_folder !== 1
+        && (selections.some(selected => selected.kind === 'casio'
+            && !selected.isFolder && selected.name === entry.name
+            && (selected.folder || '') === (entry.folder || ''))
+            || selectedFolders.includes(normalizeFolderPath(entry.folder || ''))));
+    if (selectedFolders.length
+        && !confirm(tFormat('confirm_download_items_from_folders', {
+            items: files.length,
+            folders: selectedFolders.length
+        }))) {
+        return;
+    }
+    for (let index = 0; index < files.length; index++) {
+        try {
+            await downloadCasioEntry(files[index], index);
+        } catch (error) {
+            log(tFormat('casio_file_receive_failed', {
+                file: files[index].name,
+                error: error?.message || t('casio_error_unknown')
+            }));
+        }
+    }
+}
+
 async function receiveSelected() {
     const selections = getSelectedVarInputs().map(buildEntryFromCheckbox);
     if (!selections.length) {
         log('No variables selected.');
+        return;
+    }
+    if (isCasioActive()) {
+        setButtonLoading(els.btnRecvSelected, true);
+        try {
+            await downloadCasioEntries(selections);
+        } finally {
+            setButtonLoading(els.btnRecvSelected, false);
+        }
         return;
     }
     if (isHPPrimeActive()) {
@@ -9173,6 +9693,44 @@ async function deleteSelected() {
         log('No variables selected.');
         return;
     }
+    if (isCasioActive()) {
+        const files = selections.filter(entry => !entry.isFolder);
+        if (!files.length) {
+            log(t('casio_no_files_selected'));
+            return;
+        }
+        if (!confirm(tFormat('confirm_delete_items', { count: files.length }))) {
+            return;
+        }
+        setButtonLoading(els.btnDeleteSelected, true);
+        try {
+            const module = await initModule();
+            for (const entry of files) {
+                const result = await ccallAsync(module, 'casio_delete_file', 'number',
+                    ['string', 'string'], [entry.folder || '', entry.name], {
+                        timeoutMs: null,
+                        useProgress: true,
+                        progressLabel: tFormat('casio_progress_deleting_file', {
+                            file: entry.name
+                        })
+                    });
+                if (result === 0) {
+                    log(tFormat('casio_file_deleted', { file: entry.name }));
+                } else {
+                    log(tFormat('casio_file_delete_failed', {
+                        file: entry.name,
+                        error: formatCasioError(module, result)
+                    }));
+                }
+            }
+            await refreshDirlist();
+        } catch (error) {
+            logError(error, t('casio_delete_failed'));
+        } finally {
+            setButtonLoading(els.btnDeleteSelected, false);
+        }
+        return;
+    }
     if (!confirm(tFormat('confirm_delete_items', { count: selections.length }))) {
         return;
     }
@@ -9282,6 +9840,43 @@ async function renameEntry(entry) {
             log(tFormat('numworks_script_renamed', { old: currentName, name: renamed }));
             return;
         }
+        if (isCasioActive()) {
+            if (!isValidCasioStorageName(trimmed)) {
+                log(tFormat('casio_invalid_filename', { file: trimmed }));
+                return;
+            }
+            const targetExists = state.dirlist.some(candidate =>
+                candidate.kind === 'casio' && candidate.is_folder !== 1
+                && (candidate.folder || '') === (entry.folder || '')
+                && candidate.name.toLowerCase() === trimmed.toLowerCase());
+            if (targetExists) {
+                log(tFormat('casio_rename_target_exists', { file: trimmed }));
+                return;
+            }
+            const module = await initModule();
+            const result = await ccallAsync(module, 'casio_rename_file', 'number',
+                ['string', 'string', 'string', 'string'],
+                [entry.folder || '', currentName, entry.folder || '', trimmed], {
+                    timeoutMs: null,
+                    useProgress: true,
+                    progressLabel: tFormat('casio_progress_renaming_file', {
+                        file: currentName
+                    })
+                });
+            await refreshDirlist();
+            if (result !== 0) {
+                log(tFormat('casio_file_rename_failed', {
+                    file: currentName,
+                    error: formatCasioError(module, result)
+                }));
+                return;
+            }
+            log(tFormat('casio_file_renamed', {
+                old: currentName,
+                name: trimmed
+            }));
+            return;
+        }
         await authorizeDevice();
         const module = await initModule();
         const handle = await ensureHandle();
@@ -9360,6 +9955,31 @@ async function deleteEntry(entry) {
             log(tFormat('numworks_script_deleted', { name: entry.name }));
             return;
         }
+        if (isCasioActive()) {
+            if (entry.isFolder || entry.is_folder === 1) {
+                log(t('casio_directory_delete_unavailable'));
+                return;
+            }
+            const module = await initModule();
+            const result = await ccallAsync(module, 'casio_delete_file', 'number',
+                ['string', 'string'], [entry.folder || '', entry.name], {
+                    timeoutMs: null,
+                    useProgress: true,
+                    progressLabel: tFormat('casio_progress_deleting_file', {
+                        file: entry.name
+                    })
+                });
+            if (result !== 0) {
+                log(tFormat('casio_file_delete_failed', {
+                    file: entry.name,
+                    error: formatCasioError(module, result)
+                }));
+                return;
+            }
+            log(tFormat('casio_file_deleted', { file: entry.name }));
+            await refreshDirlist();
+            return;
+        }
         await authorizeDevice();
         const module = await initModule();
         const handle = await ensureHandle();
@@ -9388,6 +10008,21 @@ async function deleteEntry(entry) {
 }
 
 async function downloadEntry(entry) {
+    if (isCasioActive()) {
+        setButtonLoading(els.btnRecvSelected, true);
+        try {
+            if (entry.isFolder || entry.is_folder === 1) {
+                await downloadCasioEntries([entry]);
+            } else {
+                await downloadCasioEntry(entry);
+            }
+        } catch (err) {
+            logError(err, t('casio_download_failed'));
+        } finally {
+            setButtonLoading(els.btnRecvSelected, false);
+        }
+        return;
+    }
     if (isHPPrimeActive()) {
         setButtonLoading(els.btnRecvSelected, true);
         try {
@@ -10433,6 +11068,7 @@ async function nukeConnection(tryReconnect = true) {
     clearActiveOperations('Operation cancelled by emergency reset.');
     const wasHPPrime = isHPPrimeActive();
     const wasNumWorks = isNumWorksActive();
+    const wasCasio = isCasioActive();
     if (wasHPPrime && state.module) {
         try {
             await ccallAsync(state.module, 'hp_prime_disconnect', 'number', [], [], { timeoutMs: 8000 });
@@ -10447,14 +11083,23 @@ async function nukeConnection(tryReconnect = true) {
             console.warn('[WebTILP] Failed to close the NumWorks WebUSB session cleanly', err);
         }
     }
-    if (!wasHPPrime && !wasNumWorks) {
+    if (wasCasio && state.module) {
+        try {
+            await ccallAsync(state.module, 'casio_disconnect', 'number', [], [], {
+                timeoutMs: 8000
+            });
+        } catch (err) {
+            console.warn('[WebTILP] Failed to close the Cahute session cleanly', err);
+        }
+    }
+    if (!wasHPPrime && !wasNumWorks && !wasCasio) {
         try { await state.authorizedDevice?.reset(); } catch (e) {}
     }
     if (isNspireActive()) {
         try { await state.authorizedDevice?.forget(); } catch (e) {}
     }
     try {
-        if (state.module && !wasHPPrime && !wasNumWorks) {
+        if (state.module && !wasHPPrime && !wasNumWorks && !wasCasio) {
             try {
                 state.module._notify_usb_disconnect();
             } catch (err) {
@@ -11005,11 +11650,22 @@ bootstrap().catch(err => {
     console.error('[WebTILP] Bootstrap failed', err);
 });
 
-function handleTransportDisconnect(event = null) {
+function isTransportEventForActiveDevice(event = null) {
+    if (!event?.device) {
+        return true;
+    }
+    if (isCasioActive()) {
+        return event.device === state.authorizedDevice;
+    }
     const numWorksBackend = state.numWorksBackend;
-    if (numWorksBackend && event?.device && event.device !== numWorksBackend.device) {
+    return !numWorksBackend || event.device === numWorksBackend.device;
+}
+
+function handleTransportDisconnect(event = null) {
+    if (!isTransportEventForActiveDevice(event)) {
         return;
     }
+    const numWorksBackend = state.numWorksBackend;
     const silent = state.silentReconnectInProgress;
     clearActiveOperations(silent ? undefined : 'Active operation cancelled due to disconnect.');
     state.handle = 0;
@@ -11035,11 +11691,10 @@ function handleTransportDisconnect(event = null) {
 }
 
 function handleTransportConnect(event = null) {
-    const numWorksBackend = state.numWorksBackend;
-    if (numWorksBackend && event?.device
-        && event.device !== numWorksBackend.device) {
+    if (!isTransportEventForActiveDevice(event)) {
         return;
     }
+    const numWorksBackend = state.numWorksBackend;
     if (state.silentReconnectInProgress) {
         return;
     }
