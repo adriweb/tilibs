@@ -109,6 +109,7 @@ function stageAssets({ sourceDir = SOURCE_DIR, outputDir = path.join(DESKTOP_DIR
     copies.set(`licenses/${library}-COPYING.txt`, path.join(repoDir, library, 'trunk/COPYING'));
   }
   copies.set('licenses/libhpcalcs-COPYING.txt', path.join(repoDir, 'hplp/libhpcalcs/COPYING'));
+  copies.set('licenses/cahute-LICENSE.txt', path.join(repoDir, 'cahute/LICENSE.txt'));
   copies.set('licenses/wasm-sources.lock', path.join(repoDir, 'deps/wasm/sources.lock'));
   for (const dependency of ['upsilon-js', 'webdfu', 'feather']) {
     copies.set(`third_party/${dependency}/LICENSE`, path.join(sourceDir, 'third_party', dependency, 'LICENSE'));

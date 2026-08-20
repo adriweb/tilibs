@@ -8,6 +8,7 @@ ROOT_DIR = ..
 LIBTICABLES_DIR = $(ROOT_DIR)/libticables/trunk
 LIBTICALCS_DIR  = $(ROOT_DIR)/libticalcs/trunk
 LIBHPCALCS_DIR  = $(ROOT_DIR)/hplp/libhpcalcs
+CAHUTE_DIR      = $(ROOT_DIR)/cahute
 LIBTIFILES_DIR  = $(ROOT_DIR)/libtifiles/trunk
 LIBTICONV_DIR   = $(ROOT_DIR)/libticonv/trunk
 LIBUSB_DIR      = $(ROOT_DIR)/libusb
@@ -36,6 +37,8 @@ INCLUDES = \
 	-I$(LIBTICABLES_DIR)/src \
 	-I$(LIBTICALCS_DIR)/src \
 	-I$(LIBHPCALCS_DIR)/src \
+	-I$(CAHUTE_DIR)/include \
+	-I$(BUILD_DIR)/cahute/include \
 	-I$(LIBTIFILES_DIR)/src \
 	-I$(LIBTICONV_DIR)/src \
 	-I$(LIBUSB_INCLUDE_DIR) \
@@ -47,6 +50,7 @@ INCLUDES = \
 LIBS = \
 	$(BUILD_DIR)/libticalcs/trunk/libticalcs2.a \
 	$(BUILD_DIR)/hplp/libhpcalcs/libhpcalcs.a \
+	$(BUILD_DIR)/cahute/libcahute-static.a \
 	$(BUILD_DIR)/libtifiles/trunk/libtifiles2.a \
 	$(BUILD_DIR)/libticables/trunk/libticables2.a \
 	$(BUILD_DIR)/libticonv/trunk/libticonv.a \
@@ -77,7 +81,7 @@ EMCCFLAGS = \
 
 # Targets
 TARGET = webtilp.js
-SRC = webtilp.cpp hp_prime_bridge.cpp hp_prime_app.cpp
+SRC = webtilp.cpp hp_prime_bridge.cpp hp_prime_app.cpp casio_bridge.cpp
 PREJS = webtilp_prejs.js
 PREJS_DEV = webtilp_prejs_dev.js
 PREJS_PROD = webtilp_prejs_prod.js
@@ -158,6 +162,7 @@ test:
 	node tests/test_python_bytecode.cjs
 	node tests/test_numworks_backend.js
 	node tests/test_numworks_frontend.js
+	node tests/test_casio_frontend.js
 	python3 i18n/check.py
 
 $(TARGET): $(SRC) $(LIBS) $(PREJS)
@@ -173,7 +178,7 @@ test-var-send-wasm:
 
 test-var-names-wasm:
 	@set -e; test_dir=$$(mktemp -d); trap 'rm -rf "$$test_dir"' EXIT; \
-	$(EMCC) $(CXXFLAGS) tests/test_var_names_wasm.cpp hp_prime_bridge.cpp hp_prime_app.cpp $(INCLUDES) $(LIBS) -o "$$test_dir/var_names.js" $(EMCCFLAGS); \
+	$(EMCC) $(CXXFLAGS) tests/test_var_names_wasm.cpp hp_prime_bridge.cpp hp_prime_app.cpp casio_bridge.cpp $(INCLUDES) $(LIBS) -o "$$test_dir/var_names.js" $(EMCCFLAGS); \
 	node tests/test_var_names_wasm.cjs "$$test_dir/var_names.js"
 
 test-silverlink-wasm: $(TARGET)

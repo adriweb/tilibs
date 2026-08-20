@@ -1,8 +1,8 @@
 # Bundled dependency licenses
 
 The desktop package stages the repository's original `COPYING` files for
-libticables, libticalcs, libticonv, libtifiles and libhpcalcs, and the vendored
-Upsilon.js, WebDFU and Feather license texts.
+libticables, libticalcs, libticonv, libtifiles and libhpcalcs, Cahute's
+`LICENSE.txt`, and the vendored Upsilon.js, WebDFU and Feather license texts.
 The additional license texts in this directory were copied verbatim from:
 
 | Dependency | License source |

@@ -59,6 +59,7 @@ COPY libticalcs ./libticalcs
 COPY libtifiles ./libtifiles
 COPY libticonv ./libticonv
 COPY hplp ./hplp
+COPY cahute ./cahute
 COPY --from=deps /work/tilibs/wasm-deps ./wasm-deps
 RUN ./build_wasm.sh
 
@@ -76,6 +77,7 @@ COPY libticalcs ./libticalcs
 COPY libtifiles ./libtifiles
 COPY libticonv ./libticonv
 COPY hplp ./hplp
+COPY cahute ./cahute
 COPY webtilp ./webtilp
 
 # Bun bundles the NumWorks backend in both profiles and minifies app.js in prod.

@@ -57,8 +57,9 @@ and drivers:
   supported serial driver. Close other calculator software before connecting
   so it releases the interface.
 - **Linux:** the desktop user needs access to the USB device, HID node or
-  serial port. Distribution packages for TILP may already supply USB rules.
-  Existing project guidance is in [libticables CONFIG](../../libticables/trunk/CONFIG).
+  serial port. Distribution packages for TILP/Cahute may already supply USB
+  rules. Existing project guidance is in [libticables CONFIG](../../libticables/trunk/CONFIG)
+  and [Cahute's rules template](../../cahute/misc/60-casio-calculators.rules.in).
   Serial access commonly uses the `dialout` or `uucp` group; use your
   distribution's instructions and log out/in after changing group membership.
 
