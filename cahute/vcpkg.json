@@ -1,0 +1,9 @@
+{
+  "builtin-baseline": "b7601ed37e1e1ce11a4f61b4b94a23e39d465f1d",
+  "dependencies": [
+    "pkgconf",
+    "python3",
+    "sdl3"
+  ],
+  "overrides": []
+}
