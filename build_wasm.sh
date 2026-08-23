@@ -15,19 +15,9 @@
 # emcmake cmake .. -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="$PWD/stage" -DBUILD_SHARED_LIBS=OFF -DENABLE_TEST=OFF -DENABLE_TAR=OFF -DENABLE_CPIO=OFF -DENABLE_CAT=OFF -DENABLE_ACL=OFF -DENABLE_XATTR=OFF -DENABLE_ICONV=OFF -DENABLE_OPENSSL=OFF -DENABLE_NETTLE=OFF -DENABLE_LIBB2=OFF -DENABLE_LZ4=OFF -DENABLE_ZSTD=OFF -DENABLE_LZMA=OFF -DENABLE_BZip2=OFF -DENABLE_EXPAT=OFF
 # emmake make -j8 install && emmake make install
 
-# You'll have to adjust the libusb .pc file with something like this:
-#
-#   prefix=/path/to/libusb/libusb
-#   exec_prefix=${prefix}
-#   libdir=${exec_prefix}/.libs
-#   includedir=${prefix}
-#
-#   Name: libusb-1.0
-#   Description: C API for USB device access from Linux, Mac OS X, Windows, OpenBSD/NetBSD and Solaris userspace
-#   Version: 1.0.29
-#   Libs: -L${libdir} -lusb-1.0
-#   Libs.private:  --bind -s ASYNCIFY
-#   Cflags: -I${includedir}/
+# The generated libusb .pc file normally contains its configure-time prefix
+# (often /usr/local). This script creates a temporary pkg-config override with
+# the actual checkout paths so CMake cannot accidentally select host libusb.
 
 # step 4 : run this file
 
@@ -92,13 +82,50 @@ echo -e "${GREEN}Using Emscripten: $(emcc --version | head -n1)${NC}"
 
 # Set up PKG_CONFIG_PATH for emscripten-ready libraries
 echo -e "${BLUE}Setting up library paths...${NC}"
-export PKG_CONFIG_PATH="$SCRIPT_DIR/libusb:${PKG_CONFIG_PATH}"
+
+LIBUSB_ROOT="$SCRIPT_DIR/libusb"
+LIBUSB_SOURCE="$LIBUSB_ROOT/libusb"
+LIBUSB_PC_SOURCE="$LIBUSB_ROOT/libusb-1.0.pc"
+LIBUSB_ARCHIVE="$LIBUSB_SOURCE/.libs/libusb-1.0.a"
+
+if [ ! -f "$LIBUSB_PC_SOURCE" ] || [ ! -f "$LIBUSB_ARCHIVE" ] || [ ! -f "$LIBUSB_SOURCE/libusb.h" ]; then
+    echo -e "${RED}Error: Emscripten libusb build artifacts are missing${NC}"
+    echo -e "Expected pkg-config file: $LIBUSB_PC_SOURCE"
+    echo -e "Expected archive: $LIBUSB_ARCHIVE"
+    echo -e "Build libusb with emconfigure/emmake as described at the top of this script."
+    exit 1
+fi
+
+LIBUSB_VERSION="$(sed -n 's/^Version:[[:space:]]*//p' "$LIBUSB_PC_SOURCE" | head -n1)"
+if [ -z "$LIBUSB_VERSION" ]; then
+    echo -e "${RED}Error: could not determine the libusb version from $LIBUSB_PC_SOURCE${NC}"
+    exit 1
+fi
+
+PKG_CONFIG_OVERRIDE_DIR="$(mktemp -d "${TMPDIR:-/tmp}/tilibs-wasm-pkgconfig.XXXXXX")"
+cleanup_pkg_config_override() {
+    rm -rf "$PKG_CONFIG_OVERRIDE_DIR"
+}
+trap cleanup_pkg_config_override EXIT
+
+cat > "$PKG_CONFIG_OVERRIDE_DIR/libusb-1.0.pc" <<EOF
+prefix=$LIBUSB_SOURCE
+exec_prefix=\${prefix}
+libdir=\${exec_prefix}/.libs
+includedir=\${prefix}
+
+Name: libusb-1.0
+Description: C API for USB device access from Linux, Mac OS X, Windows, OpenBSD/NetBSD and Solaris userspace
+Version: $LIBUSB_VERSION
+Libs: -L\${libdir} -lusb-1.0
+Libs.private: --bind -s ASYNCIFY
+Cflags: -I\${includedir}/
+EOF
 
 # Path to pre-built Emscripten libraries
 GLIB_EMSCRIPTEN="$SCRIPT_DIR/glib-emscripten-built"
 if [ -d "$GLIB_EMSCRIPTEN" ]; then
     echo -e "${GREEN}Found glib-emscripten-built at: $GLIB_EMSCRIPTEN${NC}"
-    export PKG_CONFIG_PATH="$GLIB_EMSCRIPTEN/lib/pkgconfig:${PKG_CONFIG_PATH}"
     # Also set CMAKE_PREFIX_PATH for find_package
     export CMAKE_PREFIX_PATH="$GLIB_EMSCRIPTEN:${CMAKE_PREFIX_PATH}"
 else
@@ -112,7 +139,6 @@ fi
 LIBARCHIVE_EMSCRIPTEN="$SCRIPT_DIR/libarchive/build-wasm/stage"
 if [ -d "$LIBARCHIVE_EMSCRIPTEN" ]; then
     echo -e "${GREEN}Found libarchive-emscripten-built at: $LIBARCHIVE_EMSCRIPTEN${NC}"
-    export PKG_CONFIG_PATH="$LIBARCHIVE_EMSCRIPTEN/lib/pkgconfig:${PKG_CONFIG_PATH}"
     # Also set CMAKE_PREFIX_PATH for find_package
     export CMAKE_PREFIX_PATH="$LIBARCHIVE_EMSCRIPTEN:${CMAKE_PREFIX_PATH}"
 else
@@ -122,6 +148,17 @@ else
     exit 1
 fi
 
+export PKG_CONFIG_PATH="$PKG_CONFIG_OVERRIDE_DIR:$GLIB_EMSCRIPTEN/lib/pkgconfig:$LIBARCHIVE_EMSCRIPTEN/lib/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
+
+RESOLVED_LIBUSB_PREFIX="$(pkg-config --variable=prefix libusb-1.0)"
+if [ "$RESOLVED_LIBUSB_PREFIX" != "$LIBUSB_SOURCE" ]; then
+    echo -e "${RED}Error: pkg-config resolved the wrong libusb build${NC}"
+    echo -e "Expected: $LIBUSB_SOURCE"
+    echo -e "Resolved: $RESOLVED_LIBUSB_PREFIX"
+    exit 1
+fi
+
+echo -e "${GREEN}Using Emscripten libusb $LIBUSB_VERSION at: $RESOLVED_LIBUSB_PREFIX${NC}"
 echo -e "${BLUE}PKG_CONFIG_PATH=$PKG_CONFIG_PATH${NC}"
 
 # Create build directory
