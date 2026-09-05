@@ -91,16 +91,27 @@ node build-emscripten/hplp/libhpcalcs/hpcalcs_webhid_mock_test.js
 
 ## GitHub Actions integration
 
-The core dependency build needs no prebuilt local library directories. A CI
-job can install the tools above, activate a pinned Emscripten SDK, and run the
-build and test sequence. Cache keys should include the SDK version,
-`build_wasm_deps.sh`, and `deps/wasm/`; on a completed dependency-cache hit,
-skip the dependency builder and run the tests and consumer builds.
+[`build.webtilp.workflow.yml`](../../.github/workflows/build.webtilp.workflow.yml)
+builds the production site on Ubuntu 24.04 for pushes, pull requests, and
+manual dispatch. It installs Emscripten 6.0.9, Meson 1.12.0, Node 24.19.0,
+and Bun 1.4.2, and checks out pinned TIVarsLib and Luna revisions below
+`build-wasm-deps/`. No sibling checkouts or prebuilt local libraries are needed.
+The converter outputs are cleaned before building because their repositories
+track generated binaries.
 
-A complete `make -C webtilp prod` additionally needs Bun and source checkouts
-for TIVarsLib and Luna, supplied through `TIVARS_DIR` and `LUNA_DIR` (the latter
-points at Luna's `emscripten` directory). Pin their revisions in the workflow
-instead of relying on sibling checkouts. The workflow should run the WASM
-tests and upload the generated site plus `wasm-deps/webtilp-deps.txt` for
-provenance. GitHub runner validation is still pending; the dependency upgrade
-was built and tested locally with Emscripten 5.0.6.
+The dependency cache key includes the platform, tool versions, recipe,
+patches, source lock, and workflow. An exact cache hit skips the dependency
+builder; tests and consumer builds still run. There are no partial restores.
+
+The job runs dependency, Evo file, HP WebHID mock, frontend, and module-startup
+tests, then uploads `webtilp-<commit>` with the service worker's required site
+assets, every translation, third-party notices, `webtilp-deps.txt`, and a
+`build-sources.json` recording source revisions and tool versions. Packaging
+fails if any precached asset is missing. The workflow builds an artifact;
+it does not deploy it. Hosting must provide the cross-origin isolation
+headers needed by the pthread build: `Cross-Origin-Opener-Policy: same-origin`
+and `Cross-Origin-Embedder-Policy: require-corp`.
+
+The dependency recipe and production commands have been validated locally
+with Emscripten 6.0.9, Node 24.19.0, and Bun 1.4.2. Execution on a GitHub runner
+remains to be verified after the workflow is pushed.
