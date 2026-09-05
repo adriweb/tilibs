@@ -1,0 +1,232 @@
+name: Build WebTILP
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    concurrency:
+      group: webtilp-${{ github.workflow }}-${{ github.ref }}
+      cancel-in-progress: true
+    defaults:
+      run:
+        shell: bash
+    env:
+      EMSDK_VERSION: '6.0.9'
+      EMSDK_REF: 5eb0bde7585670252e8ba05e9d361627bffd08b5
+      TIVARS_REF: 865dd74a1abff0a8cb27a4cab1ca4267b0024e8d
+      LUNA_REF: a9924a9a968954eba9adcc161a58ac607f97ce8c
+      MESON_VERSION: '1.12.0'
+      BUN_VERSION: '1.4.2'
+      EMSDK: ${{ github.workspace }}/build-wasm-deps/emsdk
+      TIVARS_DIR: ${{ github.workspace }}/build-wasm-deps/tivars_lib_cpp
+      LUNA_DIR: ${{ github.workspace }}/build-wasm-deps/Luna/emscripten
+
+    steps:
+      - name: Check out tilibs
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Check out Emscripten SDK
+        uses: actions/checkout@v7
+        with:
+          repository: emscripten-core/emsdk
+          ref: ${{ env.EMSDK_REF }}
+          path: build-wasm-deps/emsdk
+          persist-credentials: false
+
+      - name: Check out TIVarsLib
+        uses: actions/checkout@v7
+        with:
+          repository: adriweb/tivars_lib_cpp
+          ref: ${{ env.TIVARS_REF }}
+          path: build-wasm-deps/tivars_lib_cpp
+          persist-credentials: false
+
+      - name: Check out Luna
+        uses: actions/checkout@v7
+        with:
+          repository: ndless-nspire/Luna
+          ref: ${{ env.LUNA_REF }}
+          path: build-wasm-deps/Luna
+          persist-credentials: false
+
+      - name: Restore Emscripten SDK and system libraries
+        uses: actions/cache@v6
+        with:
+          path: |
+            build-wasm-deps/emsdk/upstream
+            build-wasm-deps/emsdk/node
+          key: webtilp-sdk-v1-${{ runner.os }}-${{ runner.arch }}-${{ env.EMSDK_VERSION }}-${{ env.EMSDK_REF }}
+
+      - name: Install build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake ninja-build pkg-config python3-venv curl patch xz-utils bzip2
+          python3 -m venv "$RUNNER_TEMP/webtilp-python"
+          "$RUNNER_TEMP/webtilp-python/bin/pip" install "meson==$MESON_VERSION"
+          echo "$RUNNER_TEMP/webtilp-python/bin" >> "$GITHUB_PATH"
+          "$EMSDK/emsdk" install "$EMSDK_VERSION"
+          "$EMSDK/emsdk" activate "$EMSDK_VERSION"
+
+      - name: Set up Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: '24.19.0'
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+
+      - name: Restore WASM dependencies
+        id: deps
+        uses: actions/cache/restore@v6
+        with:
+          path: wasm-deps
+          # No partial restore: the builder requires an empty install prefix.
+          # Workflow, documentation and test changes do not change the libraries.
+          key: webtilp-deps-v1-${{ runner.os }}-${{ runner.arch }}-${{ env.EMSDK_VERSION }}-${{ env.EMSDK_REF }}-${{ env.MESON_VERSION }}-${{ hashFiles('build_wasm_deps.sh', 'deps/wasm/sources.lock', 'deps/wasm/*.ini', 'deps/wasm/*.patch') }}
+
+      - name: Build WASM dependencies
+        if: steps.deps.outputs.cache-hit != 'true'
+        run: ./build_wasm_deps.sh
+
+      - name: Test WASM dependencies
+        run: |
+          source "$EMSDK/emsdk_env.sh"
+          # GNU Make 4.3 can mistake the SDK root's node directory for an executable.
+          PATH="$(dirname "$EMSDK_NODE"):$PATH"
+          export PATH
+          ./deps/wasm/test.sh
+
+      - name: Save validated WASM dependencies
+        if: steps.deps.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: wasm-deps
+          key: ${{ steps.deps.outputs.cache-primary-key }}
+
+      - name: Build and test tilibs
+        run: |
+          source "$EMSDK/emsdk_env.sh"
+          PATH="$(dirname "$EMSDK_NODE"):$PATH"
+          export PATH
+          ./build_wasm.sh
+          ./deps/wasm/test-tilibs.sh
+          cmake --build build-emscripten --target hpcalcs_webhid_mock_test
+          node build-emscripten/hplp/libhpcalcs/hpcalcs_webhid_mock_test.js
+
+      - name: Restore Python converters
+        id: converters
+        uses: actions/cache@v6
+        with:
+          path: |
+            webtilp/TIVarsLib.js
+            webtilp/TIVarsLib.wasm
+            webtilp/WebLuna.js
+            webtilp/WebLuna.wasm
+          key: webtilp-converters-v1-${{ runner.os }}-${{ runner.arch }}-${{ env.EMSDK_VERSION }}-${{ env.EMSDK_REF }}-${{ env.TIVARS_REF }}-${{ env.LUNA_REF }}-${{ hashFiles('webtilp/Makefile') }}
+
+      - name: Build Python converters
+        if: steps.converters.outputs.cache-hit != 'true'
+        run: |
+          source "$EMSDK/emsdk_env.sh"
+          # GNU Make 4.3 can mistake the SDK root's node directory for an executable.
+          PATH="$(dirname "$EMSDK_NODE"):$PATH"
+          export PATH
+          # These repositories track generated binaries; force source builds.
+          make -C "$TIVARS_DIR" -f Makefile.emscripten clean
+          make -C "$LUNA_DIR" clean
+          make -C webtilp -j"$(nproc)" prepare_python_converters
+
+      - name: Build and test production WebTILP
+        run: |
+          source "$EMSDK/emsdk_env.sh"
+          PATH="$(dirname "$EMSDK_NODE"):$PATH"
+          export PATH
+          # Converter assets were restored or built above; keep their smoke tests below.
+          make -C webtilp -j"$(nproc)" -o prepare_python_converters prod
+          make -C webtilp test
+          node webtilp/tests/test_wasm_startup.cjs
+          node --input-type=module - <<'JS'
+          import assert from 'node:assert/strict';
+          import createTIVarsLib from './webtilp/TIVarsLib.js';
+          import createWebLuna from './webtilp/WebLuna.js';
+          for (const create of [createTIVarsLib, createWebLuna]) {
+            const module = await create();
+            module.FS.writeFile('/ci-smoke.txt', 'converter startup');
+            assert.equal(module.FS.readFile('/ci-smoke.txt', { encoding: 'utf8' }), 'converter startup');
+          }
+          console.log('PASS: TIVarsLib and Luna initialization and MEMFS');
+          JS
+
+      - name: Package site and build provenance
+        run: |
+          python3 - <<'PY'
+          import ast
+          import json
+          import os
+          from pathlib import Path
+          import re
+          import shutil
+          import subprocess
+
+          source = Path('webtilp')
+          output = Path('build-wasm-deps/site')
+          output.mkdir(parents=True)
+          precache = re.search(r'const PRECACHE_URLS = (\[.*?\]);', (source / 'sw.js').read_text(), re.S)
+          assets = set(ast.literal_eval(precache.group(1)))
+          assets.update(['sw.js', 'version.json'])
+          assets.update(str(p.relative_to(source)) for p in source.glob('i18n/*.json'))
+          assets.update(str(p.relative_to(source)) for p in source.glob('*.map'))
+          assets.update(str(p.relative_to(source)) for p in source.glob('third_party/**/LICENSE'))
+          assets.add('third_party/NUMWORKS-PROVENANCE.md')
+          for name in sorted(assets):
+              destination = output / name
+              destination.parent.mkdir(parents=True, exist_ok=True)
+              shutil.copy2(source / name, destination)
+          shutil.copy2('wasm-deps/webtilp-deps.txt', output / 'webtilp-deps.txt')
+          def revision(path):
+              return subprocess.check_output(['git', '-C', path, 'rev-parse', 'HEAD'], text=True).strip()
+          info = {name: revision(path) for name, path in {
+              'tilibs': '.', 'emsdk': os.environ['EMSDK'],
+              'tivars_lib_cpp': os.environ['TIVARS_DIR'], 'Luna': os.environ['LUNA_DIR']
+          }.items()}
+          info.update({name: os.environ[name] for name in ['EMSDK_VERSION', 'MESON_VERSION', 'BUN_VERSION']})
+          (output / 'build-sources.json').write_text(json.dumps(info, indent=2) + '\n')
+          print(f'Packaged {len(assets)} site assets with build provenance')
+          PY
+
+      - name: Upload production site
+        uses: actions/upload-pages-artifact@v5
+        with:
+          path: build-wasm-deps/site
+          retention-days: 90
+
+  deploy:
+    if: ${{ github.repository == 'adriweb/tilibs' && github.ref == 'refs/heads/exp2-full-emscripten' && github.event_name != 'pull_request' }}
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    concurrency:
+      group: webtilp-github-pages
+      cancel-in-progress: false
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v5
