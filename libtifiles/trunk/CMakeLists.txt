@@ -54,9 +54,9 @@ set(PUBLIC_HEADERS
 if(NOT EMSCRIPTEN)
     find_package(ZLIB REQUIRED)
 else()
-    # For Emscripten, use built-in ports
-    message(STATUS "Emscripten build: Using Emscripten zlib port")
-    set(ZLIB_FOUND TRUE)
+    # build_wasm.sh supplies the same zlib archive as WebTILP's final link.
+    # Retain the SDK port for standalone builds without an external install.
+    find_package(ZLIB QUIET)
 endif()
 pkg_check_modules(glib REQUIRED IMPORTED_TARGET glib-2.0)
 pkg_check_modules(LibArchive REQUIRED IMPORTED_TARGET libarchive)
@@ -83,9 +83,12 @@ if(EMSCRIPTEN)
         "SHELL:-s ASYNCIFY_STACK_SIZE=5242880"
         "SHELL:-s MODULARIZE=1"
         "SHELL:-s EXPORT_NAME='libtifiles'"
-        "SHELL:-sUSE_ZLIB=1"
     )
-else()
+    if(NOT TARGET ZLIB::ZLIB)
+        target_link_options(tifiles2 PRIVATE "SHELL:-sUSE_ZLIB=1")
+    endif()
+endif()
+if(TARGET ZLIB::ZLIB)
     target_link_libraries(tifiles2 PRIVATE ZLIB::ZLIB)
 endif()
 

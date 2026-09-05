@@ -91,8 +91,7 @@ if(NOT EMSCRIPTEN)
     find_package(ZLIB REQUIRED) # for libtifiles
     target_link_libraries(ticalcs2 PRIVATE ZLIB::ZLIB)
 else()
-    # For Emscripten, use built-in ports
-    set(ZLIB_FOUND TRUE)
+    find_package(ZLIB QUIET)
     target_link_options(ticalcs2 PRIVATE
         "SHELL:--bind"
         "SHELL:-s ASYNCIFY=1"
@@ -105,8 +104,12 @@ else()
         "SHELL:-s ASYNCIFY_STACK_SIZE=5242880"
         "SHELL:-s MODULARIZE=1"
         "SHELL:-s EXPORT_NAME='libticalcs'"
-        "SHELL:-sUSE_ZLIB=1"
     )
+    if(TARGET ZLIB::ZLIB)
+        target_link_libraries(ticalcs2 PRIVATE ZLIB::ZLIB)
+    else()
+        target_link_options(ticalcs2 PRIVATE "SHELL:-sUSE_ZLIB=1")
+    endif()
 endif()
 
 set_target_properties(ticalcs2 PROPERTIES VERSION 13.0.3 SOVERSION 13)

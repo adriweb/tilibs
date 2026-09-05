@@ -42,8 +42,14 @@ if(EMSCRIPTEN)
     target_compile_definitions(hpcalcs PRIVATE __EMSCRIPTEN__=1)
     # EM_ASYNC_JS WebHID calls suspend synchronous C operations while browser
     # promises complete.  CMake consumers must therefore link with Asyncify;
-    # backup file payloads use Emscripten's zlib port.
-    target_link_options(hpcalcs INTERFACE -sASYNCIFY=1 -sUSE_ZLIB=1)
+    # backup file payloads use the external zlib install when available.
+    target_link_options(hpcalcs INTERFACE -sASYNCIFY=1)
+    find_package(ZLIB QUIET)
+    if(TARGET ZLIB::ZLIB)
+        target_link_libraries(hpcalcs PRIVATE ZLIB::ZLIB)
+    else()
+        target_link_options(hpcalcs INTERFACE -sUSE_ZLIB=1)
+    endif()
 else()
     find_package(ZLIB REQUIRED)
     find_package(PkgConfig REQUIRED)
