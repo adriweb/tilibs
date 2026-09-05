@@ -14,8 +14,22 @@ LIBUSB_DIR      = $(ROOT_DIR)/libusb
 LIBARCHIVE_DIR  = $(ROOT_DIR)/libarchive
 GLIB_DIR        = $(ROOT_DIR)/glib-emscripten-built
 BUILD_DIR       = $(ROOT_DIR)/build-emscripten
+WASM_DEPS_PREFIX ?= $(ROOT_DIR)/wasm-deps
 TIVARS_DIR     ?= $(ROOT_DIR)/../tivars_lib_cpp
 LUNA_DIR       ?= $(ROOT_DIR)/../Luna/emscripten
+
+# Prefer the complete, pinned install produced by build_wasm_deps.sh.
+# Keep the original checkout layout usable until that install is available.
+ifneq ($(wildcard $(WASM_DEPS_PREFIX)/webtilp-deps.txt),)
+GLIB_DIR = $(WASM_DEPS_PREFIX)
+LIBUSB_INCLUDE_DIR = $(WASM_DEPS_PREFIX)/include/libusb-1.0
+LIBUSB_ARCHIVE = $(WASM_DEPS_PREFIX)/lib/libusb-1.0.a
+LIBARCHIVE_STAGE = $(WASM_DEPS_PREFIX)
+else
+LIBUSB_INCLUDE_DIR = $(LIBUSB_DIR)/libusb
+LIBUSB_ARCHIVE = $(LIBUSB_DIR)/libusb/.libs/libusb-1.0.a
+LIBARCHIVE_STAGE = $(LIBARCHIVE_DIR)/build-wasm/stage
+endif
 
 # Include paths
 INCLUDES = \
@@ -24,8 +38,8 @@ INCLUDES = \
 	-I$(LIBHPCALCS_DIR)/src \
 	-I$(LIBTIFILES_DIR)/src \
 	-I$(LIBTICONV_DIR)/src \
-	-I$(LIBUSB_DIR)/libusb \
-	-I$(LIBARCHIVE_DIR)/build-wasm/stage/include \
+	-I$(LIBUSB_INCLUDE_DIR) \
+	-I$(LIBARCHIVE_STAGE)/include \
 	-I$(GLIB_DIR)/include/glib-2.0 \
 	-I$(GLIB_DIR)/lib/glib-2.0/include
 
@@ -36,11 +50,10 @@ LIBS = \
 	$(BUILD_DIR)/libtifiles/trunk/libtifiles2.a \
 	$(BUILD_DIR)/libticables/trunk/libticables2.a \
 	$(BUILD_DIR)/libticonv/trunk/libticonv.a \
-	$(LIBUSB_DIR)/libusb/.libs/libusb-1.0.a \
-	$(LIBARCHIVE_DIR)/build-wasm/stage/lib/libarchive.a \
+	$(LIBUSB_ARCHIVE) \
+	$(LIBARCHIVE_STAGE)/lib/libarchive.a \
 	$(GLIB_DIR)/lib/libglib-2.0.a \
-	$(GLIB_DIR)/lib/libz.a \
-	$(GLIB_DIR)/lib/libpcre2-8.a
+	$(GLIB_DIR)/lib/libz.a
 
 # Compiler flags
 CXXFLAGS = -O3 -std=gnu++17 -flto -pthread

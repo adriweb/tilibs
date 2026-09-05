@@ -87,6 +87,8 @@ cmake-build-*/
 tilibs.build/
 
 build-emscripten/
+build-wasm-deps/
+wasm-deps/
 glib-emscripten-built/
 libusb/
 libarchive/
