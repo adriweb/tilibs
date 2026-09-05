@@ -1,0 +1,7 @@
+# filename sha256 url
+zlib-1.3.2.tar.xz d7a0654783a4da529d1bb793b7ad9c3318020af77667bcae35f95d0e42a792f3 https://github.com/madler/zlib/releases/download/v1.3.2/zlib-1.3.2.tar.xz
+libffi-3.8.0.tar.gz 7da3e2d9a171eb0a038f592ecad3ff2bb2550f3496d87b3b29ad0cf4430c0db4 https://github.com/libffi/libffi/releases/download/v3.8.0/libffi-3.8.0.tar.gz
+glib-2.88.3.tar.xz ab24d24e698dfa1e408b7bcdb508f4aafc906185a8b8ce72fdf79bbbdc9b383b https://download.gnome.org/sources/glib/2.88/glib-2.88.3.tar.xz
+glib-wasm.patch ab0d26a034257ab4dcde2e9aa41b862eccd0309ba99b887076cf529356f00e11 https://github.com/GNOME/glib/compare/2.88.1...kleisauke:1afd0d285774f342e0aadcda5cc2c2721d47506c.patch
+libusb-1.0.30.tar.bz2 fea36f34f9156400209595e300840767ab1a385ede1dc7ee893015aea9c6dbaf https://github.com/libusb/libusb/releases/download/v1.0.30/libusb-1.0.30.tar.bz2
+libarchive-3.8.9.tar.xz 888c934f9d95648ecb9163dc8e23ab80a476ecb81a8f1154704a227b5b676dde https://github.com/libarchive/libarchive/releases/download/v3.8.9/libarchive-3.8.9.tar.xz
