@@ -1,5 +1,7 @@
 #!/bin/bash
 # Build script for the tilibs WebAssembly module using existing CMakeLists.txt
+# Recommended: run ./build_wasm_deps.sh first (see deps/wasm/README.md).
+# The original dependency layout below remains supported as a fallback.
 
 # step 0 : get emscripten
 
@@ -86,9 +88,23 @@ echo -e "${BLUE}Setting up library paths...${NC}"
 LIBUSB_ROOT="$SCRIPT_DIR/libusb"
 LIBUSB_SOURCE="$LIBUSB_ROOT/libusb"
 LIBUSB_PC_SOURCE="$LIBUSB_ROOT/libusb-1.0.pc"
-LIBUSB_ARCHIVE="$LIBUSB_SOURCE/.libs/libusb-1.0.a"
+LIBUSB_INCLUDE_DIR="$LIBUSB_SOURCE"
+LIBUSB_LIBRARY_DIR="$LIBUSB_SOURCE/.libs"
+GLIB_EMSCRIPTEN="$SCRIPT_DIR/glib-emscripten-built"
+LIBARCHIVE_EMSCRIPTEN="$SCRIPT_DIR/libarchive/build-wasm/stage"
+WASM_DEPS_PREFIX="${WASM_DEPS_PREFIX:-$SCRIPT_DIR/wasm-deps}"
+if [ -f "$WASM_DEPS_PREFIX/webtilp-deps.txt" ]; then
+    WASM_DEPS_PREFIX="$(cd "$WASM_DEPS_PREFIX" && pwd)"
+    LIBUSB_SOURCE="$WASM_DEPS_PREFIX"
+    LIBUSB_PC_SOURCE="$WASM_DEPS_PREFIX/lib/pkgconfig/libusb-1.0.pc"
+    LIBUSB_INCLUDE_DIR="$WASM_DEPS_PREFIX/include/libusb-1.0"
+    LIBUSB_LIBRARY_DIR="$WASM_DEPS_PREFIX/lib"
+    GLIB_EMSCRIPTEN="$WASM_DEPS_PREFIX"
+    LIBARCHIVE_EMSCRIPTEN="$WASM_DEPS_PREFIX"
+fi
+LIBUSB_ARCHIVE="$LIBUSB_LIBRARY_DIR/libusb-1.0.a"
 
-if [ ! -f "$LIBUSB_PC_SOURCE" ] || [ ! -f "$LIBUSB_ARCHIVE" ] || [ ! -f "$LIBUSB_SOURCE/libusb.h" ]; then
+if [ ! -f "$LIBUSB_PC_SOURCE" ] || [ ! -f "$LIBUSB_ARCHIVE" ] || [ ! -f "$LIBUSB_INCLUDE_DIR/libusb.h" ]; then
     echo -e "${RED}Error: Emscripten libusb build artifacts are missing${NC}"
     echo -e "Expected pkg-config file: $LIBUSB_PC_SOURCE"
     echo -e "Expected archive: $LIBUSB_ARCHIVE"
@@ -111,8 +127,8 @@ trap cleanup_pkg_config_override EXIT
 cat > "$PKG_CONFIG_OVERRIDE_DIR/libusb-1.0.pc" <<EOF
 prefix=$LIBUSB_SOURCE
 exec_prefix=\${prefix}
-libdir=\${exec_prefix}/.libs
-includedir=\${prefix}
+libdir=$LIBUSB_LIBRARY_DIR
+includedir=$LIBUSB_INCLUDE_DIR
 
 Name: libusb-1.0
 Description: C API for USB device access from Linux, Mac OS X, Windows, OpenBSD/NetBSD and Solaris userspace
@@ -123,9 +139,8 @@ Cflags: -I\${includedir}/
 EOF
 
 # Path to pre-built Emscripten libraries
-GLIB_EMSCRIPTEN="$SCRIPT_DIR/glib-emscripten-built"
 if [ -d "$GLIB_EMSCRIPTEN" ]; then
-    echo -e "${GREEN}Found glib-emscripten-built at: $GLIB_EMSCRIPTEN${NC}"
+    echo -e "${GREEN}Found GLib at: $GLIB_EMSCRIPTEN${NC}"
     # Also set CMAKE_PREFIX_PATH for find_package
     export CMAKE_PREFIX_PATH="$GLIB_EMSCRIPTEN:${CMAKE_PREFIX_PATH}"
 else
@@ -136,9 +151,8 @@ else
 fi
 
 # Path to pre-built LibArchive
-LIBARCHIVE_EMSCRIPTEN="$SCRIPT_DIR/libarchive/build-wasm/stage"
 if [ -d "$LIBARCHIVE_EMSCRIPTEN" ]; then
-    echo -e "${GREEN}Found libarchive-emscripten-built at: $LIBARCHIVE_EMSCRIPTEN${NC}"
+    echo -e "${GREEN}Found libarchive at: $LIBARCHIVE_EMSCRIPTEN${NC}"
     # Also set CMAKE_PREFIX_PATH for find_package
     export CMAKE_PREFIX_PATH="$LIBARCHIVE_EMSCRIPTEN:${CMAKE_PREFIX_PATH}"
 else
@@ -162,7 +176,7 @@ echo -e "${GREEN}Using Emscripten libusb $LIBUSB_VERSION at: $RESOLVED_LIBUSB_PR
 echo -e "${BLUE}PKG_CONFIG_PATH=$PKG_CONFIG_PATH${NC}"
 
 # Create build directory
-BUILD_DIR="build-emscripten"
+BUILD_DIR="$SCRIPT_DIR/build-emscripten"
 if [ -d "$BUILD_DIR" ]; then
     echo -e "${YELLOW}Removing existing build directory...${NC}"
     rm -rf "$BUILD_DIR"
@@ -180,12 +194,14 @@ echo -e "  WebUSB: Enabled"
 echo ""
 
 # Configure with CMake
-emcmake cmake .. \
+emcmake cmake "$SCRIPT_DIR" \
     -GNinja \
     -DCMAKE_BUILD_TYPE=Release \
     -DBUILD_SHARED_LIBS=OFF \
     -DBUILD_TESTS=OFF \
     -DBUILD_TIFILEUTIL=OFF \
+    -DZLIB_INCLUDE_DIR="$GLIB_EMSCRIPTEN/include" \
+    -DZLIB_LIBRARY="$GLIB_EMSCRIPTEN/lib/libz.a" \
     -DCMAKE_C_FLAGS="-pthread" \
     -DCMAKE_CXX_FLAGS="-pthread"
 
