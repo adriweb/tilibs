@@ -2026,6 +2026,7 @@ extern const CalcFncts calc_89 =
 	&tixx_get_lab_equipment_data_legacy,
 	&del_folder,
 	&noop_recv_os,
+	nullptr,
 };
 
 extern const CalcFncts calc_92p =
@@ -2107,6 +2108,7 @@ extern const CalcFncts calc_92p =
 	&tixx_get_lab_equipment_data_legacy,
 	&del_folder,
 	&noop_recv_os,
+	nullptr,
 };
 
 extern const CalcFncts calc_89t =
@@ -2188,6 +2190,7 @@ extern const CalcFncts calc_89t =
 	&tixx_get_lab_equipment_data_legacy,
 	&del_folder,
 	&noop_recv_os,
+	nullptr,
 };
 
 extern const CalcFncts calc_v2 =
@@ -2269,6 +2272,7 @@ extern const CalcFncts calc_v2 =
 	&tixx_get_lab_equipment_data_legacy,
 	&del_folder,
 	&noop_recv_os,
+	nullptr,
 };
 
 extern const CalcFncts calc_92 =
@@ -2349,6 +2353,7 @@ extern const CalcFncts calc_92 =
 	&tixx_get_lab_equipment_data_legacy,
 	&del_folder,
 	&noop_recv_os,
+	nullptr,
 };
 
 extern const CalcFncts calc_cbl2 =
@@ -2429,6 +2434,7 @@ extern const CalcFncts calc_cbl2 =
 	&tixx_get_lab_equipment_data_legacy,
 	&noop_del_folder,
 	&noop_recv_os,
+	nullptr,
 };
 
 extern const CalcFncts calc_labpro =
@@ -2509,6 +2515,7 @@ extern const CalcFncts calc_labpro =
 	&tixx_get_lab_equipment_data_legacy,
 	&noop_del_folder,
 	&noop_recv_os,
+	nullptr,
 };
 
 extern const CalcFncts calc_tipresenter =
@@ -2588,4 +2595,5 @@ extern const CalcFncts calc_tipresenter =
 	&noop_get_lab_equipment_data,
 	&noop_del_folder,
 	&noop_recv_os,
+	nullptr,
 };
