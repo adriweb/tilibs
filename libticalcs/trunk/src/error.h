@@ -72,6 +72,8 @@ typedef enum
 	ERR_INVALID_SCREENSHOT,
 	ERR_VAR_VERSION,		// Variable rejected due to version code
 
+	ERR_CLOCK_UNSTABLE,		// Clock could not be synchronized
+
 // --- 300 to 379 are reserved for hand-held status (DUSB)
 
 	ERR_CALC_ERROR2 = 300,	// Hand-held returned an error code

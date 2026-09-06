@@ -23,10 +23,12 @@
 	Clock support for AMS >= 2.08.
 */
 
+#include <stdio.h>
 #include <string.h>
 
 #include "ticalcs.h"
 #include "logging.h"
+#include "internal.h"
 
 #ifdef __WIN32__
 #define strcasecmp _stricmp
@@ -182,4 +184,40 @@ int TICALL ticalcs_clock_show(CalcModel model, CalcClock* s)
 	}
 
 	return 0;
+}
+
+// DUSB classic clocks store civil seconds since 1997-01-01, without a timezone.
+// UTC conversion avoids applying the host's DST rules to calculator dates.
+int ticalcs_clock_to_dusb(const CalcClock* clock, uint32_t* value)
+{
+	if (clock->seconds > 59)
+	{
+		return ERR_INVALID_PARAMETER;
+	}
+	GDateTime* date = g_date_time_new_utc(clock->year, clock->month, clock->day,
+		clock->hours, clock->minutes, clock->seconds);
+	if (!date)
+	{
+		return ERR_INVALID_PARAMETER;
+	}
+	const gint64 seconds = g_date_time_to_unix(date) - 852076800;
+	g_date_time_unref(date);
+	if (seconds < 0 || seconds > G_MAXUINT32)
+	{
+		return ERR_INVALID_PARAMETER;
+	}
+	*value = (uint32_t)seconds;
+	return 0;
+}
+
+void ticalcs_clock_from_dusb(uint32_t value, CalcClock* clock)
+{
+	GDateTime* date = g_date_time_new_from_unix_utc(852076800 + gint64(value));
+	clock->year = g_date_time_get_year(date);
+	clock->month = g_date_time_get_month(date);
+	clock->day = g_date_time_get_day_of_month(date);
+	clock->hours = g_date_time_get_hour(date);
+	clock->minutes = g_date_time_get_minute(date);
+	clock->seconds = g_date_time_get_second(date);
+	g_date_time_unref(date);
 }

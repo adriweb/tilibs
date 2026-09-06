@@ -475,6 +475,12 @@ int noop_recv_os (CalcHandle* handle, FlashContent* content);
 int ticalcs_calc_send_var2_(CalcHandle* handle, CalcMode mode, const char* filename, int take_busy);
 
 
+// clock.cc
+
+TICALCS_TESTABLE int ticalcs_clock_to_dusb(const CalcClock* clock, uint32_t* value);
+TICALCS_TESTABLE void ticalcs_clock_from_dusb(uint32_t value, CalcClock* clock);
+
+
 // cmdz80.c
 
 int ti82_send_asm_exec(CalcHandle*, VarEntry * var);

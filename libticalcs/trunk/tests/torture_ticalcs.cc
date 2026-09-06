@@ -14,6 +14,7 @@
 #include <cmd68k.h>
 #include <romdump.h>
 #include "../src/error.h"
+#include "../src/internal.h"
 
 #define PRINTF(FUNCTION, TYPE, ...) \
 fprintf(stderr, "%d\t" TYPE "\n", __LINE__, FUNCTION(__VA_ARGS__))
@@ -1056,6 +1057,60 @@ static void nnse_parser_unit_test()
 #undef NNSE_EXPECT
 }
 
+static void clock_expect(bool condition)
+{
+    if (!condition)
+    {
+        fputs("Clock test failed\n", stderr);
+        abort();
+    }
+}
+
+static void clock_conversion_unit_test()
+{
+    static const struct
+    {
+        CalcClock clock;
+        uint32_t packed;
+    } cases[] = {
+        { { 1997, 1, 1, 0, 0, 0, 12, 1, 0 }, 0 },
+        { { 2026, 1, 15, 13, 34, 56, 12, 1, 1 }, 0x369f4400 },
+        { { 2026, 7, 15, 13, 34, 56, 24, 2, 1 }, 0x378de380 },
+        { { 2024, 2, 29, 23, 59, 59, 12, 3, 1 }, 0x3317717f },
+        { { 2133, 2, 7, 6, 28, 15, 24, 1, 0 }, UINT32_MAX }
+    };
+    for (const auto & test : cases)
+    {
+        uint32_t packed = 123;
+        clock_expect(ticalcs_clock_to_dusb(&test.clock, &packed) == 0);
+        clock_expect(packed == test.packed);
+        CalcClock decoded = {};
+        decoded.time_format = test.clock.time_format;
+        decoded.date_format = test.clock.date_format;
+        decoded.state = test.clock.state;
+        ticalcs_clock_from_dusb(test.packed, &decoded);
+        clock_expect(decoded.year == test.clock.year && decoded.month == test.clock.month
+            && decoded.day == test.clock.day && decoded.hours == test.clock.hours
+            && decoded.minutes == test.clock.minutes && decoded.seconds == test.clock.seconds);
+        clock_expect(decoded.time_format == test.clock.time_format
+            && decoded.date_format == test.clock.date_format && decoded.state == test.clock.state);
+    }
+    static const CalcClock invalid[] = {
+        { 1996, 12, 31, 23, 59, 59, 12, 1, 1 },
+        { 2133, 2, 7, 6, 28, 16, 12, 1, 1 },
+        { 2025, 2, 29, 12, 0, 0, 12, 1, 1 },
+        { 2026, 1, 1, 24, 0, 0, 12, 1, 1 },
+        { 2026, 1, 1, 0, 60, 0, 12, 1, 1 },
+        { 2026, 1, 1, 0, 0, 60, 12, 1, 1 }
+    };
+    for (const auto & clock : invalid)
+    {
+        uint32_t packed = 123;
+        clock_expect(ticalcs_clock_to_dusb(&clock, &packed) == ERR_INVALID_PARAMETER);
+        clock_expect(packed == 123);
+    }
+}
+
 int main(int argc, char **argv)
 {
     ticalcs_library_init();
@@ -1072,6 +1127,7 @@ int main(int argc, char **argv)
     dissect_functions_unit_test_2();
     dissect_functions_unit_test_3();
     nnse_parser_unit_test();
+    clock_conversion_unit_test();
 
     ticalcs_library_exit();
 
