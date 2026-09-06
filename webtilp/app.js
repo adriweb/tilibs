@@ -5837,24 +5837,13 @@ async function getClockInfo(module, handle) {
     return parseClockInfo(clockInfoText);
 }
 
-async function setClockFromDate(module, handle, date, settings) {
+async function syncClockToNow(module, handle, offsetMinutes = 0) {
     return ccallAsync(
         module,
-        'calc_set_clock',
+        'calc_sync_clock',
         'number',
-        ['number', 'number', 'number', 'number', 'number', 'number', 'number', 'number', 'number', 'number'],
-        [
-            handle,
-            date.getFullYear(),
-            date.getMonth() + 1,
-            date.getDate(),
-            date.getHours(),
-            date.getMinutes(),
-            date.getSeconds(),
-            settings.timeFormat,
-            settings.dateFormat,
-            settings.state
-        ],
+        ['number', 'number'],
+        [handle, offsetMinutes],
         { timeoutMs: PROGRESS_IDLE_TIMEOUT_MS, useProgress: true, progressLabel: 'Syncing clock' }
     );
 }
@@ -5878,17 +5867,14 @@ async function syncClock() {
             return;
         }
 
-        const clockInfo = await getClockInfo(module, handle);
-        const settings = normalizeClockSettings(clockInfo);
-        const baseDate = new Date();
-        let targetDate = new Date(baseDate.getTime());
-        let result = await setClockFromDate(module, handle, targetDate, settings);
+        let result = await syncClockToNow(module, handle);
         if (result !== 0) {
             log(`Clock sync failed (${formatErrorResult(module, result)}).`);
             return;
         }
 
         let adjusted = false;
+        let targetDate = new Date();
         let afterInfo = await getClockInfo(module, handle);
         let afterDate = clockInfoToDate(afterInfo);
         if (afterDate) {
@@ -5896,17 +5882,18 @@ async function syncClock() {
             const diffAbs = Math.abs(diffMinutes);
             if (diffAbs >= 30 && diffAbs <= 120) {
                 adjusted = true;
-                targetDate = new Date(targetDate.getTime() + diffMinutes * 60000);
-                result = await setClockFromDate(module, handle, targetDate, settings);
+                result = await syncClockToNow(module, handle, diffMinutes);
                 if (result !== 0) {
                     log(`Clock sync failed (${formatErrorResult(module, result)}).`);
                     return;
                 }
+                targetDate = new Date();
                 afterInfo = await getClockInfo(module, handle);
                 afterDate = clockInfoToDate(afterInfo);
             }
         }
 
+        const settings = normalizeClockSettings(afterInfo);
         const displayDate = afterDate || targetDate;
         if (adjusted) {
             log(`Clock synced (timezone corrected) to ${displayDate.toLocaleString()}.`);

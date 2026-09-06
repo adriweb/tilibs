@@ -12,6 +12,8 @@
 #include <tifiles.h>
 #include <ticonv.h>
 #include <nsp_cmd.h>
+#include <dusb_cmd.h>
+
 
 #ifndef __EMSCRIPTEN__
 #define gssize ssize_t
@@ -1243,6 +1245,18 @@ int calc_set_clock(CableHandle* cable_handle, int year, int month, int day, int 
     clock.state = state;
 
     return ticalcs_calc_set_clock(g_calc_handle, &clock);
+}
+
+EMSCRIPTEN_KEEPALIVE
+int calc_sync_clock(CableHandle* cable_handle, int offset_minutes)
+{
+    if (!cable_handle || offset_minutes < -120 || offset_minutes > 120) {
+        return ERR_WEB_INVALID_ARGUMENT;
+    }
+    const int ready_result = ensure_calc_ready(cable_handle, 0);
+    if (ready_result) return ready_result;
+    if (tilp_calc_check_version("2.06") < 0) return -1;
+    return ticalcs_calc_sync_clock(g_calc_handle, offset_minutes * 60);
 }
 
 EMSCRIPTEN_KEEPALIVE
