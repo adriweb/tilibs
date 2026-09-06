@@ -246,6 +246,10 @@ int TICALL ticalcs_error_get(int number, char **message)
 		NULL);
 		break;
 
+	case ERR_CLOCK_UNSTABLE:
+		*message = g_strdup(_("Clock could not be synchronized; please retry."));
+		break;
+
 	case ERR_NOT_READY:
 		*message = g_strconcat(
 		_("Msg: calculator is not ready."),
