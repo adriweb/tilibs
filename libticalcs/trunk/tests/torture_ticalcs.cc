@@ -3,6 +3,7 @@
 #include <assert.h>
 #include <ticalcs.h>
 #include <inttypes.h>
+#include <time.h>
 #include <nsp_rpkt.h>
 #include <nsp_vpkt.h>
 #include <nsp_cmd.h>
@@ -119,6 +120,7 @@ static void torture_ticalcs()
     PRINTF(ticalcs_calc_set_clock, INT, (CalcHandle*)0x12345678, nullptr);
     PRINTF(ticalcs_calc_get_clock, INT, nullptr, (CalcClock*)0x12345678);
     PRINTF(ticalcs_calc_get_clock, INT, (CalcHandle*)0x12345678, nullptr);
+    PRINTF(ticalcs_calc_sync_clock, INT, nullptr, 0);
     PRINTF(ticalcs_calc_new_fld, INT, nullptr, (VarRequest*)0x12345678);
     PRINTF(ticalcs_calc_new_fld, INT, (CalcHandle*)0x12345678, nullptr);
     PRINTF(ticalcs_calc_del_var, INT, nullptr, (VarRequest*)0x12345678);
@@ -1057,6 +1059,11 @@ static void nnse_parser_unit_test()
 #undef NNSE_EXPECT
 }
 
+static int clock_get_result;
+static int clock_set_calls;
+static int clock_sync_calls;
+static int clock_event_calls;
+
 static void clock_expect(bool condition)
 {
     if (!condition)
@@ -1111,6 +1118,144 @@ static void clock_conversion_unit_test()
     }
 }
 
+static int clock_event_stub(CalcHandle * handle, uint32_t, const CalcEventData * event, void *)
+{
+    clock_event_calls++;
+    clock_expect(handle->busy);
+    clock_expect(event->operation == FNCT_GET_CLOCK || event->operation == FNCT_SET_CLOCK);
+    return event->retval;
+}
+
+static int clock_get_stub(CalcHandle *, CalcClock * clock)
+{
+    *clock = {};
+    clock->year = 2001;
+    clock->month = 2;
+    clock->day = 3;
+    clock->time_format = 12;
+    clock->date_format = 2;
+    clock->state = 1;
+    return clock_get_result;
+}
+
+static int clock_set_stub(CalcHandle * handle, CalcClock * clock)
+{
+    clock_set_calls++;
+    clock_expect(handle->busy && clock->year > 2001);
+    clock_expect(clock->time_format == 12 && clock->date_format == 2 && clock->state == 1);
+    return ERR_ABORT;
+}
+
+static int clock_sync_stub(CalcHandle * handle, CalcClock * clock, int offset_seconds)
+{
+    clock_sync_calls++;
+    clock_expect(handle->busy && clock->year == 2001 && offset_seconds == 75);
+    clock_expect(clock->time_format == 12 && clock->date_format == 2 && clock->state == 1);
+    return ERR_CLOCK_UNSTABLE;
+}
+
+static int clock_packet_calls;
+static time_t clock_packet_time;
+
+static int clock_packet_stub(CalcHandle *, uint32_t, const CalcEventData * event, void *)
+{
+    if (event->type == CALC_EVENT_TYPE_BEFORE_SEND_DUSB_VPKT)
+    {
+        const DUSBVirtualPacket & packet = event->data.dusb_vpkt;
+        clock_expect(packet.type == DUSB_VPKT_PARM_SET && packet.size == 8);
+        const uint8_t * data = packet.data;
+        clock_expect(data[0] == 0 && data[1] == DUSB_PID_CLK_SEC_SINCE_1997
+            && data[2] == 0 && data[3] == 4);
+        uint32_t packed = (uint32_t(data[4]) << 24) | (uint32_t(data[5]) << 16)
+            | (uint32_t(data[6]) << 8) | data[7];
+        CalcClock clock = {};
+        ticalcs_clock_from_dusb(packed, &clock);
+        struct tm local = {};
+        local.tm_year = clock.year - 1900;
+        local.tm_mon = clock.month - 1;
+        local.tm_mday = clock.day;
+        local.tm_hour = clock.hours;
+        local.tm_min = clock.minutes;
+        local.tm_sec = clock.seconds;
+        local.tm_isdst = -1;
+        clock_packet_time = mktime(&local);
+        clock_packet_calls++;
+        return ERR_ABORT; // Inspect the real serialized request without using USB.
+    }
+    return event->retval;
+}
+
+static void clock_89t_sync_unit_test()
+{
+    CalcHandle * handle = ticalcs_handle_new(CALC_TI89T_USB);
+    clock_expect(handle && handle->calc->fncts.sync_clock);
+    handle->event_hook = clock_packet_stub;
+    const int offsets[] = { -75, 0, 75 };
+    for (int offset : offsets)
+    {
+        for (int state = 0; state < 2; state++)
+        {
+            CalcClock clock = { 2001, 2, 3, 4, 5, 6, 12, 1, state };
+            clock_packet_calls = 0;
+            const time_t before = (g_get_real_time() + 500000) / G_USEC_PER_SEC + offset;
+            clock_expect(handle->calc->fncts.sync_clock(handle, &clock, offset) == ERR_ABORT);
+            const time_t after = (g_get_real_time() + 500000) / G_USEC_PER_SEC + offset;
+            clock_expect(clock_packet_calls == 1 && clock_packet_time >= before && clock_packet_time <= after);
+            clock_expect(clock.time_format == 12 && clock.date_format == 1 && clock.state == state);
+        }
+    }
+    handle->updat->cancel = 1;
+    clock_packet_calls = 0;
+    CalcClock clock = {};
+    clock_expect(handle->calc->fncts.sync_clock(handle, &clock, 0) == ERR_ABORT);
+    clock_expect(clock_packet_calls == 0);
+    handle->updat->cancel = 0;
+    ticalcs_handle_del(handle);
+}
+
+static void clock_dispatch_unit_test()
+{
+    for (int specialized = 0; specialized < 2; specialized++)
+    {
+        struct _CalcFnctPtrs functions = {};
+        functions.get_clock = clock_get_stub;
+        functions.set_clock = clock_set_stub;
+        functions.sync_clock = specialized ? clock_sync_stub : nullptr;
+        CalcFncts calculator = { CALC_NONE, "", "", "", OPS_CLOCK, (CalcProductIDs)0, {}, functions };
+        CalcHandle handle = {};
+        handle.calc = &calculator;
+        handle.event_hook = clock_event_stub;
+        handle.open = 1;
+        handle.attached = 1;
+
+        clock_get_result = 0;
+        clock_set_calls = clock_sync_calls = clock_event_calls = 0;
+        clock_expect(ticalcs_calc_sync_clock(&handle, 75) == (specialized ? ERR_CLOCK_UNSTABLE : ERR_ABORT));
+        clock_expect(clock_set_calls == !specialized && clock_sync_calls == specialized && !handle.busy);
+        clock_expect(clock_event_calls == 4);
+
+        CalcClock fixed_clock = {};
+        clock_get_stub(&handle, &fixed_clock);
+        fixed_clock.year = 2004;
+        clock_set_calls = clock_sync_calls = clock_event_calls = 0;
+        clock_expect(ticalcs_calc_set_clock(&handle, &fixed_clock) == ERR_ABORT);
+        clock_expect(clock_set_calls == 1 && !clock_sync_calls && !handle.busy);
+        clock_expect(clock_event_calls == 2);
+        clock_expect(fixed_clock.year == 2004);
+
+        clock_get_result = ERR_INVALID_PACKET;
+        clock_set_calls = clock_sync_calls = clock_event_calls = 0;
+        clock_expect(ticalcs_calc_sync_clock(&handle, 75) == ERR_INVALID_PACKET);
+        clock_expect(!clock_set_calls && !clock_sync_calls && !handle.busy);
+        clock_expect(clock_event_calls == 2);
+        clock_event_calls = 0;
+
+        handle.busy = 1;
+        clock_expect(ticalcs_calc_sync_clock(&handle, 75) == ERR_BUSY);
+        clock_expect(handle.busy && !clock_set_calls && !clock_sync_calls && !clock_event_calls);
+    }
+}
+
 int main(int argc, char **argv)
 {
     ticalcs_library_init();
@@ -1128,6 +1273,8 @@ int main(int argc, char **argv)
     dissect_functions_unit_test_3();
     nnse_parser_unit_test();
     clock_conversion_unit_test();
+    clock_dispatch_unit_test();
+    clock_89t_sync_unit_test();
 
     ticalcs_library_exit();
 

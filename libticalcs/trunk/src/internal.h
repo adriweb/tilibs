@@ -477,6 +477,7 @@ int ticalcs_calc_send_var2_(CalcHandle* handle, CalcMode mode, const char* filen
 
 // clock.cc
 
+int ticalcs_clock_now(CalcClock* clock, int offset_seconds, gint64 ahead_us);
 TICALCS_TESTABLE int ticalcs_clock_to_dusb(const CalcClock* clock, uint32_t* value);
 TICALCS_TESTABLE void ticalcs_clock_from_dusb(uint32_t value, CalcClock* clock);
 

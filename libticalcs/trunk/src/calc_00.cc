@@ -304,4 +304,5 @@ extern const CalcFncts calc_00 =
 	&noop_get_lab_equipment_data,
 	&noop_del_folder,
 	&noop_recv_os,
+	nullptr,
 };

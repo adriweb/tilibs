@@ -758,6 +758,7 @@ typedef struct
  * @get_lab_equipment_data: get data from a piece of lab equipment
  * @del_fld: delete folder (if supported)
  * @recv_os: request a FLASH os (if supported)
+ * @sync_clock: optional host-clock synchronization, otherwise fall back to get/set
  *
  * A structure containing pointers to functions implementing the various operations (potentially) supported by a hand-held.
  * !!! This structure is for private use !!!
@@ -815,6 +816,9 @@ struct _CalcFnctPtrs
 	int		(*del_fld)		(CalcHandle*, VarRequest*);
 
 	int		(*recv_os)		(CalcHandle*, FlashContent*);
+
+	// Optional host-clock synchronization; otherwise use get_clock/set_clock.
+	int		(*sync_clock)	(CalcHandle*, CalcClock* clock, int offset_seconds);
 };
 
 /**
@@ -1107,6 +1111,7 @@ typedef struct
 
 	TIEXPORT3 int TICALL ticalcs_calc_set_clock(CalcHandle *handle, CalcClock* clock);
 	TIEXPORT3 int TICALL ticalcs_calc_get_clock(CalcHandle *handle, CalcClock* clock);
+	TIEXPORT3 int TICALL ticalcs_calc_sync_clock(CalcHandle *handle, int offset_seconds);
 
 	TIEXPORT3 int TICALL ticalcs_calc_new_fld(CalcHandle *handle, VarRequest*);
 	TIEXPORT3 int TICALL ticalcs_calc_del_var(CalcHandle *handle, VarRequest*);

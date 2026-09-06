@@ -960,7 +960,8 @@ static int send_cert(CalcHandle *handle, FlashContent *content)
 		&noop_send_lab_equipment_data, \
 		&noop_get_lab_equipment_data, \
 		&noop_del_folder, \
-		&noop_recv_os \
+		&noop_recv_os, \
+		nullptr \
 	}
 
 extern const CalcFncts calc_84evo_usb =

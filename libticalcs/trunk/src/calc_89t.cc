@@ -788,7 +788,7 @@ static int		dump_rom_2	(CalcHandle* handle, CalcDumpSize size, const char *filen
 	return ret;
 }
 
-static int		set_clock	(CalcHandle* handle, CalcClock* _clock)
+static int set_clock_time(CalcHandle* handle, CalcClock* _clock)
 {
 	uint32_t calc_time;
 	uint8_t data[4];
@@ -798,14 +798,39 @@ static int		set_clock	(CalcHandle* handle, CalcClock* _clock)
 		return ret;
 	}
 
-	ticalcs_strlcpy(handle->updat->text, _("Setting clock..."), sizeof(handle->updat->text));
-	ticalcs_update_label(handle);
-
 	data[0] = MSB(MSW(calc_time));
 	data[1] = LSB(MSW(calc_time));
 	data[2] = MSB(LSW(calc_time));
 	data[3] = LSB(LSW(calc_time));
-	ret = dusb_cmd_s_param_set_r_data_ack(handle, DUSB_PID_CLK_SEC_SINCE_1997, 4, data);
+	return dusb_cmd_s_param_set_r_data_ack(handle, DUSB_PID_CLK_SEC_SINCE_1997, 4, data);
+}
+
+static int sync_clock(CalcHandle* handle, CalcClock* clock, int offset_seconds)
+{
+	if (handle->updat->cancel)
+	{
+		return ERR_ABORT;
+	}
+
+	ticalcs_strlcpy(handle->updat->text, _("Setting clock..."), sizeof(handle->updat->text));
+	ticalcs_update_label(handle);
+
+	// Round immediately before the packed write; leave formats and enabled state alone.
+	int ret = ticalcs_clock_now(clock, offset_seconds, 500000);
+	if (!ret)
+	{
+		ret = set_clock_time(handle, clock);
+	}
+	return ret;
+}
+
+static int		set_clock	(CalcHandle* handle, CalcClock* _clock)
+{
+	ticalcs_strlcpy(handle->updat->text, _("Setting clock..."), sizeof(handle->updat->text));
+	ticalcs_update_label(handle);
+
+	uint8_t data[1];
+	int ret = set_clock_time(handle, _clock);
 	if (!ret)
 	{
 		data[0] = _clock->date_format == 3 ? 0 : _clock->date_format;
@@ -1436,4 +1461,5 @@ extern const CalcFncts calc_89t_usb =
 	&noop_get_lab_equipment_data,
 	&noop_del_folder,
 	&noop_recv_os,
+	&sync_clock,
 };

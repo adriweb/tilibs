@@ -1412,7 +1412,7 @@ static int		dump_rom_2	(CalcHandle* handle, CalcDumpSize size, const char *filen
 
 static int get_clock(CalcHandle* handle, CalcClock* clock);
 
-static int set_clock_fields(CalcHandle* handle, CalcClock* clock, CalcClock current)
+static int set_clock_fields(CalcHandle* handle, CalcClock* clock, CalcClock current, bool sync, int offset_seconds)
 {
 	int ret;
 	const uint16_t ids[] = {
@@ -1420,6 +1420,9 @@ static int set_clock_fields(CalcHandle* handle, CalcClock* clock, CalcClock curr
 		DUSB_PID_CLK_YEAR, DUSB_PID_CLK_MONTH, DUSB_PID_CLK_DAY,
 		DUSB_PID_CLK_HOURS, DUSB_PID_CLK_MINUTES, DUSB_PID_CLK_SECONDS
 	};
+	// Round the predicted completion to the nearest second. After a barrier,
+	// the next RTC load is one tick away; the first wait has unknown phase.
+	gint64 lead_us = 500000;
 	bool settings_written[3] = {};
 	for (unsigned writes = 0; writes < 16; ++writes)
 	{
@@ -1430,6 +1433,14 @@ static int set_clock_fields(CalcHandle* handle, CalcClock* clock, CalcClock curr
 
 		CalcClock target = *clock;
 		target.time_format = 24;
+		if (sync)
+		{
+			ret = ticalcs_clock_now(&target, offset_seconds, lead_us + 500000);
+			if (ret)
+			{
+				return ret;
+			}
+		}
 
 		const unsigned actual[] = {
 			current.date_format, current.time_format, unsigned(current.state),
@@ -1440,7 +1451,7 @@ static int set_clock_fields(CalcHandle* handle, CalcClock* clock, CalcClock curr
 			target.year, target.month, target.day, target.hours, target.minutes, target.seconds
 		};
 		unsigned field = 8;
-		for (unsigned i = 0; i < 8; ++i)
+		for (unsigned i = sync ? 3 : 0; i < 8; ++i)
 		{
 			if (actual[i] != desired[i] && (i >= 3 || !settings_written[i]))
 			{
@@ -1486,11 +1497,24 @@ static int set_clock_fields(CalcHandle* handle, CalcClock* clock, CalcClock curr
 		}
 
 		ticalcs_update_refresh(handle);
+		lead_us = 1000000;
 		if (field == 8)
 		{
+			if (sync)
+			{
+				ret = ticalcs_clock_now(&target, offset_seconds, 500000);
+				if (ret)
+				{
+					return ret;
+				}
+			}
 			if (current.year == target.year && current.month == target.month && current.day == target.day
 				&& current.hours == target.hours && current.minutes == target.minutes && current.seconds == target.seconds)
 			{
+				if (sync)
+				{
+					*clock = current;
+				}
 				return 0;
 			}
 		}
@@ -1499,7 +1523,7 @@ static int set_clock_fields(CalcHandle* handle, CalcClock* clock, CalcClock curr
 	return ERR_CLOCK_UNSTABLE;
 }
 
-static int set_clock(CalcHandle* handle, CalcClock* clock)
+static int set_clock_impl(CalcHandle* handle, CalcClock* clock, bool sync, int offset_seconds)
 {
 	GDateTime* date = g_date_time_new_utc(clock->year, clock->month, clock->day,
 		clock->hours, clock->minutes, clock->seconds);
@@ -1533,9 +1557,17 @@ static int set_clock(CalcHandle* handle, CalcClock* clock)
 
 	if (classic)
 	{
-		if (initial_seconds < 0 || initial_seconds > G_MAXUINT32)
+		if (!sync && (initial_seconds < 0 || initial_seconds > G_MAXUINT32))
 		{
 			return ERR_INVALID_PARAMETER;
+		}
+		if (sync)
+		{
+			ret = ticalcs_clock_now(clock, offset_seconds, 500000);
+			if (ret)
+			{
+				return ret;
+			}
 		}
 
 		uint32_t value;
@@ -1548,7 +1580,8 @@ static int set_clock(CalcHandle* handle, CalcClock* clock)
 		const uint8_t data[] = { uint8_t(value >> 24), uint8_t(value >> 16), uint8_t(value >> 8), uint8_t(value) };
 		ret = dusb_cmd_s_param_set_r_data_ack(handle, DUSB_PID_CLK_SEC_SINCE_1997, 4, data);
 
-		if (ret)
+		// Sync preserves formats/state without rewriting them.
+		if (ret || sync)
 		{
 			return ret;
 		}
@@ -1570,10 +1603,13 @@ static int set_clock(CalcHandle* handle, CalcClock* clock)
 	}
 
 	CalcClock current = *clock;
-	ret = get_clock(handle, &current);
-	if (ret)
+	if (!sync)
 	{
-		return ret;
+		ret = get_clock(handle, &current);
+		if (ret)
+		{
+			return ret;
+		}
 	}
 
 	// CE field setters also copy display hours into the RTC. Keep 24-hour mode
@@ -1591,7 +1627,7 @@ static int set_clock(CalcHandle* handle, CalcClock* clock)
 	}
 	if (!ret)
 	{
-		ret = set_clock_fields(handle, clock, current);
+		ret = set_clock_fields(handle, clock, current, sync, offset_seconds);
 	}
 
 	const uint8_t restore_format = ret ? original_format : requested_format;
@@ -1603,8 +1639,22 @@ static int set_clock(CalcHandle* handle, CalcClock* clock)
 			ret = restore;
 		}
 	}
+	if (sync)
+	{
+		clock->time_format = restore_format == format12 ? 12 : 24;
+	}
 
 	return ret;
+}
+
+static int set_clock(CalcHandle* handle, CalcClock* clock)
+{
+	return set_clock_impl(handle, clock, false, 0);
+}
+
+static int sync_clock(CalcHandle* handle, CalcClock* clock, int offset_seconds)
+{
+	return set_clock_impl(handle, clock, true, offset_seconds);
 }
 
 static int get_clock_impl(CalcHandle* handle, CalcClock* _clock, bool normalize_hours)
@@ -2392,6 +2442,7 @@ extern const CalcFncts calc_84p_usb =
 	&noop_get_lab_equipment_data,
 	&noop_del_folder,
 	&noop_recv_os,
+	&sync_clock,
 };
 
 extern const CalcFncts calc_84pcse_usb =
@@ -2471,6 +2522,7 @@ extern const CalcFncts calc_84pcse_usb =
 	&noop_get_lab_equipment_data,
 	&noop_del_folder,
 	&noop_recv_os,
+	&sync_clock,
 };
 
 extern const CalcFncts calc_83pce_usb =
@@ -2549,6 +2601,7 @@ extern const CalcFncts calc_83pce_usb =
 	&noop_get_lab_equipment_data,
 	&noop_del_folder,
 	&noop_recv_os,
+	&sync_clock,
 };
 
 extern const CalcFncts calc_84pce_usb =
@@ -2627,6 +2680,7 @@ extern const CalcFncts calc_84pce_usb =
 	&noop_get_lab_equipment_data,
 	&noop_del_folder,
 	&noop_recv_os,
+	&sync_clock,
 };
 
 extern const CalcFncts calc_82a_usb =
@@ -2706,6 +2760,7 @@ extern const CalcFncts calc_82a_usb =
 	&noop_get_lab_equipment_data,
 	&noop_del_folder,
 	&noop_recv_os,
+	&sync_clock,
 };
 
 extern const CalcFncts calc_84pt_usb =
@@ -2785,6 +2840,7 @@ extern const CalcFncts calc_84pt_usb =
 	&noop_get_lab_equipment_data,
 	&noop_del_folder,
 	&noop_recv_os,
+	&sync_clock,
 };
 
 extern const CalcFncts calc_82aep_usb =
@@ -2863,4 +2919,5 @@ extern const CalcFncts calc_82aep_usb =
 	&noop_get_lab_equipment_data,
 	&noop_del_folder,
 	&noop_recv_os,
+	&sync_clock,
 };
