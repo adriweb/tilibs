@@ -1709,6 +1709,7 @@ extern const CalcFncts calc_73 =
 	&noop_get_lab_equipment_data,
 	&noop_del_folder,
 	&noop_recv_os,
+	nullptr,
 };
 
 extern const CalcFncts calc_83p =
@@ -1789,6 +1790,7 @@ extern const CalcFncts calc_83p =
 	&noop_get_lab_equipment_data,
 	&noop_del_folder,
 	&noop_recv_os,
+	nullptr,
 };
 
 extern const CalcFncts calc_84p =
@@ -1869,6 +1871,7 @@ extern const CalcFncts calc_84p =
 	&noop_get_lab_equipment_data,
 	&noop_del_folder,
 	&noop_recv_os,
+	nullptr,
 };
 
 extern const CalcFncts calc_84pcse =
@@ -1949,4 +1952,5 @@ extern const CalcFncts calc_84pcse =
 	&noop_get_lab_equipment_data,
 	&noop_del_folder,
 	&noop_recv_os,
+	nullptr,
 };

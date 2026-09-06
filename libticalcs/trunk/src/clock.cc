@@ -25,6 +25,7 @@
 
 #include <stdio.h>
 #include <string.h>
+#include <time.h>
 
 #include "ticalcs.h"
 #include "logging.h"
@@ -182,6 +183,34 @@ int TICALL ticalcs_clock_show(CalcModel model, CalcClock* s)
 		ticalcs_info("Time format: %02i", s->time_format);
 		ticalcs_info("Date format: %s", ticalcs_clock_format2date(model, s->date_format));
 	}
+
+	return 0;
+}
+
+// Use libc's local time conversion, including the browser timezone in Emscripten.
+int ticalcs_clock_now(CalcClock* clock, int offset_seconds, gint64 ahead_us)
+{
+	const time_t now = (g_get_real_time() + ahead_us) / G_USEC_PER_SEC + offset_seconds;
+	struct tm local;
+#ifdef HAVE_LOCALTIME_R
+	if (!localtime_r(&now, &local))
+	{
+		return ERR_INVALID_PARAMETER;
+	}
+#else
+	const struct tm* result = localtime(&now);
+	if (!result)
+	{
+		return ERR_INVALID_PARAMETER;
+	}
+	local = *result;
+#endif
+	clock->year = local.tm_year + 1900;
+	clock->month = local.tm_mon + 1;
+	clock->day = local.tm_mday;
+	clock->hours = local.tm_hour;
+	clock->minutes = local.tm_min;
+	clock->seconds = local.tm_sec;
 
 	return 0;
 }

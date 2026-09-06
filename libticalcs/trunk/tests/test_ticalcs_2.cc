@@ -1001,6 +1001,17 @@ static int get_clock(CalcHandle * h, int, char *)
 	return ret;
 }
 
+static int sync_clock(CalcHandle * h, int, char *)
+{
+	int ret = ticalcs_calc_sync_clock(h, 0);
+	if (!ret)
+	{
+		ret = get_clock(h, 0, nullptr);
+	}
+
+	return ret;
+}
+
 static int del_var(CalcHandle * h, int, char *)
 {
 	int ret = 1;
@@ -2597,6 +2608,9 @@ static menu_entry fnct_menu[] =
 	DEFINE_MENU_ENTRY("NSP  Send key (specific and generic)", nsp_send_key),
 	NULL_ENTRY,
 	DEFINE_MENU_ENTRY("NSP  Test remote management stuff", nsp_remote_mgmt),
+	NULL_ENTRY,
+	// Append new commands to preserve existing script command numbers.
+	DEFINE_MENU_ENTRY("FNCT Sync clock", sync_clock),
 	NULL_ENTRY,
 #undef NULL_ENTRY
 #undef DEFINE_MENU_ENTRY
