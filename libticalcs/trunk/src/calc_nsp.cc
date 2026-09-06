@@ -1758,6 +1758,7 @@ static int		recv_os    (CalcHandle* handle, FlashContent* content)
 	&noop_get_lab_equipment_data, \
 	&del_folder, \
 	&recv_os, \
+	nullptr, \
 }
 
 extern const CalcFncts calc_nsp = 
