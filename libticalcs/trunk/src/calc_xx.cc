@@ -999,6 +999,71 @@ int TICALL ticalcs_calc_set_clock(CalcHandle* handle, CalcClock* _clock)
 }
 
 /**
+ * ticalcs_calc_sync_clock:
+ * @handle: a previously allocated handle
+ * @offset_seconds: adjustment to host local time, normally zero
+ *
+ * Synchronize to host local time, preserving clock formats and enabled state.
+ * Direct USB 84-family and 89Ti models sample time immediately before writing;
+ * CE models also account for RTC completion. Other models use their existing setter.
+ * Return value: 0 if successful, an error code otherwise.
+ **/
+int TICALL ticalcs_calc_sync_clock(CalcHandle* handle, int offset_seconds)
+{
+	VALIDATE_HANDLE(handle);
+	VALIDATE_CALCFNCTS(handle->calc);
+	if (!handle->calc->fncts.get_clock || !handle->calc->fncts.set_clock)
+	{
+		return ERR_UNSUPPORTED;
+	}
+
+	CalcClock clock = {};
+	int ret = ticalcs_calc_get_clock(handle, &clock);
+	if (ret)
+	{
+		return ret;
+	}
+	if (!clock.year || clock.month < 1 || clock.month > 12 || clock.day < 1 || clock.day > 31
+		|| clock.hours > 23 || clock.minutes > 59 || clock.seconds > 59
+		|| (clock.state != 0 && clock.state != 1))
+	{
+		return ERR_INVALID_PACKET;
+	}
+
+	const CalcFncts* calc = handle->calc;
+	if (!calc->fncts.sync_clock)
+	{
+		ret = ticalcs_clock_now(&clock, offset_seconds, 0);
+		if (!ret)
+		{
+			ret = ticalcs_calc_set_clock(handle, &clock);
+		}
+		return ret;
+	}
+
+	RETURN_IF_HANDLE_NOT_ATTACHED(handle);
+	RETURN_IF_HANDLE_NOT_OPEN(handle);
+	RETURN_IF_HANDLE_BUSY(handle);
+
+	ticalcs_info("%s", _("Synchronizing clock:"));
+	handle->busy = 1;
+	CalcEventData event;
+	ticalcs_event_fill_header(handle, &event, /* type */ CALC_EVENT_TYPE_BEFORE_GENERIC_OPERATION, /* retval */ 0, /* operation */ FNCT_SET_CLOCK);
+	event.data.ptrval = (void *)&clock;
+	ret = ticalcs_event_send(handle, &event);
+	if (!ret)
+	{
+		ret = calc->fncts.sync_clock(handle, &clock, offset_seconds);
+	}
+	ticalcs_event_fill_header(handle, &event, /* type */ CALC_EVENT_TYPE_AFTER_GENERIC_OPERATION, /* retval */ ret, /* operation */ FNCT_SET_CLOCK);
+	event.data.ptrval = (void *)&clock;
+	ret = ticalcs_event_send(handle, &event);
+	handle->busy = 0;
+
+	return ret;
+}
+
+/**
  * ticalcs_calc_get_clock:
  * @handle: a previously allocated handle
  * @clock: a #CalcClock structure
