@@ -791,39 +791,12 @@ static int		dump_rom_2	(CalcHandle* handle, CalcDumpSize size, const char *filen
 static int		set_clock	(CalcHandle* handle, CalcClock* _clock)
 {
 	uint32_t calc_time;
-	struct tm ref, cur;
-	time_t r, c, now;
 	uint8_t data[4];
-	int ret;
-
-	time(&now);
-#ifdef HAVE_LOCALTIME_R
-	localtime_r(&now, &ref);
-#else
-	memcpy(&ref, localtime(&now), sizeof(struct tm));
-#endif
-
-	ref.tm_year = 1997 - 1900;
-	ref.tm_mon = 0;
-	ref.tm_yday = 0;
-	ref.tm_mday = 1;
-	ref.tm_wday = 3;
-	ref.tm_hour = 0;
-	ref.tm_min = 0;
-	ref.tm_sec = 0;
-	//ref.tm_isdst = -1;
-	r = mktime(&ref);
-
-	cur.tm_year = _clock->year - 1900;
-	cur.tm_mon = _clock->month - 1;
-	cur.tm_mday = _clock->day;
-	cur.tm_hour = _clock->hours;
-	cur.tm_min = _clock->minutes;
-	cur.tm_sec = _clock->seconds;
-	cur.tm_isdst = -1;
-	c = mktime(&cur);
-
-	calc_time = (uint32_t)difftime(c, r);
+	int ret = ticalcs_clock_to_dusb(_clock, &calc_time);
+	if (ret)
+	{
+		return ret;
+	}
 
 	ticalcs_strlcpy(handle->updat->text, _("Setting clock..."), sizeof(handle->updat->text));
 	ticalcs_update_label(handle);
@@ -881,43 +854,12 @@ static int		get_clock	(CalcHandle* handle, CalcClock* _clock)
 					    && params[3]->ok && params[3]->size == 1
 					    && params[4]->ok && params[4]->size == 1)
 					{
-						struct tm ref, cur;
-						time_t r, c, now;
 						const uint8_t * data = params[2]->data;
 						const uint32_t calc_time = (((uint32_t)data[0]) << 24) | (((uint32_t)data[1]) << 16) | (((uint32_t)data[2]) << 8) | (data[3] <<  0);
 
 						ticalcs_info("%s", _("Found valid classic clock"));
 
-						time(&now);	// retrieve current DST setting
-#ifdef HAVE_LOCALTIME_R
-						localtime_r(&now, &ref);
-#else
-						memcpy(&ref, localtime(&now), sizeof(struct tm));
-#endif
-						ref.tm_year = 1997 - 1900;
-						ref.tm_mon = 0;
-						ref.tm_yday = 0;
-						ref.tm_mday = 1;
-						ref.tm_wday = 3;
-						ref.tm_hour = 0;
-						ref.tm_min = 0;
-						ref.tm_sec = 0;
-						//ref.tm_isdst = -1;
-						r = mktime(&ref);
-
-						c = r + calc_time;
-#ifdef HAVE_LOCALTIME_R
-						localtime_r(&c, &cur);
-#else
-						memcpy(&cur, localtime(&c), sizeof(struct tm));
-#endif
-
-						_clock->year = (uint16_t)(cur.tm_year + 1900);
-						_clock->month = (uint8_t)(cur.tm_mon + 1);
-						_clock->day = (uint8_t)(cur.tm_mday);
-						_clock->hours = (uint8_t)(cur.tm_hour);
-						_clock->minutes = (uint8_t)(cur.tm_min);
-						_clock->seconds = (uint8_t)(cur.tm_sec);
+						ticalcs_clock_from_dusb(calc_time, _clock);
 
 						_clock->date_format = params[3]->data[0] == 0 ? 3 : params[3]->data[0];
 						_clock->time_format = params[4]->data[0] ? 24 : 12;
@@ -925,10 +867,15 @@ static int		get_clock	(CalcHandle* handle, CalcClock* _clock)
 					}
 					else
 					{
+						ret = ERR_INVALID_PACKET;
 						ticalcs_warning(_("Found classic clock but failed to retrieve its parameters: %u %u %u %u"),
 								params[1]->ok, params[2]->ok, params[3]->ok, params[4]->ok);
 					}
 				}
+			}
+			else
+			{
+				ret = ERR_INVALID_PACKET;
 			}
 		}
 	}
