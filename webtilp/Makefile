@@ -119,6 +119,8 @@ test:
 	$(CXX) -std=c++17 -Wall -Wextra -Werror hp_prime_app.cpp tests/test_hp_prime_app.cpp -o tests/test_hp_prime_app
 	./tests/test_hp_prime_app
 	rm -f tests/test_hp_prime_app
+	node --check < sw.js.in
+	node tests/test_service_worker.js
 	node --check $(APP_JS_SRC)
 	node --check $(NUMWORKS_JS_SRC)
 	@for file in $(NUMWORKS_JS_MODULES); do node --check $$file || exit 1; done
