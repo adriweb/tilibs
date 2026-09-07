@@ -235,6 +235,8 @@
   "theme_dark_modern": "Dunkel modern",
   "theme_light_modern": "Hell modern",
   "theme_retro": "Retro-Terminal",
+  "theme_professional_light": "Professionell hell",
+  "theme_professional_dark": "Professionell dunkel",
   "auto": "Auto",
   "directlink_usb": "DirectLink USB",
   "silverlink_usb": "SilverLink (Graph Link USB)",
