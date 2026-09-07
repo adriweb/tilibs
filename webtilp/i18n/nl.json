@@ -235,6 +235,8 @@
   "theme_dark_modern": "Donker modern",
   "theme_light_modern": "Licht modern",
   "theme_retro": "Retro-terminal",
+  "theme_professional_light": "Professioneel licht",
+  "theme_professional_dark": "Professioneel donker",
   "auto": "Auto",
   "directlink_usb": "DirectLink USB",
   "silverlink_usb": "SilverLink (Graph Link USB)",
