@@ -13,7 +13,14 @@
     <link rel="stylesheet" href="app.css">
     <link rel="stylesheet" href="build-profile.css">
 </head>
-<body>
+<body class="initializing" aria-busy="true">
+    <section class="initialization-screen" id="initializationScreen" role="status" aria-live="polite" aria-atomic="true">
+        <div class="splash-card initialization-card">
+            <div class="brand-title">WebTILP</div>
+            <span class="initialization-spinner" aria-hidden="true"></span>
+            <p>Initializing...</p>
+        </div>
+    </section>
     <header class="topbar">
         <div class="brand">
             <div class="brand-mark">
