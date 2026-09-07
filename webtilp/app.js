@@ -1617,18 +1617,17 @@ const LEGACY_TIVARS_FLASH_EXTENSIONS = new Set([
 
 const PID_SILVERLINK = 0xe001;
 const DIRECTLINK_PIDS = new Set([
-    0xe003,
-    0xe004,
-    0xe008,
-    0xe012,
-    0xe018, // PID_TI84_EVO_SERIAL
-    0xe01c,
-    0xe022
+    0xe003, // PID_TI84P
+    0xe004, // PID_TI89TM
+    0xe008, // PID_TI84P_SE
+    0xe012, // PID_NSPIRE
+    0xe018, // PID_TI84EVO
+    0xe01c, // PID_NSPIRE_CRADLE
+    0xe022  // PID_NSPIRE_CXII
 ]);
 
 const NSPIRE_PIDS = new Set([0xE012, 0xE01C, 0xE022]);
 const TI84P_FAMILY_PIDS = new Set([0xE003, 0xE008]);
-const TI89_PIDS = new Set([0xE004]);
 
 const KEYMAP_8X_ = {
     "Right": 0x01,
@@ -4527,19 +4526,41 @@ function showCableOpenHelp(result) {
     }
 
     if (isWindowsPlatform() && code === 37) {
+        if (is84pFamilyActive() || isTI89TActive()) {
+            openConnectionHelpModal('Install the latest TI Connect™ CE version', `
+                <p>
+                Your browser isn't able to talk to the calculator. Install the latest TI Connect™ CE version, then try again.
+                ${isTI89TActive() ? '<br><i>(Yes, even for the TI-89 Titanium: its included driver will make it work.</i>' : ''}
+                </p>
+                <ol>
+                    <li>Download and install <a href="https://education.ti.com/en/software/details/en/13312f7cec074a2dafd7ee5646129839/swticonnectcesoftwareforwindows" target="_blank" rel="noopener noreferrer">TI Connect™ CE v6.1</a> or later.</li>
+                    <li>Don't launch TI Connect™ CE (if you did, quit it)</li>
+                    <li>Unplug and replug the calculator</li>
+                    <li>Try connecting again here (refresh this page if needed)</li>
+                </ol>
+                ${closeAppsReminder}
+            `);
+            return;
+        }
         openConnectionHelpModal('Install the WinUSB driver with Zadig', `
-            <p>Windows could not open the calculator through WebUSB. Install the WinUSB driver for the calculator/cable, then try again.</p>
+            <p>Your browser isn't able to talk to the calculator. Install the WinUSB driver for the calculator/cable, then try again.</p>
             <ol>
                 <li>Download and run <a href="https://zadig.akeo.ie/" target="_blank" rel="noopener noreferrer">Zadig</a>.</li>
                 <li>In Zadig, choose <strong>Options</strong> &gt; <strong>List All Devices</strong>.</li>
                 <li>Select the TI calculator or SilverLink cable. Be careful not to select your keyboard, mouse, or USB hub.</li>
                 <li>Choose <strong>WinUSB</strong> as the target driver.</li>
                 <li>Click <strong>Replace Driver</strong> or <strong>Install Driver</strong>.</li>
-                <li>Unplug and replug the calculator, refresh this page if needed, then try again.</li>
+                <li>Unplug and replug the calculator</li>
+                <li>Try connecting again here (refresh this page if needed)</li>
             </ol>
             ${closeAppsReminder}
         `);
     }
+}
+
+function isTI89TActive() {
+    const pid = state.authorizedDevice?.productId;
+    return typeof pid === 'number' && pid === 0xE004;
 }
 
 function isNspireActive() {
@@ -4722,8 +4743,7 @@ function getActiveKeyMapConfig() {
     if (is84pFamilyActive()) {
         return KEYMAP_CONFIG_8X;
     }
-    const pid = state.authorizedDevice?.productId;
-    if (typeof pid === 'number' && TI89_PIDS.has(pid)) {
+    if (isTI89TActive()) {
         return KEYMAP_CONFIG_89;
     }
     const calcSetting = state.settings?.calcModel ?? 'auto';
@@ -8331,8 +8351,7 @@ async function performTransfers(plan, module, options) {
                         alert(msg);
                         continue;
                     }
-                    const is89t_dusb = state.authorizedDevice?.productId === 0xe004;
-                    if (is89t_dusb) {
+                    if (isTI89TActive()) {
                         if (existing.attr !== 0) {
                             const clearAttrResult = await ccallAsync(
                                 module,
