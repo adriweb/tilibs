@@ -781,6 +781,8 @@ const I18N_EN = {
     "theme_dark_modern": "Dark Modern",
     "theme_light_modern": "Light Modern",
     "theme_retro": "Retro Terminal",
+    "theme_professional_light": "Professional Light",
+    "theme_professional_dark": "Professional Dark",
     "auto": "Auto",
     "directlink_usb": "DirectLink USB",
     "silverlink_usb": "SilverLink (Graph Link USB)",
@@ -3136,7 +3138,9 @@ const THEME_STORAGE_KEY = 'webtilp.theme';
 const THEMES = [
     { id: 'dark-modern', labelKey: 'theme_dark_modern' },
     { id: 'light-modern', labelKey: 'theme_light_modern' },
-    { id: 'retro', labelKey: 'theme_retro' }
+    { id: 'retro', labelKey: 'theme_retro' },
+    { id: 'professional-light', labelKey: 'theme_professional_light' },
+    { id: 'professional-dark', labelKey: 'theme_professional_dark' }
 ];
 
 function getCalcModelLabel(value) {
