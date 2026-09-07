@@ -37,6 +37,22 @@ const PRECACHE_URLS = [
   'i18n/zh.json'
 ];
 
+// Like coi-serviceworker, synthesize isolation headers for hosts such as GitHub
+// Pages. Keep this in the offline worker: only one worker can control this scope.
+function isolatedResponse(response) {
+  if (response.status === 0) {
+    return response; // Opaque responses cannot be reconstructed.
+  }
+  const headers = new Headers(response.headers);
+  headers.set('Cross-Origin-Opener-Policy', 'same-origin');
+  headers.set('Cross-Origin-Embedder-Policy', 'require-corp');
+  return new Response(response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers
+  });
+}
+
 async function cacheResponse(cache, request, response) {
   if (!response || !response.ok) {
     return;
@@ -82,7 +98,7 @@ self.addEventListener('activate', event => {
       const hasShell = await cache.match('webtilp.html');
       if (hasShell) {
         const keys = await caches.keys();
-        await Promise.all(keys.filter(key => key !== CACHE_NAME).map(key => caches.delete(key)));
+        await Promise.all(keys.filter(key => key.startsWith('webtilp-') && key !== CACHE_NAME).map(key => caches.delete(key)));
       }
       await self.clients.claim();
     })()
@@ -90,7 +106,8 @@ self.addEventListener('activate', event => {
 });
 
 self.addEventListener('fetch', event => {
-  if (event.request.method !== 'GET') {
+  if (event.request.method !== 'GET'
+      || (event.request.cache === 'only-if-cached' && event.request.mode !== 'same-origin')) {
     return;
   }
   const url = new URL(event.request.url);
@@ -99,19 +116,24 @@ self.addEventListener('fetch', event => {
   }
   event.respondWith((async () => {
     const cache = await caches.open(CACHE_NAME);
-    const cached = await caches.match(event.request, { ignoreSearch: true, ignoreVary: true });
+    const cached = await cache.match(event.request, { ignoreSearch: true, ignoreVary: true });
     try {
       const response = await fetch(event.request);
-      await cacheResponse(cache, event.request, response);
-      return response;
+      // A full/disabled cache must not turn a successful network fetch into a failure.
+      try {
+        await cacheResponse(cache, event.request, response);
+      } catch (error) {
+        console.warn('[WebTILP] Could not cache response.', error);
+      }
+      return isolatedResponse(response);
     } catch {
       if (cached) {
-        return cached;
+        return isolatedResponse(cached);
       }
       if (event.request.mode === 'navigate') {
-        const fallback = await caches.match('webtilp.html');
+        const fallback = await cache.match('webtilp.html');
         if (fallback) {
-          return fallback;
+          return isolatedResponse(fallback);
         }
       }
       throw new Error('Offline and no cached response.');
@@ -120,6 +142,9 @@ self.addEventListener('fetch', event => {
 });
 
 self.addEventListener('message', event => {
+  if (event.data?.type === 'GET_ISOLATION_STATUS') {
+    event.ports[0]?.postMessage({ type: 'ISOLATION_READY', version: CACHE_VERSION });
+  }
   if (event.data && event.data.type === 'SKIP_WAITING') {
     self.skipWaiting();
   }
