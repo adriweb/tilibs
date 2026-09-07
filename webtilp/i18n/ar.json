@@ -235,6 +235,8 @@
   "theme_dark_modern": "حديث داكن",
   "theme_light_modern": "حديث فاتح",
   "theme_retro": "طرفية قديمة",
+  "theme_professional_light": "احترافي فاتح",
+  "theme_professional_dark": "احترافي داكن",
   "auto": "تلقائي",
   "directlink_usb": "DirectLink USB",
   "silverlink_usb": "SilverLink (Graph Link USB)",
