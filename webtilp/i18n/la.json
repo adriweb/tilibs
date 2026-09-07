@@ -235,6 +235,8 @@
   "theme_dark_modern": "Modernum obscurum",
   "theme_light_modern": "Modernum clarum",
   "theme_retro": "Terminale retro",
+  "theme_professional_light": "Professionalis clarus",
+  "theme_professional_dark": "Professionalis obscurus",
   "auto": "Auto",
   "directlink_usb": "DirectLink USB",
   "silverlink_usb": "SilverLink (Graph Link USB)",

@@ -235,6 +235,8 @@
   "theme_dark_modern": "モダンダーク",
   "theme_light_modern": "モダンライト",
   "theme_retro": "レトロターミナル",
+  "theme_professional_light": "プロフェッショナル ライト",
+  "theme_professional_dark": "プロフェッショナル ダーク",
   "auto": "自動",
   "directlink_usb": "DirectLink USB",
   "silverlink_usb": "SilverLink (Graph Link USB)",
