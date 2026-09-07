@@ -4790,6 +4790,9 @@ function ensureSupportedTransport() {
 
 async function initModule() {
     ensureSupportedTransport();
+    if (!window.crossOriginIsolated) {
+        throw new Error('WebTILP could not enable browser isolation. Allow service workers and reload the page.');
+    }
     if (state.module) {
         return state.module;
     }
@@ -10890,8 +10893,72 @@ function bindEvents() {
     });
 }
 
+// Wait for our isolation-capable worker, including upgrades from the old offline
+// worker. A controller alone is insufficient: it may still serve without headers.
+function waitForIsolationWorker(registration, timeoutMs = 30000) {
+    return new Promise(resolve => {
+        const ports = [];
+        const finish = value => {
+            clearTimeout(timer);
+            navigator.serviceWorker.removeEventListener('controllerchange', check);
+            ports.forEach(port => port.close());
+            resolve(value);
+        };
+        const check = () => {
+            // Hard refresh bypasses the worker and leaves controller null, but
+            // the active registration can still confirm that a normal reload is safe.
+            const controller = navigator.serviceWorker.controller || registration.active;
+            if (!controller) return;
+            const channel = new MessageChannel();
+            ports.push(channel.port1);
+            channel.port1.onmessage = event => {
+                if (event.data?.type === 'ISOLATION_READY') finish(event.data.version);
+            };
+            controller.postMessage({ type: 'GET_ISOLATION_STATUS' }, [channel.port2]);
+        };
+        const timer = setTimeout(() => finish(null), timeoutMs);
+        navigator.serviceWorker.addEventListener('controllerchange', check);
+        check();
+    });
+}
+
+async function prepareServiceWorker() {
+    // Hard refresh can restore the pre-isolation sessionStorage snapshot. Keep
+    // the one-retry guard in the navigation URL instead, then remove it on success.
+    const reloadParam = '__webtilp_isolation';
+    const url = new URL(window.location.href);
+    if (window.crossOriginIsolated && url.searchParams.has(reloadParam)) {
+        url.searchParams.delete(reloadParam);
+        window.history.replaceState(window.history.state, '', url.href);
+    }
+    if (!window.isSecureContext || !('serviceWorker' in navigator)) return false;
+    try {
+        const reg = await navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' });
+        navigator.serviceWorker.ready.then(showOfflineBanner).catch(() => {});
+        reg.addEventListener('updatefound', () => {
+            const worker = reg.installing;
+            worker?.addEventListener('statechange', () => {
+                if (worker.state === 'installed' && navigator.serviceWorker.controller) {
+                    showOfflineUpdateBanner();
+                }
+            });
+        });
+        if (window.crossOriginIsolated) return false;
+        const version = await waitForIsolationWorker(reg);
+        if (!version) return false;
+        if (url.searchParams.get(reloadParam) === version) return false;
+        url.searchParams.set(reloadParam, version);
+        window.location.replace(url.href);
+        return true;
+    } catch (error) {
+        console.warn('[WebTILP] Service worker setup failed.', error);
+        return false;
+    }
+}
+
 async function bootstrap() {
     initTheme();
+    if (await prepareServiceWorker()) return;
     applyUrlOverrides();
     try {
         await applyTranslations();
@@ -10907,38 +10974,18 @@ async function bootstrap() {
     updateSelectionActionButtons();
     updateKeyControlsState(false);
     updateTransportSplashState();
+    document.body.classList.remove('initializing');
+    document.body.removeAttribute('aria-busy');
     autoConnectIfAuthorized();
     window.addEventListener('resize', updateScreenshotCanvasScale);
 }
 
 bootstrap().catch(err => {
+    document.body.classList.remove('initializing');
+    document.body.removeAttribute('aria-busy');
     console.error('[WebTILP] Bootstrap failed', err);
 });
 
-if ('serviceWorker' in navigator) {
-    window.addEventListener('load', () => {
-        navigator.serviceWorker.register('sw.js').then(reg => {
-            navigator.serviceWorker.ready.then(() => {
-                showOfflineBanner();
-            }).catch(() => {
-                // best-effort
-            });
-            reg.addEventListener('updatefound', () => {
-                const worker = reg.installing;
-                if (!worker) {
-                    return;
-                }
-                worker.addEventListener('statechange', () => {
-                    if (worker.state === 'installed' && navigator.serviceWorker.controller) {
-                        showOfflineUpdateBanner();
-                    }
-                });
-            });
-        }).catch(() => {
-            // Offline support is best-effort; ignore registration failures.
-        });
-    });
-}
 function handleTransportDisconnect(event = null) {
     const numWorksBackend = state.numWorksBackend;
     if (numWorksBackend && event?.device && event.device !== numWorksBackend.device) {
