@@ -351,11 +351,17 @@ static bool read_manifest_u32(const std::vector<uint8_t>& manifest,
 static int send_rebuilt_app(size_t index, files_var_entry* original,
                             const std::vector<uint8_t>& rebuilt)
 {
-    if (rebuilt.size() > UINT32_MAX) {
+    std::vector<uint8_t> transfer;
+    if (!hp_prime_app::prepare_for_send(rebuilt.data(), rebuilt.size(),
+            prime_name_to_utf8(original->name), &transfer,
+            &g_hp_protocol_diagnostics)) {
+        return HP_WEB_APP_FORMAT_ERROR;
+    }
+    if (transfer.size() > UINT32_MAX) {
         return HP_WEB_FILE_ERROR;
     }
     files_var_entry* replacement = hpfiles_ve_create_with_size(
-        (uint32_t)rebuilt.size());
+        (uint32_t)transfer.size());
     if (!replacement) {
         return HP_WEB_FILE_ERROR;
     }
@@ -364,8 +370,8 @@ static int send_rebuilt_app(size_t index, files_var_entry* original,
     replacement->type = original->type;
     replacement->model = original->model;
     replacement->invalid = 0;
-    if (!rebuilt.empty()) {
-        memcpy(replacement->data, rebuilt.data(), rebuilt.size());
+    if (!transfer.empty()) {
+        memcpy(replacement->data, transfer.data(), transfer.size());
     }
     const int result = hpcalcs_calc_send_file(g_hp_calc, replacement);
     if (result == 0) {
@@ -894,10 +900,8 @@ int hp_prime_send_cached_app_resources(unsigned int index,
             g_hp_protocol_diagnostics = "application resource manifest has invalid file data";
             return HP_WEB_APP_FORMAT_ERROR;
         }
-        for (size_t core_index = 0; core_index < 3; core_index++) {
-            if (ascii_case_equal(name, app.parts[core_index].name)) {
-                return HP_WEB_APP_CORE_READ_ONLY;
-            }
+        if (ascii_case_equal(name, app.parts[0].name)) {
+            return HP_WEB_APP_CORE_READ_ONLY;
         }
         updates.push_back({name, manifest.data() + offset, data_size});
         offset += data_size;
@@ -909,7 +913,7 @@ int hp_prime_send_cached_app_resources(unsigned int index,
     std::vector<uint8_t> rebuilt;
     std::string error;
     if (!hp_prime_app::replace_or_add_resources(file->data, file->size, app,
-            updates, &rebuilt, &error)) {
+            updates, &rebuilt, &error, true)) {
         g_hp_protocol_diagnostics = error;
         return HP_WEB_APP_FORMAT_ERROR;
     }
@@ -1028,7 +1032,21 @@ int hp_prime_send_file(const char* path, const char* original_filename)
         return HP_WEB_INVALID_ARGUMENT;
     }
     free(calculator_filename);
-    result = hpcalcs_calc_send_file(g_hp_calc, file);
+    std::vector<uint8_t> prepared;
+    if (file->type == PRIME_TYPE_APP) {
+        if (!hp_prime_app::prepare_for_send(file->data, file->size,
+                prime_name_to_utf8(file->name), &prepared,
+                &g_hp_protocol_diagnostics)) {
+            hpfiles_ve_delete(file);
+            return HP_WEB_APP_FORMAT_ERROR;
+        }
+        files_var_entry transfer = *file;
+        transfer.data = prepared.data();
+        transfer.size = (uint32_t)prepared.size();
+        result = hpcalcs_calc_send_file(g_hp_calc, &transfer);
+    } else {
+        result = hpcalcs_calc_send_file(g_hp_calc, file);
+    }
     hpfiles_ve_delete(file);
     if (result == 0) {
         clear_file_cache();
