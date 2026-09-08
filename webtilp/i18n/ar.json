@@ -1,4 +1,6 @@
 {
+  "hp_prime_choose_app_folder": "اختيار مجلد .hpappdir",
+  "hp_prime_app_folder_invalid": "تعذر استيراد {folder}: اختر مجلد .hpappdir يحتوي مباشرةً على ملف الوصف .hpapp بالاسم نفسه وملفات بأسماء فريدة.",
   "brand_subtitle": "نقل شامل مباشرة من متصفحك!",
   "settings": "الإعدادات",
   "calculator_family": "فئة الآلة الحاسبة",

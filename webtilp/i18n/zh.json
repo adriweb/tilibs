@@ -1,4 +1,6 @@
 {
+  "hp_prime_choose_app_folder": "选择 .hpappdir 文件夹",
+  "hp_prime_app_folder_invalid": "无法导入 {folder}：请选择包含同名 .hpapp 描述文件的 .hpappdir 文件夹，所有文件须直接位于其中且文件名唯一。",
   "brand_subtitle": "通用传输，直接在浏览器中完成！",
   "settings": "设置",
   "calculator_family": "计算器系列",

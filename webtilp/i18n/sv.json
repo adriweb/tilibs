@@ -1,4 +1,6 @@
 {
+  "hp_prime_choose_app_folder": "Välj .hpappdir-mapp",
+  "hp_prime_app_folder_invalid": "Kan inte importera {folder}: välj en .hpappdir-mapp med en .hpapp-fil med samma namn och filer med unika namn direkt i mappen.",
   "brand_subtitle": "Universella överföringar, direkt från din webbläsare!",
   "settings": "Inställningar",
   "calculator_family": "Kalkylatorfamilj",

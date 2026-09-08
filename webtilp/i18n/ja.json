@@ -1,4 +1,6 @@
 {
+  "hp_prime_choose_app_folder": ".hpappdir フォルダーを選択",
+  "hp_prime_app_folder_invalid": "{folder} をインポートできません。同名の .hpapp 記述ファイルと、一意の名前を持つファイルを直下に含む .hpappdir フォルダーを選択してください。",
   "brand_subtitle": "ブラウザーから直接行える汎用転送！",
   "settings": "設定",
   "calculator_family": "電卓ファミリー",

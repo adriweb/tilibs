@@ -559,6 +559,8 @@ const I18N_EN = {
     "hp_prime_backup_tooltip": "Download a read-only HP Prime backup ZIP",
     "hp_prime_refresh_tooltip": "Refresh HP Prime files (retrieves a read-only calculator snapshot)",
     "hp_prime_dropzone_title": "Drop HP Prime files to send",
+    "hp_prime_choose_app_folder": "Choose .hpappdir folder",
+    "hp_prime_app_folder_invalid": "Cannot import {folder}: select a .hpappdir folder containing its matching .hpapp descriptor and files directly inside it, with unique filenames.",
     "hp_prime_dropzone_subtitle": "Supported extensions include .hpprgm, .hpnote, .hpapp, .hplist, and .hpmat",
     "hp_prime_files_title": "HP Prime Files",
     "hp_prime_error_unknown": "unknown HP Prime error",
@@ -4716,6 +4718,11 @@ function setNumWorksUiState() {
 }
 
 function applyActiveFamilyUiState(options = {}) {
+    const appFolderButton = document.getElementById('btnChooseHPAppFolder');
+    if (appFolderButton) {
+        appFolderButton.classList.toggle('hidden', !isHPPrimeActive());
+        appFolderButton.textContent = t('hp_prime_choose_app_folder');
+    }
     if (isHPPrimeActive()) {
         setHPPrimeUiState();
     } else if (isNumWorksActive()) {
@@ -6932,6 +6939,105 @@ function getDroppedFiles(event) {
     return result;
 }
 
+// CK's .hpappdir representation stores the three core sections separately.
+// The calculator receives one APP payload: BE lengths, unchanged core bytes,
+// then resource sections containing a NUL-terminated UTF-16LE name and bytes.
+async function packHPPrimeAppDirectory(folder, files) {
+    const invalid = () => new Error(tFormat('hp_prime_app_folder_invalid', { folder }));
+    if (!/\.hpappdir$/i.test(folder)) throw invalid();
+    const appName = folder.slice(0, -9);
+    if (!appName || /[\/\\\x00-\x1f]/.test(appName) || appName.length > 128) throw invalid();
+    const entries = new Map();
+    for (const file of files) {
+        const name = file.name;
+        // Finder metadata is not calculator application content.
+        if (name === '.DS_Store' || name.startsWith('._')) continue;
+        const key = name.toLowerCase();
+        if (!name || name === '.' || name === '..' || name.length > 128
+            || /[\/\\\x00-\x1f\x7f]/.test(name) || entries.has(key)) throw invalid();
+        entries.set(key, file);
+    }
+    const coreNames = ['.hpapp', '.hpappnote', '.hpappprgm'].map(ext => appName + ext);
+    const cores = coreNames.map(name => entries.get(name.toLowerCase()));
+    if (!cores[0] || !cores[0].size) throw invalid();
+    coreNames.forEach(name => entries.delete(name.toLowerCase()));
+    const resources = Array.from(entries.values()).sort((a, b) => a.name < b.name ? -1 : a.name > b.name ? 1 : 0);
+    if (resources.some(file => /\.(hpapp|hpappnote|hpappprgm)$/i.test(file.name))) throw invalid();
+    const size = 12 + cores.reduce((sum, file) => sum + (file?.size || 0), 0)
+        + resources.reduce((sum, file) => sum + 4 + file.name.length * 2 + 2 + file.size, 0);
+    // Leave room for the outer file message in the 64 MiB transport limit.
+    if (size > 64 * 1024 * 1024 - 1024) throw invalid();
+    const bytes = new Uint8Array(size);
+    const view = new DataView(bytes.buffer);
+    let offset = 0;
+    for (const file of cores) {
+        const data = file ? new Uint8Array(await file.arrayBuffer()) : new Uint8Array();
+        view.setUint32(offset, data.length, false);
+        offset += 4;
+        bytes.set(data, offset);
+        offset += data.length;
+    }
+    for (const file of resources) {
+        const data = new Uint8Array(await file.arrayBuffer());
+        view.setUint32(offset, file.name.length * 2 + 2 + data.length, false);
+        offset += 4;
+        for (let i = 0; i < file.name.length; i++) {
+            view.setUint16(offset, file.name.charCodeAt(i), true);
+            offset += 2;
+        }
+        offset += 2;
+        bytes.set(data, offset);
+        offset += data.length;
+    }
+    const result = new File([bytes], appName + '.hpapp', { type: 'application/octet-stream' });
+    result.hpAppDirectory = true;
+    return result;
+}
+
+async function readHPPrimeAppDirectory(entry) {
+    const reader = entry.createReader();
+    const children = [];
+    // Chromium returns directory entries in batches (often only 100 at once).
+    for (;;) {
+        const batch = await new Promise((resolve, reject) => reader.readEntries(resolve, reject));
+        if (!batch.length) break;
+        children.push(...batch);
+    }
+    if (children.some(child => !child.isFile)) {
+        throw new Error(tFormat('hp_prime_app_folder_invalid', { folder: entry.name }));
+    }
+    const files = await Promise.all(children.map(child => new Promise((resolve, reject) => child.file(resolve, reject))));
+    return packHPPrimeAppDirectory(entry.name, files);
+}
+
+async function getDroppedTransferFiles(event) {
+    // Capture entries AND ordinary files synchronously while the drop event's
+    // data store is readable; it is protected after the first await.
+    const files = getDroppedFiles(event);
+    const items = Array.from(event.dataTransfer?.items || []).filter(item => item.kind === 'file');
+    const captured = items.map(item => ({ entry: item.webkitGetAsEntry?.(), file: item.getAsFile() }));
+    if (!captured.some(item => item.entry?.isDirectory)) return files;
+    const result = [];
+    for (const item of captured) {
+        if (item.entry?.isDirectory) {
+            result.push(await readHPPrimeAppDirectory(item.entry));
+        } else if (item.file) {
+            result.push(item.file);
+        }
+    }
+    return result;
+}
+
+async function getHPPrimePickedDirectory(files) {
+    const selected = Array.from(files);
+    if (!selected.length) return [];
+    const folder = selected[0].webkitRelativePath.split('/')[0];
+    if (selected.some(file => file.webkitRelativePath !== folder + '/' + file.name)) {
+        throw new Error(tFormat('hp_prime_app_folder_invalid', { folder }));
+    }
+    return [await packHPPrimeAppDirectory(folder, selected)];
+}
+
 function readProgressTick() {
     if (!state.module) {
         return null;
@@ -7293,7 +7399,7 @@ async function sendDroppedFiles(files, dropFolder) {
     log(`Dropped ${files.length} file(s) for transfer.`);
     if (isHPPrimeActive()) {
         const appRoot = findHPPrimeAppRoot(dropFolder);
-        if (appRoot) {
+        if (appRoot && !files.some(file => file.hpAppDirectory)) {
             try {
                 await sendHPPrimeAppResources(files, appRoot);
             } catch (error) {
@@ -10693,6 +10799,18 @@ function bindEvents() {
     els.fileInput.addEventListener('change', () => {
         setSelectedFiles(els.fileInput.files, 'file picker');
     });
+    const hpAppFolderInput = document.getElementById('hpAppFolderInput');
+    document.getElementById('btnChooseHPAppFolder').addEventListener('click', () => hpAppFolderInput.click());
+    hpAppFolderInput.addEventListener('change', async () => {
+        try {
+            const files = await getHPPrimePickedDirectory(hpAppFolderInput.files);
+            setSelectedFiles(files, 'file picker');
+        } catch (error) {
+            logError(error);
+        } finally {
+            hpAppFolderInput.value = '';
+        }
+    });
     const dropzone = document.getElementById('dropzone');
     const dropzoneDragEnter = (event) => {
         if (hasFileDrag(event)) {
@@ -10713,7 +10831,7 @@ function bindEvents() {
         }
         setDropzoneActive(false);
     };
-    const dropzoneDrop = (event) => {
+    const dropzoneDrop = async (event) => {
         event.preventDefault();
         event.stopPropagation();
         const now = Date.now();
@@ -10721,12 +10839,13 @@ function bindEvents() {
             return;
         }
         lastDropTs = now;
-        const files = getDroppedFiles(event);
-        if (!files.length) {
-            return;
-        }
         setDropzoneActive(false);
-        setSelectedFiles(files, 'drop');
+        try {
+            const files = await getDroppedTransferFiles(event);
+            if (files.length) setSelectedFiles(files, 'drop');
+        } catch (error) {
+            logError(error);
+        }
     };
     dropzone.addEventListener('dragenter', dropzoneDragEnter);
     dropzone.addEventListener('dragover', dropzoneDragOver);
@@ -10881,19 +11000,21 @@ function bindEvents() {
     els.tableView.addEventListener('dragleave', () => {
         clearDropHighlight();
     });
-    els.tableView.addEventListener('drop', event => {
+    els.tableView.addEventListener('drop', async event => {
         event.preventDefault();
-        const files = getDroppedFiles(event);
-        if (!files.length) {
-            return;
-        }
+        event.stopPropagation();
         clearDropHighlight();
         const folderNode = event.target.closest('[data-folder-path]');
         const row = event.target.closest('tr');
         const folder = folderNode
             ? (folderNode.dataset.folderPath || '')
             : (row ? (row.dataset.folderTarget || '') : '');
-        sendDroppedFiles(files, folder);
+        try {
+            const files = await getDroppedTransferFiles(event);
+            if (files.length) await sendDroppedFiles(files, folder);
+        } catch (error) {
+            logError(error);
+        }
     });
     document.addEventListener('keydown', event => {
         if (event.key === 'Escape') {

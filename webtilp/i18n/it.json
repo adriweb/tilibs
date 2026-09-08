@@ -1,4 +1,6 @@
 {
+  "hp_prime_choose_app_folder": "Scegli cartella .hpappdir",
+  "hp_prime_app_folder_invalid": "Impossibile importare {folder}: seleziona una cartella .hpappdir contenente il descrittore .hpapp omonimo e file con nomi univoci direttamente al suo interno.",
   "brand_subtitle": "Trasferimenti universali, direttamente dal browser!",
   "settings": "Impostazioni",
   "calculator_family": "Famiglia di calcolatrici",

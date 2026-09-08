@@ -1,4 +1,6 @@
 {
+  "hp_prime_choose_app_folder": "Elegir carpeta .hpappdir",
+  "hp_prime_app_folder_invalid": "No se puede importar {folder}: selecciona una carpeta .hpappdir con su descriptor .hpapp del mismo nombre y archivos con nombres únicos directamente dentro de ella.",
   "brand_subtitle": "Transferencias universales, ¡directamente desde tu navegador!",
   "settings": "Configuración",
   "calculator_family": "Familia de calculadoras",

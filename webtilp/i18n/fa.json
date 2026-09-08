@@ -1,4 +1,6 @@
 {
+  "hp_prime_choose_app_folder": "انتخاب پوشهٔ .hpappdir",
+  "hp_prime_app_folder_invalid": "وارد کردن {folder} ممکن نیست: پوشهٔ .hpappdir شامل توصیفگر .hpapp هم‌نام و فایل‌هایی با نام‌های یکتا مستقیماً درون آن انتخاب کنید.",
   "brand_subtitle": "انتقال‌های جهانی، مستقیماً از مرورگر شما!",
   "settings": "تنظیمات",
   "calculator_family": "خانواده ماشین‌حساب",

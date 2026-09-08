@@ -1,4 +1,6 @@
 {
+  "hp_prime_choose_app_folder": "Elige indicem .hpappdir",
+  "hp_prime_app_folder_invalid": "{folder} importari non potest: elige indicem .hpappdir qui descriptorem .hpapp eiusdem nominis et tabulas nominibus univocis directe continet.",
   "brand_subtitle": "Translationes universales, e navigatro tuo directe!",
   "settings": "Optiones",
   "calculator_family": "Familia calculatricum",

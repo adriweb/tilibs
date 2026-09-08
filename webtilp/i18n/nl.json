@@ -1,4 +1,6 @@
 {
+  "hp_prime_choose_app_folder": ".hpappdir-map kiezen",
+  "hp_prime_app_folder_invalid": "Kan {folder} niet importeren: kies een .hpappdir-map met het gelijknamige .hpapp-bestand en bestanden met unieke namen direct in de map.",
   "brand_subtitle": "Universele overdrachten, rechtstreeks vanuit je browser!",
   "settings": "Instellingen",
   "calculator_family": "Rekenmachinefamilie",
