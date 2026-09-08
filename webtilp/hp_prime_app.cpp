@@ -252,6 +252,115 @@ static bool has_duplicate_name(const Parsed& parsed, const std::string& name,
 
 } // namespace
 
+bool program_source(const uint8_t* data, size_t size,
+                    const uint8_t** source, size_t* source_size,
+                    std::string* error)
+{
+    if (!source || !source_size || (!data && size)) {
+        set_error(error, "application program data is unavailable");
+        return false;
+    }
+    *source = data;
+    *source_size = size;
+    if (size < 4 || data[0] != 0x7c || data[1] != 0x61
+        || data[2] != 0x8a || data[3] != 0xb2) {
+        return true; // Already transfer-format UTF-16LE source.
+    }
+    const auto le32 = [data](size_t offset) {
+        return (uint32_t)data[offset] | ((uint32_t)data[offset + 1] << 8)
+            | ((uint32_t)data[offset + 2] << 16)
+            | ((uint32_t)data[offset + 3] << 24);
+    };
+    const auto invalid = [error]() {
+        set_error(error, "unsupported or malformed serialized application program");
+        return false;
+    };
+    if (size < 12 || le32(4) != 0xfffffffeU || le32(8) != 0) {
+        return invalid();
+    }
+    // Independently decoded from CK files and a G2 USB capture: records have
+    // LE byte lengths (excluding the length itself) followed by a field ID.
+    // Field 5 is the source-unit list; each unit has name, flags, and source.
+    // Do not scan for EXPORT or treat arbitrary serialized bytes as text.
+    bool found_list = false;
+    bool found_source = false;
+    bool empty_editor = true;
+    bool found_editor_metadata = false;
+    *source_size = 0;
+    for (size_t offset = 12; offset < size;) {
+        if (size - offset < 8) return invalid();
+        const uint32_t length = le32(offset);
+        if (length < 4 || length > size - offset - 4) return invalid();
+        const size_t end = offset + 4 + length;
+        const uint32_t field_id = le32(offset + 4);
+        if (field_id == 0x0240028eU) {
+            found_editor_metadata = true;
+        } else if (field_id == 0x007fff05U || field_id == 0x023fff05U
+                   || field_id == 0x00bfff05U) {
+            if (length != 8 || le32(offset + 8) != 0) empty_editor = false;
+        } else {
+            empty_editor = false;
+        }
+        if ((field_id >> 22) == 5 && field_id != 0x014000beU) return invalid();
+        if (field_id == 0x014000beU) {
+            if (found_list) return invalid();
+            found_list = true;
+            for (size_t unit = offset + 8; unit < end;) {
+                if (end - unit < 4) return invalid();
+                const uint32_t unit_size = le32(unit);
+                if (unit_size > end - unit - 4) return invalid();
+                const size_t unit_end = unit + 4 + unit_size;
+                bool unit_source = false;
+                for (size_t field = unit + 4; field < unit_end;) {
+                    if (unit_end - field < 8) return invalid();
+                    const uint32_t field_size = le32(field);
+                    if (field_size < 4 || field_size > unit_end - field - 4) return invalid();
+                    if (le32(field + 4) == 0x00c0009bU) {
+                        // Multiple source units need an evidenced merge rule.
+                        // Reject rather than silently dropping any source.
+                        if (found_source || ((field_size - 4) & 1U)) return invalid();
+                        *source = data + field + 8;
+                        *source_size = field_size - 4;
+                        if (*source_size < 2 || (*source)[*source_size - 1]
+                            || (*source)[*source_size - 2]) return invalid();
+                        for (size_t i = 0; i + 2 < *source_size; i += 2) {
+                            if (!(*source)[i] && !(*source)[i + 1]) return invalid();
+                        }
+                        found_source = unit_source = true;
+                    }
+                    field += 4 + field_size;
+                }
+                if (!unit_source) return invalid();
+                unit = unit_end;
+            }
+        }
+        offset = end;
+    }
+    // Empty built-in editor files omit the source list: they contain zero
+    // flags and editor metadata only. A compiled program without a source
+    // list, or a file truncated between records, must not erase its program.
+    return found_source || found_list || (empty_editor && found_editor_metadata)
+        ? true : invalid();
+}
+
+bool prepare_for_send(const uint8_t* data, size_t size,
+                      const std::string& app_name,
+                      std::vector<uint8_t>* output, std::string* error)
+{
+    Parsed parsed;
+    if (!output || !parse(data, size, app_name, &parsed, error)) return false;
+    const Part& part = parsed.parts[2];
+    const uint8_t* source;
+    size_t source_size;
+    if (!program_source(data + part.data_offset, part.data_size,
+                        &source, &source_size, error)) return false;
+    output->assign(data, data + part.section_offset);
+    append_u32be(output, (uint32_t)source_size);
+    if (!append_bytes(output, source, source_size)) return false;
+    const size_t tail = part.section_offset + part.section_size;
+    return append_bytes(output, data + tail, size - tail);
+}
+
 bool parse(const uint8_t* data, size_t size, const std::string& app_name,
            Parsed* parsed, std::string* error)
 {
@@ -373,7 +482,7 @@ bool replace_or_add_resources(const uint8_t* data, size_t size,
                               const Parsed& parsed,
                               const std::vector<ResourceUpdate>& updates,
                               std::vector<uint8_t>* rebuilt,
-                              std::string* error)
+                              std::string* error, bool allow_program_and_note)
 {
     if (!rebuilt || !validate_source(data, size, parsed, error)) {
         return false;
@@ -394,6 +503,7 @@ bool replace_or_add_resources(const uint8_t* data, size_t size,
         for (size_t core_index = 0; core_index < 3; core_index++) {
             if (lowercase_ascii(update.name)
                 == lowercase_ascii(parsed.parts[core_index].name)) {
+                if (allow_program_and_note && core_index != 0) continue;
                 set_error(error, "core application part names are reserved");
                 return false;
             }
@@ -421,7 +531,8 @@ bool replace_or_add_resources(const uint8_t* data, size_t size,
     std::vector<bool> used(updates.size(), false);
     for (const Part& part : parsed.parts) {
         size_t update_index = updates.size();
-        if (part.kind == PartKind::Resource) {
+        if (part.kind == PartKind::Resource || (allow_program_and_note
+            && (part.kind == PartKind::Program || part.kind == PartKind::Note))) {
             const std::string part_key = lowercase_ascii(part.name);
             for (size_t i = 0; i < updates.size(); i++) {
                 if (lowercase_ascii(updates[i].name) == part_key) {
@@ -431,6 +542,14 @@ bool replace_or_add_resources(const uint8_t* data, size_t size,
             }
         }
         if (update_index != updates.size()) {
+            if (part.kind != PartKind::Resource) {
+                const ResourceUpdate& update = updates[update_index];
+                if (update.size > UINT32_MAX) return false;
+                append_u32be(rebuilt, (uint32_t)update.size);
+                if (!append_bytes(rebuilt, update.data, update.size)) return false;
+                used[update_index] = true;
+                continue;
+            }
             std::vector<uint8_t> original_name;
             if (!encode_utf16le(part.name, &original_name)
                 || !append_named_resource(rebuilt, original_name,

@@ -317,6 +317,9 @@ async function testApplicationMappingAndDropDispatch() {
     assert.equal(appDrop.root, appRoot);
     assert.equal(topLevelSends, 0,
         'dropping on an application dispatches to its resource updater');
+    await dropContext.sendDroppedFiles([{ name: 'Gallery.hpapp', hpAppDirectory: true }], 'synthese');
+    assert.equal(topLevelSends, 1,
+        'a complete app folder dropped on an existing app is installed as an app, not as a resource');
 }
 
 async function testApplicationDownloadDispatch() {
@@ -896,7 +899,154 @@ async function testPrimeRgb555ScreenshotDecoding() {
         'all PNG filters decode to the original little-endian RGB555 colors');
 }
 
+async function testAppDirectoryImport() {
+    const { File } = require('node:buffer');
+    const context = vm.createContext({
+        File, Uint8Array, DataView,
+        tFormat: (key, values) => key + ': ' + values.folder
+    });
+    for (const name of ['getDroppedFiles', 'packHPPrimeAppDirectory',
+        'readHPPrimeAppDirectory', 'getDroppedTransferFiles', 'getHPPrimePickedDirectory']) {
+        vm.runInContext(extractFunction(name), context);
+    }
+    const descriptor = new File([Uint8Array.of(0x7c, 0x61, 0x8a, 0xb2)], 'Gallery.hpapp');
+    const note = new File(['notes'], 'Gallery.hpappnote');
+    const program = new File(['program'], 'Gallery.hpappprgm');
+    const resource = new File([Uint8Array.of(0, 255, 17, 0)], 'café🖼.png');
+    const app = await context.packHPPrimeAppDirectory('Gallery.hpappdir',
+        [resource, program, descriptor, note, new File(['Finder'], '.DS_Store')]);
+    assert.equal(app.name, 'Gallery.hpapp');
+    assert.equal(app.hpAppDirectory, true);
+    const bytes = Buffer.from(await app.arrayBuffer());
+    let offset = 0;
+    for (const file of [descriptor, note, program]) {
+        const size = bytes.readUInt32BE(offset);
+        offset += 4;
+        assert.deepEqual(bytes.subarray(offset, offset + size), Buffer.from(await file.arrayBuffer()),
+            'core sections are ordered descriptor/note/program and preserve exact bytes');
+        offset += size;
+    }
+    const resourceSize = bytes.readUInt32BE(offset);
+    offset += 4;
+    const encodedName = Buffer.from(resource.name + '\0', 'utf16le');
+    assert.equal(resourceSize, encodedName.length + resource.size);
+    assert.deepEqual(bytes.subarray(offset, offset + encodedName.length), encodedName);
+    offset += encodedName.length;
+    assert.deepEqual(bytes.subarray(offset), Buffer.from(await resource.arrayBuffer()));
+    const minimal = await context.packHPPrimeAppDirectory('Gallery.hpappdir', [descriptor]);
+    assert.equal(minimal.size, 12 + descriptor.size, 'missing note/program produce empty sections');
+    for (const [folder, files] of [
+        ['Gallery', [descriptor]], ['Gallery.hpappdir', []],
+        ['Other.hpappdir', [descriptor]],
+        ['Gallery.hpappdir', [descriptor, new File(['x'], 'GALLERY.HPAPP')]],
+        ['Gallery.hpappdir', [descriptor, new File(['x'], 'nested/image.png')]],
+        ['Gallery.hpappdir', [descriptor, new File(['x'], 'Other.hpappprgm')]]
+    ]) {
+        await assert.rejects(context.packHPPrimeAppDirectory(folder, files), /hp_prime_app_folder_invalid/);
+    }
+    const child = file => ({ isFile: true, name: file.name, file: resolve => resolve(file) });
+    let reads = 0;
+    const batches = [[child(descriptor)], Array.from({ length: 105 }, (_, i) => child(new File([String(i)], i + '.png'))), []];
+    const folderEntry = {
+        isDirectory: true, name: 'Gallery.hpappdir',
+        createReader: () => ({ readEntries: resolve => { reads++; resolve(batches.shift()); } })
+    };
+    let storeReadable = true;
+    const plainFile = new File(['outside'], 'test.hpprgm');
+    const pending = context.getDroppedTransferFiles({ dataTransfer: {
+        files: [], items: [folderEntry, null].map((entry, i) => ({
+            kind: 'file',
+            webkitGetAsEntry: () => { assert.ok(storeReadable); return entry; },
+            getAsFile: () => { assert.ok(storeReadable); return i ? plainFile : null; }
+        }))
+    } });
+    storeReadable = false;
+    const dropped = await pending;
+    assert.equal(reads, 3, 'read every batch until an empty batch');
+    assert.equal(dropped.length, 2, 'mixed app folders and ordinary files are retained');
+    assert.equal(dropped[1], plainFile);
+    const picked = new File([await descriptor.arrayBuffer()], descriptor.name);
+    Object.defineProperty(picked, 'webkitRelativePath', { value: 'Gallery.hpappdir/Gallery.hpapp' });
+    assert.equal((await context.getHPPrimePickedDirectory([picked]))[0].name, 'Gallery.hpapp');
+    const nested = new File(['x'], 'x.png');
+    Object.defineProperty(nested, 'webkitRelativePath', { value: 'Gallery.hpappdir/sub/x.png' });
+    await assert.rejects(context.getHPPrimePickedDirectory([picked, nested]), /hp_prime_app_folder_invalid/,
+        'nested directories must not be silently flattened');
+    await assert.rejects(context.readHPPrimeAppDirectory({
+        name: 'Gallery.hpappdir', createReader: () => ({ readEntries: (_resolve, reject) => reject(new Error('read denied')) })
+    }), /read denied/, 'directory read failures are propagated');
+}
+
+async function testAppProgramUploadTargeting() {
+    const apps = ['Gallery', 'Other'].map((name, hpIndex) => ({ name, hpIndex, hpAppRoot: true }));
+    const state = {
+        hpFileSnapshotLoaded: true, expandedFolders: new Set(),
+        dirlist: [...apps, ...apps.flatMap(app => ['hpappprgm', 'hpappnote'].map(extension => ({
+            name: `${app.name}.${extension}`, kind: 'hp-app-child', hpIndex: app.hpIndex,
+            hpAppChildEditable: false
+        })))]
+    };
+    let answer = 'Other', approve = true, updates = [], calls = [], logs = [], prompts = [];
+    const module = { FS: { writeFile() {}, unlink() {} } };
+    const context = {
+        state, Uint8Array, console,
+        t: key => key, tFormat: (key, args) => key + JSON.stringify(args),
+        log: message => logs.push(message),
+        prompt: (message, suggested) => { prompts.push([message, suggested]); return answer; },
+        confirm: () => approve,
+        initModule: async () => module,
+        encodeHPPrimeAppResourceManifest: entries => { updates = entries; return new Uint8Array(); },
+        ccallAsync: async (_module, name, _type, _argTypes, args) => { calls.push([name, args]); return 0; },
+        getEntryFolderPath: app => app.name,
+        applyHPPrimeFileSnapshot() {},
+        setButtonLoading() {},
+        updateSendFilesButtonState() {},
+        isHPPrimeActive: () => true,
+        isHPLegacyActive: () => false,
+        isCasioActive: () => false,
+        els: { fileInput: { files: [] }, btnSendFiles: {} },
+        setSelectedFiles: files => { state.selectedFiles = files; }
+    };
+    vm.createContext(context);
+    for (const name of ['chooseHPPrimeAppForFile', 'sendHPPrimeAppResources', 'sendSelectedFiles']) {
+        vm.runInContext(extractFunction(name), context);
+    }
+    const file = { name: 'Gallery.hpappprgm', arrayBuffer: async () => Uint8Array.of(1, 2, 3, 4).buffer };
+    assert.equal(context.chooseHPPrimeAppForFile(file), apps[1]);
+    assert.equal(prompts[0][1], 'Gallery', 'suggest same-name app but allow a different target');
+    assert.equal(await context.sendHPPrimeAppResources([file], apps[1]), true);
+    assert.equal(updates[0].name, 'Other.hpappprgm', 'target the app core section, not a resource named after the source');
+    assert.deepEqual(Array.from(updates[0].data), [1, 2, 3, 4], 'native adapter handles source conversion');
+    assert.equal(calls[0][0], 'hp_prime_send_cached_app_resources');
+    assert.equal(calls[0][1][0], 1);
+    approve = false;
+    await context.sendHPPrimeAppResources([file], apps[1]);
+    assert.equal(calls.length, 1, 'keep overwrite confirmation for core parts');
+    approve = true;
+    await context.sendHPPrimeAppResources([{ ...file, name: 'Gallery.hpapp' }], apps[1]);
+    assert.equal(calls.length, 1, 'do not upload a descriptor as a resource');
+    answer = null;
+    assert.equal(context.chooseHPPrimeAppForFile(file), null, 'cancel never chooses an app implicitly');
+    answer = 'missing';
+    assert.equal(context.chooseHPPrimeAppForFile(file), null);
+    assert.match(logs.at(-1), /hp_prime_app_target_missing/);
+    state.hpFileSnapshotLoaded = false;
+    assert.equal(context.chooseHPPrimeAppForFile(file), null);
+    await context.sendHPPrimeAppResources([file], apps[1]);
+    assert.equal(calls.length, 1, 'no update against a partial or stale snapshot');
+    state.hpFileSnapshotLoaded = true;
+    answer = 'Gallery';
+    state.selectedFiles = [file];
+    await context.sendSelectedFiles();
+    assert.equal(calls.length, 2);
+    assert.equal(calls[1][0], 'hp_prime_send_cached_app_resources', 'standalone program is never sent as a top-level variable');
+    assert.equal(updates[0].name, 'Gallery.hpappprgm');
+    assert.equal(state.selectedFiles.length, 0);
+}
+
 Promise.all([
+    testAppProgramUploadTargeting(),
+    testAppDirectoryImport(),
     testFamilyUiState(),
     testTableDropUsesPrimeTransferPath(),
     testApplicationMappingAndDropDispatch(),
