@@ -42,6 +42,15 @@ bool extract(const uint8_t* data, size_t size, const Parsed& parsed,
              size_t part_index, const uint8_t** part_data,
              size_t* part_size, std::string* error);
 
+// CK stores app programs as serialized editor state, but the transfer's
+// program section must contain UTF-16LE source. Returned bytes borrow input.
+bool program_source(const uint8_t* data, size_t size,
+                    const uint8_t** source, size_t* source_size,
+                    std::string* error);
+bool prepare_for_send(const uint8_t* data, size_t size,
+                      const std::string& app_name,
+                      std::vector<uint8_t>* output, std::string* error);
+
 bool replace_or_add_resource(const uint8_t* data, size_t size,
                              const Parsed& parsed,
                              const std::string& resource_name,
@@ -54,7 +63,8 @@ bool replace_or_add_resources(const uint8_t* data, size_t size,
                               const Parsed& parsed,
                               const std::vector<ResourceUpdate>& updates,
                               std::vector<uint8_t>* rebuilt,
-                              std::string* error);
+                              std::string* error,
+                              bool allow_program_and_note = false);
 
 bool rename_resource(const uint8_t* data, size_t size, const Parsed& parsed,
                      size_t part_index, const std::string& new_name,
