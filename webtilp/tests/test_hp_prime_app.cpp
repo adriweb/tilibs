@@ -26,6 +26,107 @@ static void append_core(std::vector<uint8_t>* output,
     output->insert(output->end(), data.begin(), data.end());
 }
 
+static void append_le(std::vector<uint8_t>* output, uint32_t value)
+{
+    for (unsigned int i = 0; i < 4; i++) output->push_back((uint8_t)(value >> (i * 8)));
+}
+
+static void append_record(std::vector<uint8_t>* output, uint32_t id,
+                          const std::vector<uint8_t>& payload)
+{
+    append_le(output, (uint32_t)payload.size() + 4);
+    append_le(output, id);
+    output->insert(output->end(), payload.begin(), payload.end());
+}
+
+static std::vector<uint8_t> serialized_program(const std::vector<uint8_t>& source)
+{
+    // Repository-authored fixture for the CK editor-state layout, not CK code
+    // or Gallery's copyrighted program. USB requires just the source field.
+    std::vector<uint8_t> result, fields, units;
+    append_le(&result, 0xb28a617c);
+    append_le(&result, 0xfffffffe);
+    append_le(&result, 0);
+    append_record(&result, 0x007fff05, {0, 0, 0, 0});
+    append_record(&fields, 0x0040008b, {'M', 0, 'a', 0, 'i', 0, 'n', 0, 0, 0});
+    append_record(&fields, 0x00800085, {0, 0, 0, 0});
+    append_record(&fields, 0x00c0009b, source);
+    append_le(&units, (uint32_t)fields.size());
+    units.insert(units.end(), fields.begin(), fields.end());
+    append_record(&result, 0x014000be, units);
+    return result;
+}
+
+static bool check(bool condition, const char* message);
+static void append_resource(std::vector<uint8_t>* output,
+                            const std::u16string& name,
+                            const std::vector<uint8_t>& data);
+
+static bool test_serialized_program()
+{
+    bool passed = true;
+    std::string error;
+    const std::vector<uint8_t> text = {'A', 0, ':', 0, '=', 0, '2', 0, ';', 0, 0, 0};
+    const auto binary = serialized_program(text);
+    const uint8_t* source = nullptr;
+    size_t source_size = 0;
+    passed &= check(hp_prime_app::program_source(binary.data(), binary.size(),
+        &source, &source_size, &error) && source_size == text.size()
+        && std::vector<uint8_t>(source, source + source_size) == text,
+        "extract source from serialized CK program without treating magic as text");
+    passed &= check(hp_prime_app::program_source(text.data(), text.size(),
+        &source, &source_size, &error) && source == text.data() && source_size == text.size(),
+        "leave received UTF-16LE source unchanged");
+    for (size_t length = 4; length < binary.size(); length++) {
+        passed &= check(!hp_prime_app::program_source(binary.data(), length,
+            &source, &source_size, &error), "reject truncated serialized records");
+    }
+    auto invalid = binary;
+    invalid[4] = 0xff;
+    passed &= check(!hp_prime_app::program_source(invalid.data(), invalid.size(),
+        &source, &source_size, &error), "reject unsupported serialized version");
+    invalid = serialized_program({'A', 0});
+    passed &= check(!hp_prime_app::program_source(invalid.data(), invalid.size(),
+        &source, &source_size, &error), "reject unterminated serialized source");
+    invalid = serialized_program({'A', 0, 0, 0, 'B', 0, 0, 0});
+    passed &= check(!hp_prime_app::program_source(invalid.data(), invalid.size(),
+        &source, &source_size, &error), "reject embedded source terminator");
+    invalid.assign(binary.begin(), binary.begin() + 24);
+    append_record(&invalid, 0x0240028e, {});
+    passed &= check(hp_prime_app::program_source(invalid.data(), invalid.size(),
+        &source, &source_size, &error) && source_size == 0, "recognize an empty built-in editor state");
+    append_record(&invalid, 0x00c001be, {1, 2, 3, 4});
+    passed &= check(!hp_prime_app::program_source(invalid.data(), invalid.size(),
+        &source, &source_size, &error), "never erase a compiled program with missing source");
+    invalid = binary;
+    invalid.insert(invalid.end(), binary.begin() + 24, binary.end());
+    passed &= check(!hp_prime_app::program_source(invalid.data(), invalid.size(),
+        &source, &source_size, &error), "reject duplicate source lists");
+
+    std::vector<uint8_t> app, expected, prepared;
+    append_core(&app, {1, 2}); append_core(&app, {'N', 0}); append_core(&app, binary);
+    append_resource(&app, u"test.png", {9, 8, 7});
+    append_core(&expected, {1, 2}); append_core(&expected, {'N', 0}); append_core(&expected, text);
+    append_resource(&expected, u"test.png", {9, 8, 7});
+    passed &= check(hp_prime_app::prepare_for_send(app.data(), app.size(), "test",
+        &prepared, &error) && prepared == expected,
+        "replace only the serialized program section, preserving every other byte");
+    passed &= check(hp_prime_app::prepare_for_send(expected.data(), expected.size(), "test",
+        &prepared, &error) && prepared == expected, "app preparation is idempotent");
+    hp_prime_app::Parsed parsed;
+    hp_prime_app::parse(expected.data(), expected.size(), "test", &parsed, &error);
+    const std::vector<hp_prime_app::ResourceUpdate> updates = {{"test.hpappprgm", binary.data(), binary.size()}};
+    passed &= check(hp_prime_app::replace_or_add_resources(expected.data(), expected.size(),
+        parsed, updates, &prepared, &error, true) && prepared == app,
+        "explicit program replacement updates the core section, not a named resource");
+    passed &= check(!hp_prime_app::replace_or_add_resources(expected.data(), expected.size(),
+        parsed, updates, &prepared, &error), "resource-only API keeps core update guard");
+    passed &= check(!hp_prime_app::replace_or_add_resources(expected.data(), expected.size(),
+        parsed, {{"test.hpapp", text.data(), text.size()}}, &prepared, &error, true),
+        "descriptor replacement remains forbidden");
+    return passed;
+}
+
 static void append_resource(std::vector<uint8_t>* output,
                             const std::u16string& name,
                             const std::vector<uint8_t>& data)
@@ -93,7 +194,7 @@ int main(int argc, char** argv)
                   << " application parts with exact round-trip\n";
         return EXIT_SUCCESS;
     }
-    bool passed = true;
+    bool passed = test_serialized_program();
     std::string error;
     const std::vector<uint8_t> fixture = make_fixture();
     hp_prime_app::Parsed parsed;
