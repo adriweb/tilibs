@@ -82,7 +82,7 @@ static int tifiles_fext_is_evo(const char *ext)
 	static const char *const evo_exts[] = {
 		"8xn2", "8xl2", "8xm2", "8xy2", "8xs2", "8xp2",
 		"8ci2", "8xd2", "8xw2", "8xz2", "8xt2", "8xv2",
-		"8xpy2",
+		"8xpy2", "8mp2",
 		"8xg2", "8ca2", "8ek2", nullptr
 	};
 

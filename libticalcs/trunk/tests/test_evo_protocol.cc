@@ -1,6 +1,9 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
+#include <initializer_list>
+#include <vector>
 
 #include "../src/error.h"
 #include "../src/evo_cbor.h"
@@ -90,11 +93,98 @@ static void check_cbor_container_bounds(void)
 	evo_cbor_free(&value);
 }
 
+static std::vector<std::vector<uint8_t>> sent_payloads;
+static const char *first_error;
+static const char *second_error;
+static const char *expected_url;
+
+static int mock_put(CalcHandle *, const char *url, const uint8_t *data, size_t size)
+{
+	CHECK(!strcmp(url, expected_url));
+	const char *error = sent_payloads.empty() ? first_error : second_error;
+	sent_payloads.emplace_back(data, data + size);
+	CHECK(sent_payloads.size() <= 2);
+	return error ? ticalcs_evo_error_set((const uint8_t *)error, strlen(error)) : 0;
+}
+
+static void check_python_wrapper_fallback(void)
+{
+	// Independent, checksummed legacy fixture: name m, no menu, MPY v5.
+	const uint8_t old_file[] = {
+		0xbf, 0x68, 0x6d, 0x65, 0x74, 0x61, 0x44, 0x61, 0x74, 0x61, 0xbf, 0x64, 0x74, 0x79, 0x70, 0x65,
+		0x0f, 0x67, 0x76, 0x65, 0x72, 0x73, 0x69, 0x6f, 0x6e, 0x01, 0x64, 0x6e, 0x61, 0x6d, 0x65, 0x42,
+		0x0c, 0xe8, 0xff, 0x67, 0x76, 0x65, 0x72, 0x73, 0x69, 0x6f, 0x6e, 0x01, 0x64, 0x73, 0x69, 0x7a,
+		0x65, 0x18, 0x18, 0x64, 0x64, 0x61, 0x74, 0x61, 0x58, 0x18, 0x13, 0x02, 0xd8, 0x20, 0x18, 0x00,
+		0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x6d, 0x00, 0x05, 0x00, 0x00, 0x02, 0x4d, 0x05, 0x03, 0x1f,
+		0x00, 0x00, 0xff, 0xea, 0x7d
+	};
+	uint8_t *new_file = nullptr;
+	uint32_t new_size = 0;
+	CHECK(tifiles_evo_repack_python_module(old_file, sizeof(old_file), &new_file, &new_size) == 0);
+	for (const int modern : {0, 1})
+	{
+		VarEntry entry = {};
+		strcpy(entry.name, "M");
+		entry.type = modern ? 18 : 15;
+		entry.data = modern ? new_file : const_cast<uint8_t *>(old_file);
+		entry.size = modern ? new_size : sizeof(old_file);
+		const std::vector<uint8_t> original(entry.data, entry.data + entry.size);
+		const std::vector<uint8_t> converted = modern
+		    ? std::vector<uint8_t>(old_file, old_file + sizeof(old_file))
+		    : std::vector<uint8_t>(new_file, new_file + new_size);
+		for (const char *error : {"", "DP", "PM", "NM", "TO", "VE", "D"})
+		{
+			for (const char *retry_error : {"", "DP", "NM"})
+			{
+				sent_payloads.clear();
+				first_error = *error ? error : nullptr;
+				second_error = *retry_error ? retry_error : nullptr;
+				expected_url = "hh01/xfr/var?memtarget=1&policy=1";
+				const bool retry = !strcmp(error, "DP");
+				const char *expected_error = retry ? second_error : first_error;
+				const int result = evo_send_file_payload(nullptr, &entry, mock_put);
+				CHECK(result == (expected_error ? ERR_EVO_ERROR : 0));
+				CHECK(sent_payloads.size() == (retry ? 2 : 1));
+				CHECK(sent_payloads[0] == original);
+				if (retry) CHECK(sent_payloads[1] == converted);
+				CHECK(std::vector<uint8_t>(entry.data, entry.data + entry.size) == original);
+				CHECK(entry.attr == ATTRB_NONE);
+				if (expected_error && strlen(expected_error) == 2)
+				{
+					uint16_t code = 0;
+					CHECK(ticalcs_error_get_raw_protocol_code(result, &code) == 0);
+					CHECK(code == ((unsigned int)expected_error[0] << 8 | expected_error[1]));
+				}
+			}
+		}
+	}
+	// Unrecognized type 18 stays Archive-only but cannot be converted on DP.
+	// Unrecognized/source type 15 keeps the caller's selected memory target.
+	for (const uint8_t type : {15, 18})
+	{
+		VarEntry entry = {};
+		entry.type = type;
+		uint8_t opaque[] = {0x13, 1, 0, 0};
+		entry.data = opaque; entry.size = sizeof(opaque);
+		for (const FileAttr attr : {ATTRB_NONE, ATTRB_ARCHIVED})
+		{
+			entry.attr = attr;
+			expected_url = type == 18 || attr == ATTRB_ARCHIVED
+			    ? "hh01/xfr/var?memtarget=1&policy=1" : "hh01/xfr/var?memtarget=0&policy=1";
+			sent_payloads.clear(); first_error = "DP"; second_error = nullptr;
+			CHECK(evo_send_file_payload(nullptr, &entry, mock_put) == ERR_EVO_ERROR);
+			CHECK(sent_payloads.size() == 1);
+		}
+	}
+	tifiles_ve_free_data(new_file);
+}
+
 int main(void)
 {
 	check_packet_lengths();
 	check_packet_sequences();
 	check_receive_limits();
 	check_cbor_container_bounds();
+	check_python_wrapper_fallback();
 	return 0;
 }
