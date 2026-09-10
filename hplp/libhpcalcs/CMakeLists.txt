@@ -42,7 +42,11 @@ if(EMSCRIPTEN)
     target_compile_definitions(hpcalcs PRIVATE __EMSCRIPTEN__=1)
     # EM_ASYNC_JS WebHID calls suspend synchronous C operations while browser
     # promises complete.  CMake consumers must therefore link with Asyncify;
-    # backup file payloads use Emscripten's zlib port.
+    # backup file payloads use Emscripten's zlib port. -sUSE_ZLIB=1 is needed
+    # here too (not just on the INTERFACE below): prime_cmd.c itself includes
+    # <zlib.h>, and that flag is what puts Emscripten's zlib port headers on
+    # the compiler's include path.
+    target_compile_options(hpcalcs PRIVATE -sUSE_ZLIB=1)
     target_link_options(hpcalcs INTERFACE -sASYNCIFY=1 -sUSE_ZLIB=1)
 else()
     find_package(ZLIB REQUIRED)

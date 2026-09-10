@@ -1,0 +1,19 @@
+services:
+  webtilp:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      # emscripten/emsdk only ships amd64 images; pin this explicitly so the
+      # build cache matches regardless of the host's native arch (Apple
+      # Silicon etc.) instead of invalidating on every arch mismatch.
+      platforms:
+        - linux/amd64
+      args:
+        EMSDK_VERSION: "4.0.15"
+        BUILD_PROFILE: dev
+        BUILD_SHA: docker
+    image: webtilp:dev
+    platform: linux/amd64
+    ports:
+      - "8080:80"
+    restart: unless-stopped
