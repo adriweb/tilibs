@@ -799,6 +799,7 @@ const I18N_EN = {
     "theme_retro": "Retro Terminal",
     "theme_professional_light": "Professional Light",
     "theme_professional_dark": "Professional Dark",
+    "theme_minimal": "Minimal",
     "auto": "Auto",
     "directlink_usb": "DirectLink USB",
     "silverlink_usb": "SilverLink (Graph Link USB)",
@@ -990,14 +991,42 @@ function setTextContent(element, value) {
     }
 }
 
-function setButtonText(element, text) {
+function isMinimalTheme() {
+    return document.body.dataset.theme === 'minimal';
+}
+
+function iconMarkup(name) {
+    return `<svg class="icon" aria-hidden="true"><use href="#icon-${name}"></use></svg>`;
+}
+
+function themeIconMarkup(name, emoji) {
+    const glyph = isMinimalTheme() ? iconMarkup(name) : escapeHtml(emoji);
+    return `<span class="theme-icon" data-icon="${escapeHtml(name)}" data-emoji="${escapeHtml(emoji)}" aria-hidden="true">${glyph}</span>`;
+}
+
+function updateThemeIcons() {
+    // Only replace glyphs: changing theme must preserve controls, loading state,
+    // selected variables, and the existing sticky-folder header.
+    document.querySelectorAll('.theme-icon').forEach(element => {
+        if (isMinimalTheme()) {
+            element.innerHTML = iconMarkup(element.dataset.icon);
+        } else {
+            element.textContent = element.dataset.emoji;
+        }
+    });
+}
+
+// Renders either "<emoji> <label>" (legacy themes) or a Feather-icon + label
+// (Minimal theme, which drops emoji in favor of plain glyphs). Preserves any
+// child badge nodes (e.g. the settings update dot) across the re-render.
+function setIconLabel(element, iconName, label, emoji) {
     if (!element) {
         return;
     }
-    const dot = element.querySelector('.settings-update-dot');
-    element.textContent = text;
-    if (dot) {
-        element.appendChild(dot);
+    const preserved = element.querySelector('.settings-update-dot');
+    element.innerHTML = `${themeIconMarkup(iconName, emoji)} ${escapeHtml(label)}`;
+    if (preserved) {
+        element.appendChild(preserved);
     }
 }
 
@@ -3161,7 +3190,8 @@ const THEMES = [
     { id: 'light-modern', labelKey: 'theme_light_modern' },
     { id: 'retro', labelKey: 'theme_retro' },
     { id: 'professional-light', labelKey: 'theme_professional_light' },
-    { id: 'professional-dark', labelKey: 'theme_professional_dark' }
+    { id: 'professional-dark', labelKey: 'theme_professional_dark' },
+    { id: 'minimal', labelKey: 'theme_minimal' }
 ];
 
 function getCalcModelLabel(value) {
@@ -3294,6 +3324,7 @@ function applyTheme(themeId) {
     document.body.dataset.theme = target;
     localStorage.setItem(THEME_STORAGE_KEY, target);
     updateThemeButton();
+    updateThemeIcons();
 }
 
 function updateThemeButton() {
@@ -3924,47 +3955,47 @@ async function applyTranslations() {
     document.documentElement.dir = state.uiLanguage === 'fa' ? 'rtl' : 'ltr';
 
     setTextContent(document.getElementById('brandSubtitle'), t('brand_subtitle'));
-    setButtonText(els.btnSettings, `⚙️ ${t('settings')}`);
-    setTextContent(els.btnConnect, `🔌 ${t('connect_calculator')}`);
+    setIconLabel(els.btnSettings, 'settings', t('settings'), '⚙️');
+    setIconLabel(els.btnConnect, 'zap', t('connect_calculator'), '🔌');
     setTextContent(document.getElementById('splashTitle'), t('welcome_title'));
     setTextContent(document.getElementById('splashText'), t('welcome_text'));
     setTextContent(document.getElementById('splashWebUsbWarningTitle'), t('webusb_unavailable_title'));
     setTextContent(document.getElementById('splashWebUsbWarningText'), t('webusb_unavailable_text'));
-    setTextContent(els.btnSplashConnect, `🔌 ${t('connect_calculator')}`);
+    setIconLabel(els.btnSplashConnect, 'zap', t('connect_calculator'), '🔌');
 
     setTextContent(document.getElementById('panelDeviceTitle'), t('device'));
     setTextContent(document.getElementById('labelModel'), t('model'));
     setTextContent(document.getElementById('labelFreeMemory'), t('free_memory'));
-    setTextContent(els.btnGetInfo, `ℹ️ ${t('refresh_device_info')}`);
-    setTextContent(els.btnSyncClock, `🕒 ${t('sync_clock')}`);
+    setIconLabel(els.btnGetInfo, 'info', t('refresh_device_info'), 'ℹ️');
+    setIconLabel(els.btnSyncClock, 'clock', t('sync_clock'), '🕒');
 
     setTextContent(document.getElementById('panelTransfersTitle'), t('transfers'));
-    setTextContent(els.btnIsReady, `✅ ${t('is_ready')}`);
+    setIconLabel(els.btnIsReady, 'check', t('is_ready'), '✅');
     setTextContent(document.getElementById('dropzoneTitle'), t('dropzone_title'));
     setTextContent(document.getElementById('dropzoneSubtitle'), t('dropzone_subtitle'));
-    setTextContent(els.btnSendFiles, `📤 ${t('send_selected_files')}`);
-    setTextContent(els.btnReceiveBackup, `📥  ${t('make_backup')}`);
+    setIconLabel(els.btnSendFiles, 'upload', t('send_selected_files'), '📤');
+    setIconLabel(els.btnReceiveBackup, 'archive', t('make_backup'), '📥');
+    setIconLabel(els.btnReceiveOs, 'download', t('receive_os'), '📥');
+    setIconLabel(els.btnDownloadOsPartial, 'download', t('download_os_so_far'), '⬇️');
+    setIconLabel(els.btnDumpRom, 'cpu', t('dump_rom'), '🧠');
+    setIconLabel(els.btnLeaveExam, 'log-out', t('leave_exam_mode'), '👨‍🎓');
     setTextContent(els.btnBackupDirlist, t('list_from_backup'));
     setTextContent(els.backupDirlistNote, t('backup_dirlist_note'));
-    setTextContent(els.btnReceiveOs, `📥  ${t('receive_os')}`);
-    setTextContent(els.btnDownloadOsPartial, `⬇️  ${t('download_os_so_far')}`);
-    setTextContent(els.btnDumpRom, `🧠  ${t('dump_rom')}`);
-    setTextContent(els.btnLeaveExam, `👨‍🎓  ${t('leave_exam_mode')}`);
 
     setTextContent(document.getElementById('panelKeysTitle'), t('remote_keys'));
     if (els.keyCodeInput) {
         els.keyCodeInput.placeholder = t('key_input_placeholder');
     }
-    setTextContent(els.btnSendKey, `🎯 ${t('send_key')}`);
+    setIconLabel(els.btnSendKey, 'target', t('send_key'), '🎯');
 
     setTextContent(document.getElementById('panelVarsTitle'), t('calculator_variables'));
     if (els.filterInput) {
         els.filterInput.placeholder = t('filter_name_or_type');
     }
-    setTextContent(els.btnRefreshDirlist, `🔄 ${t('refresh_list')}`);
-    setTextContent(els.btnNewFolder, `📁 ${t('new_folder')}`);
-    setTextContent(els.btnRecvSelected, `⬇️ ${t('receive_selected')}`);
-    setTextContent(els.btnDeleteSelected, `🗑️ ${t('delete_selected')}`);
+    setIconLabel(els.btnRefreshDirlist, 'refresh-cw', t('refresh_list'), '🔄');
+    setIconLabel(els.btnNewFolder, 'folder-plus', t('new_folder'), '📁');
+    setIconLabel(els.btnRecvSelected, 'download', t('receive_selected'), '⬇️');
+    setIconLabel(els.btnDeleteSelected, 'trash-2', t('delete_selected'), '🗑️');
     setTextContent(document.getElementById('varsHeaderName'), t('name'));
     setTextContent(document.getElementById('varsHeaderType'), t('type'));
     setTextContent(document.getElementById('varsHeaderSize'), t('size'));
@@ -3972,16 +4003,16 @@ async function applyTranslations() {
     setTextContent(document.getElementById('varsHeaderFolder'), t('folder'));
     setTextContent(document.getElementById('varsHeaderKind'), t('kind'));
     setTextContent(els.previewReindentLabel, t('reindent'));
-    setTextContent(els.btnDownloadPreview, `⬇️ ${t('download')}`);
+    setIconLabel(els.btnDownloadPreview, 'download', t('download'), '⬇️');
     setTextContent(els.previewDownloadLabel, `${t('download')}:`);
     els.previewBasicDownloads?.setAttribute('aria-label', t('download'));
     setTextContent(els.btnDismissPreview, t('close'));
 
     setTextContent(document.getElementById('panelScreenshotTitle'), t('screenshot'));
-    setTextContent(els.btnScreenshot, `📸 ${t('take_screenshot')}`);
-    setTextContent(els.btnDownloadScreenshot, `⬇️ ${t('download_png')}`);
+    setIconLabel(els.btnScreenshot, 'camera', t('take_screenshot'), '📸');
+    setIconLabel(els.btnDownloadScreenshot, 'download', t('download_png'), '⬇️');
     setTextContent(document.getElementById('panelLogTitle'), t('activity_log'));
-    setTextContent(els.btnClearLog, `🧹 ${t('clear_log')}`);
+    setIconLabel(els.btnClearLog, 'x-circle', t('clear_log'), '🧹');
 
     setTextContent(document.getElementById('settingsTitle'), t('settings_title'));
     setTextContent(document.getElementById('settingCableLabel'), t('cable'));
@@ -3993,10 +4024,10 @@ async function applyTranslations() {
     setTextContent(document.getElementById('settingConvertPythonFilesLabel'), t('convert_python_files'));
     setTextContent(document.getElementById('settingsNote'), t('settings_note'));
     setTextContent(document.getElementById('offlineBannerText'), state.offlineUpdateShown ? t('offline_update_available') : t('offline_ready'));
-    setTextContent(els.btnReloadOffline, `↻ ${t('reload_for_update')}`);
+    setIconLabel(els.btnReloadOffline, 'refresh-cw', t('reload_for_update'), '↻');
     setTextContent(els.btnClearOfflineCache, t('clear_offline_cache'));
-    setTextContent(els.btnResetSettings, `↩️ ${t('reset_defaults')}`);
-    setTextContent(els.btnSaveSettings, `💾 ${t('save_settings')}`);
+    setIconLabel(els.btnResetSettings, 'rotate-ccw', t('reset_defaults'), '↩️');
+    setIconLabel(els.btnSaveSettings, 'save', t('save_settings'), '💾');
 
     setTextContent(document.getElementById('transferTitle'), t('transfer_options'));
     setTextContent(document.getElementById('transferHeaderFile'), t('file'));
@@ -4010,7 +4041,7 @@ async function applyTranslations() {
     setTextContent(els.btnTransferAllRam, t('transfer_all_ram'));
     setTextContent(els.btnTransferAllArchive, t('transfer_all_archive'));
     setTextContent(els.btnCancelTransfer, t('cancel'));
-    setTextContent(els.btnConfirmTransfer, `🚀 ${t('start_transfer')}`);
+    setIconLabel(els.btnConfirmTransfer, 'send', t('start_transfer'), '🚀');
 
     setTextContent(document.getElementById('newFolderTitle'), t('create_folder'));
     setTextContent(document.getElementById('newFolderNameLabel'), t('folder_name'));
@@ -4033,7 +4064,7 @@ async function applyTranslations() {
     setTextContent(document.getElementById('backupNote'), t('backup_note'));
     setTextContent(document.getElementById('backupModalOverlayText'), t('loading_dirlist'));
     setTextContent(els.btnCancelBackup, t('cancel'));
-    setTextContent(els.btnConfirmBackup, `📥 ${t('create_backup')}`);
+    setIconLabel(els.btnConfirmBackup, 'archive', t('create_backup'), '📥');
     setTextContent(els.btnCloseConnectionHelp, t('close'));
     updateTransportSplashState();
 
@@ -4439,8 +4470,7 @@ function formatMemoryValue(value) {
 
 function setStatus(text, active) {
     syncStatusTranslation(text);
-    els.statusDot.style.background = active ? '#4fd3b4' : '#586178';
-    els.statusDot.style.boxShadow = active ? '0 0 0 4px rgba(79, 211, 180, 0.2)' : '0 0 0 4px rgba(88, 97, 120, 0.2)';
+    els.statusDot.classList.toggle('is-active', Boolean(active));
 }
 
 function setConnected(connected) {
@@ -6541,16 +6571,16 @@ function renderTableView(entries, filter) {
         const canPreview = canPreviewVariable(entry, previewModelId);
         const rowActions = `
             <div class="row-actions">
-                ${canPreview ? `<button class="btn ghost btn-inline action-preview" title="${escapeHtml(t('preview'))}" aria-label="${escapeHtml(t('preview'))}">👁️</button>` : ''}
-                ${entry.kind === 'backup-var' ? '' : '<button class="btn ghost btn-inline action-download" title="Download">⬇️</button>'}
-                ${canRename ? '<button class="btn ghost btn-inline action-rename" title="Rename">✏️</button>' : ''}
-                ${canDelete ? '<button class="btn ghost btn-inline action-delete" title="Delete">🗑️</button>' : ''}
+                ${canPreview ? `<button class="btn ghost btn-inline action-preview" title="${escapeHtml(t('preview'))}" aria-label="${escapeHtml(t('preview'))}">${themeIconMarkup('eye', '👁️')}</button>` : ''}
+                ${entry.kind === 'backup-var' ? '' : `<button class="btn ghost btn-inline action-download" title="Download">${themeIconMarkup('download', '⬇️')}</button>`}
+                ${canRename ? `<button class="btn ghost btn-inline action-rename" title="Rename">${themeIconMarkup('edit-2', '✏️')}</button>` : ''}
+                ${canDelete ? `<button class="btn ghost btn-inline action-delete" title="Delete">${themeIconMarkup('trash-2', '🗑️')}</button>` : ''}
             </div>`;
         const toggleButton = isFolder
             ? `<button class="folder-toggle" type="button" data-folder-path="${safeFolderPath}" aria-label="${options.expanded ? 'Collapse folder' : 'Expand folder'}">${options.expanded ? '▾' : '▸'}</button>`
             : '';
         const displayName = isFolder
-            ? `<span class="folder-icon" data-folder-path="${safeFolderPath}">📂</span> ${safeName}`
+            ? `<span class="folder-icon" data-folder-path="${safeFolderPath}">${themeIconMarkup('folder', '📂')}</span> ${safeName}`
             : `${safeName}${integrityWarning}`;
         const summaryText = options.summary ? `<em class="folder-summary">(${options.summary})</em>` : '';
         row.innerHTML = `
@@ -7336,7 +7366,8 @@ function updateStickyFolderHeader() {
         return;
     }
     tbody.innerHTML = '';
-    const label = parts.length ? `📂 ${escapeHtml(parts.join(' > '))}` : '📂';
+    const folderGlyph = themeIconMarkup('folder', '📂');
+    const label = parts.length ? `${folderGlyph} ${escapeHtml(parts.join(' > '))}` : folderGlyph;
     const padCell = current.querySelector('td');
     const padWidth = padCell ? padCell.offsetWidth : 0;
     const tr = document.createElement('tr');
