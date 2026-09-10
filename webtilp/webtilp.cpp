@@ -47,14 +47,34 @@ enum {
     WEBTILP_EVO_TYPE_IMAGE = 5,
     WEBTILP_EVO_TYPE_GROUP = 9,
     WEBTILP_EVO_TYPE_FLASH_APP = 11,
-    WEBTILP_EVO_TYPE_RCL_WINDOW = 13
+    WEBTILP_EVO_TYPE_RCL_WINDOW = 13,
+    WEBTILP_EVO_TYPE_PYTHON_SCRIPT = 15,
+    WEBTILP_EVO_TYPE_PYTHON_MODULE = 18
 };
+
+// Zero means unknown: leave the file alone and let the DP fallback decide.
+static inline unsigned int evo_python_type_for_os(const char *version)
+{
+    if (!version) return 0;
+    unsigned int parts[4] = {};
+    for (unsigned int i = 0; i < 4; i++) {
+        if (*version < '0' || *version > '9') return 0;
+        while (*version >= '0' && *version <= '9') {
+            parts[i] = parts[i] * 10 + (*version++ - '0');
+            if (parts[i] > 65535) return 0;
+        }
+        if (i < 3 && *version++ != '.') return 0;
+    }
+    if (*version || parts[0] < 7) return 0;
+    return parts[0] == 7 && parts[1] == 0 ? WEBTILP_EVO_TYPE_PYTHON_SCRIPT : WEBTILP_EVO_TYPE_PYTHON_MODULE;
+}
 
 static CableModel g_cable_model = CABLE_USB;
 static CalcModel g_calc_model;
 static CalcHandle* g_calc_handle = nullptr;
 static int g_calc_attached = 0;
 static int g_calc_ready = 0;
+static unsigned int g_evo_python_type = 0;
 static CableHandle* g_cable_handle = nullptr;
 static int g_force_cable = 0;
 static int g_force_calc = 0;
@@ -128,6 +148,7 @@ static uint8_t rclwindw_type_for_model(CalcModel model)
 
 static void reset_calc_handle_state(void)
 {
+    g_evo_python_type = 0;
     if (g_calc_handle) {
         if (g_calc_attached) {
             ticalcs_cable_detach(g_calc_handle);
@@ -938,6 +959,7 @@ int receive_data(CableHandle* handle) {
 
 EMSCRIPTEN_KEEPALIVE
 int close_cable(CableHandle* handle) {
+    g_evo_python_type = 0;
     if (!handle) {
         printf("ERROR: NULL handle provided\n");
         return -1;
@@ -955,6 +977,7 @@ int close_cable(CableHandle* handle) {
 
 EMSCRIPTEN_KEEPALIVE
 int cleanup() {
+    g_evo_python_type = 0;
     printf("library exits...\n");
     const int result_hp = hp_prime_library_exit();
     if (g_calc_handle) {
@@ -1131,6 +1154,7 @@ int calc_send_key(CableHandle* cable_handle, uint32_t key) {
 
 EMSCRIPTEN_KEEPALIVE
 const char* calc_get_info_string(CableHandle* cable_handle) {
+    g_evo_python_type = 0;
     if (!cable_handle) {
         printf("ERROR: NULL cable handle provided\n");
         return "";
@@ -1160,6 +1184,9 @@ const char* calc_get_info_string(CableHandle* cable_handle) {
     }
 
     update_calc_model_from_infos(&infos);
+    if (ticonv_model_is_tievo(g_calc_model) && (infos.mask & INFOS_OS_VERSION)) {
+        g_evo_python_type = evo_python_type_for_os(infos.os_version);
+    }
     return info_buf;
 }
 
@@ -1744,10 +1771,14 @@ static unsigned int compute_location_mask_for_entry(const VarEntry* ve) {
     }
 
     if (ticonv_model_is_tievo(g_calc_model)) {
+        if (tifiles_evo_is_python_module(ve->data, ve->size)) {
+            return LOC_ARCHIVE;
+        }
         switch (ve->type) {
             case WEBTILP_EVO_TYPE_PICTURE:
             case WEBTILP_EVO_TYPE_IMAGE:
             case WEBTILP_EVO_TYPE_GROUP:
+            case WEBTILP_EVO_TYPE_PYTHON_MODULE:
                 return LOC_ARCHIVE;
             case WEBTILP_EVO_TYPE_FLASH_APP:
                 // The generic type-11 transfer is only a RAM staging path.
@@ -2030,6 +2061,22 @@ static void apply_var_entry_overrides(VarEntry* ve, const char* folder, int loca
         }
     } else if (location != -1) {
         printf("WARN: Unknown location override %d\n", location);
+    }
+
+    // This is a transient entry loaded for sending, not the user's source file.
+    // Use the current connection's device info to avoid a known-bad first send.
+    if (ticonv_model_is_tievo(g_calc_model) && g_evo_python_type
+        && ve->type != g_evo_python_type && tifiles_evo_is_python_module(ve->data, ve->size)) {
+        uint8_t* converted = nullptr;
+        uint32_t converted_size = 0;
+        if (!tifiles_evo_repack_python_module(ve->data, ve->size, &converted, &converted_size)) {
+            printf("Repackaging %s as %s for the connected Evo OS\n", ve->name, g_evo_python_type == 18 ? "8mp2" : "8xpy2");
+            tifiles_ve_free_data(ve->data);
+            ve->data = converted;
+            ve->size = converted_size;
+            ve->type = (uint8_t)g_evo_python_type;
+            ve->attr = ATTRB_ARCHIVED;
+        }
     }
 }
 
