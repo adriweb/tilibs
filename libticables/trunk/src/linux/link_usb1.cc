@@ -237,6 +237,19 @@ static void tigl_get_product(char * string, unsigned int maxlen, struct libusb_d
 	}
 }
 
+void usb_clear_device_info(void)
+{
+	for (int i = 0; i < tigl_n_devices; i++)
+	{
+		if (tigl_devices[i].dev != NULL)
+		{
+			libusb_unref_device((libusb_device *)tigl_devices[i].dev);
+		}
+	}
+	memset(tigl_devices, 0, sizeof(tigl_devices));
+	tigl_n_devices = 0;
+}
+
 static int tigl_find(void)
 {
 	// discover devices
@@ -245,20 +258,25 @@ static int tigl_find(void)
 	int j = 0;
 	int k;
 
-	memset(tigl_devices, 0, sizeof(tigl_devices));
-	tigl_n_devices = 0;
-
 #if defined(__EMSCRIPTEN__)
 	if (evo_serial_has_bound_device())
 	{
+		usb_clear_device_info();
 		tigl_n_devices = evo_serial_add_devices(tigl_devices, 0, MAX_CABLES, VID_TI, PID_TI84EVO);
 		return tigl_n_devices;
 	}
 #endif
 
 	ssize_t cnt = libusb_get_device_list(NULL, &list);
+	// Keep the previous cache alive until the new list owns its references.
+	// WebUSB can then reuse cached descriptors across successive probes.
+	usb_clear_device_info();
 	if (cnt <= 0)
 	{
+		if (cnt == 0)
+		{
+			libusb_free_device_list(list, 1);
+		}
 		tigl_n_devices = evo_serial_add_devices(tigl_devices, 0, MAX_CABLES, VID_TI, PID_TI84EVO);
 		return tigl_n_devices;
 	}
@@ -271,6 +289,8 @@ static int tigl_find(void)
 		if (r < 0)
 		{
 			fprintf(stderr, "failed to get device descriptor");
+			libusb_free_device_list(list, 1);
+			usb_clear_device_info();
 			return r;
 		}
 		if (desc.idVendor == VID_TI || desc.idVendor == VID_VERNIER)
@@ -292,11 +312,13 @@ static int tigl_find(void)
 						      desc.bcdDevice >> 8,
 						      desc.bcdDevice & 0xff);
 
-					tigl_devices[j++].dev = device;
+					// The cache owns a reference independently of the enumeration list.
+					tigl_devices[j++].dev = libusb_ref_device(device);
 					tigl_n_devices = j;
 
 					if (j >= MAX_CABLES)
 					{
+						libusb_free_device_list(list, 1);
 						return j;
 					}
 				}
@@ -319,6 +341,7 @@ static int tigl_find(void)
 #endif
 		tigl_n_devices = j;
 	}
+	libusb_free_device_list(list, 1);
 	return j;
 }
 
@@ -328,6 +351,10 @@ static int tigl_enum(void)
 
 	/* find all TI products on all ports */
 	ret = tigl_find();
+	if (ret < 0)
+	{
+		return ret;
+	}
 	if (ret == 0)
 	{
 		ticables_warning("%s", _("no devices found!\n"));
