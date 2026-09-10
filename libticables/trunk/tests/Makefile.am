@@ -2,7 +2,7 @@
 
 AM_CPPFLAGS = -I$(top_srcdir)/src
 
-EXTRA_DIST = ticables2.supp vcheck
+EXTRA_DIST = ticables2.supp vcheck test_usb_enumeration.cc
 
 noinst_PROGRAMS = test_ticables_2 torture_ticables
 

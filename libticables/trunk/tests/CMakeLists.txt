@@ -7,6 +7,19 @@ add_executable(torture_ticables torture_ticables.c)
 add_executable(test_ticables_2 test_ticables_2.cc)
 if(NOT WIN32)
     add_executable(test_usb_endpoints test_usb_endpoints.cc)
+    if(NOT EMSCRIPTEN)
+        # This harness compiles the real USB backend with mocked enumeration;
+        # discard the unused transport methods and their platform dependencies.
+        add_executable(test_usb_enumeration test_usb_enumeration.cc)
+        target_compile_definitions(test_usb_enumeration PRIVATE HAVE_LIBUSB10_STRERROR=1 PACKAGE="libticables2")
+        target_compile_options(test_usb_enumeration PRIVATE -ffunction-sections -fdata-sections)
+        if(APPLE)
+            target_link_options(test_usb_enumeration PRIVATE -Wl,-dead_strip)
+        else()
+            target_link_options(test_usb_enumeration PRIVATE -Wl,--gc-sections)
+        endif()
+        target_link_libraries(test_usb_enumeration PRIVATE PkgConfig::glib PkgConfig::libusb)
+    endif()
 endif()
 
 set(TICABLES_TEST_TARGETS torture_ticables test_ticables_2)
@@ -28,10 +41,17 @@ foreach(tar ${TICABLES_TEST_TARGETS})
 endforeach()
 
 if(NOT WIN32)
+    set(TICABLES_USB_ENUMERATION_COMMAND)
+    set(TICABLES_USB_ENUMERATION_DEPENDENCY)
+    if(TARGET test_usb_enumeration)
+        set(TICABLES_USB_ENUMERATION_COMMAND COMMAND "$<TARGET_FILE:test_usb_enumeration>")
+        set(TICABLES_USB_ENUMERATION_DEPENDENCY test_usb_enumeration)
+    endif()
     add_custom_target(ticables2_check
         COMMAND "$<TARGET_FILE:torture_ticables>"
         COMMAND "$<TARGET_FILE:test_usb_endpoints>"
-        DEPENDS torture_ticables test_usb_endpoints
+        ${TICABLES_USB_ENUMERATION_COMMAND}
+        DEPENDS torture_ticables test_usb_endpoints ${TICABLES_USB_ENUMERATION_DEPENDENCY}
         COMMENT "Run the ticables2 torture tests"
         EXCLUDE_FROM_ALL
     )
