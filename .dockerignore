@@ -1,0 +1,38 @@
+# git / editors / OS cruft
+.git
+**/.git
+.github
+.agents
+.codex
+.idea
+.vs
+.DS_Store
+
+# Locally built native artifacts (Dockerfile builds these itself from scratch)
+build-emscripten/
+build-wasm-deps/
+wasm-deps/
+glib-emscripten-built/
+libusb/
+libarchive/
+cmake-build-*/
+tilibs.build/
+tifileutil/testData/
+
+# webtilp build outputs (Dockerfile builds these itself)
+webtilp/app.bundle.js*
+webtilp/numworks_backend.bundle.js*
+webtilp/build-profile.css
+webtilp/webtilp.js
+webtilp/webtilp_prejs.js
+webtilp/webtilp.wasm
+webtilp/webtilp.worker.js
+webtilp/TIVarsLib.js
+webtilp/TIVarsLib.wasm
+webtilp/WebLuna.js
+webtilp/WebLuna.wasm
+webtilp/version.json
+webtilp/sw.js
+
+# Native (non-wasm) build dirs, unrelated to the web build
+win32_config/

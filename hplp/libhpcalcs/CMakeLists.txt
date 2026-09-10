@@ -48,6 +48,8 @@ if(EMSCRIPTEN)
     if(TARGET ZLIB::ZLIB)
         target_link_libraries(hpcalcs PRIVATE ZLIB::ZLIB)
     else()
+        # prime_cmd.c needs the port headers while compiling as well as linking.
+        target_compile_options(hpcalcs PRIVATE -sUSE_ZLIB=1)
         target_link_options(hpcalcs INTERFACE -sUSE_ZLIB=1)
     endif()
 else()
