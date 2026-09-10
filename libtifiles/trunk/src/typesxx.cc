@@ -54,6 +54,7 @@ static const char *evo_byte2type(uint8_t data)
 	case 13: return "ZSTO";
 	case 14: return "TABLE";
 	case 15: return "PYTHON";
+	case 18: return "MPY";
 	default: return "";
 	}
 }
@@ -77,6 +78,7 @@ static uint8_t evo_type2byte(const char *s)
 	if (!g_ascii_strcasecmp(s, "ZSTO")) return 13;
 	if (!g_ascii_strcasecmp(s, "TABLE")) return 14;
 	if (!g_ascii_strcasecmp(s, "PYTHON")) return 15;
+	if (!g_ascii_strcasecmp(s, "MPY")) return 18;
 	return 8;
 }
 
@@ -100,6 +102,7 @@ static const char *evo_byte2fext(uint8_t data)
 	case 13: return "8xz2";
 	case 14: return "8xt2";
 	case 15: return "8xpy2";
+	case 18: return "8mp2";
 	default: return "8x?2";
 	}
 }
@@ -123,6 +126,7 @@ static uint8_t evo_fext2byte(const char *s)
 	if (!g_ascii_strcasecmp(s, "8xz2")) return 13;
 	if (!g_ascii_strcasecmp(s, "8xt2")) return 14;
 	if (!g_ascii_strcasecmp(s, "8xpy2")) return 15;
+	if (!g_ascii_strcasecmp(s, "8mp2")) return 18;
 	return 8;
 }
 
@@ -146,6 +150,7 @@ static const char *evo_byte2desc(uint8_t data)
 	case 13: return N_("Zoom");
 	case 14: return N_("Table Setup");
 	case 15: return N_("Python Script");
+	case 18: return N_("Python Module");
 	default: return N_("Unknown");
 	}
 }

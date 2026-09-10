@@ -18,6 +18,8 @@ TICALCS_TESTABLE int evo_kermit_packet_remainder(uint8_t length, const uint8_t *
 TICALCS_TESTABLE EvoKermitSequenceState evo_kermit_sequence_state(int have_previous, uint8_t previous, uint8_t received);
 TICALCS_TESTABLE int evo_kermit_duplicate_retry_allowed(size_t duplicate_count);
 TICALCS_TESTABLE int evo_kermit_size_within_limit(size_t current, size_t additional, size_t limit);
+TICALCS_TESTABLE int evo_send_file_payload(CalcHandle *handle, const VarEntry *entry,
+                                           int (*put)(CalcHandle *, const char *, const uint8_t *, size_t));
 int evo_get_request(CalcHandle *handle, const char *url, uint8_t **payload, size_t *payload_len);
 int evo_put_request(CalcHandle *handle, const char *url, const uint8_t *payload, size_t payload_len);
 int evo_put_request_ignore_final_status(CalcHandle *handle, const char *url, const uint8_t *payload, size_t payload_len);
