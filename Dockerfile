@@ -193,6 +193,7 @@ COPY libticables ./libticables
 COPY libticalcs ./libticalcs
 COPY libtifiles ./libtifiles
 COPY libticonv ./libticonv
+COPY hplp ./hplp
 COPY --from=deps /work/tilibs/glib-emscripten-built ./glib-emscripten-built
 COPY --from=deps /work/tilibs/libusb ./libusb
 COPY --from=deps /work/tilibs/libarchive ./libarchive
@@ -233,13 +234,13 @@ COPY libticables ./libticables
 COPY libticalcs ./libticalcs
 COPY libtifiles ./libtifiles
 COPY libticonv ./libticonv
+COPY hplp ./hplp
 COPY webtilp ./webtilp
 
-# bun is only needed to minify app.js for the "prod" profile.
-RUN if [ "$BUILD_PROFILE" = "prod" ]; then \
-        curl -fsSL https://bun.sh/install | bash && \
-        ln -s /root/.bun/bin/bun /usr/local/bin/bun; \
-    fi
+# bun bundles the NumWorks backend (numworks_backend.bundle.js) for both
+# profiles, and additionally minifies app.js for "prod".
+RUN curl -fsSL https://bun.sh/install | bash && \
+    ln -s /root/.bun/bin/bun /usr/local/bin/bun
 
 WORKDIR /work/tilibs/webtilp
 RUN make "$BUILD_PROFILE" \
@@ -247,11 +248,17 @@ RUN make "$BUILD_PROFILE" \
         LUNA_DIR=/work/tilibs/Luna_src/emscripten \
         BUILD_SHA="$BUILD_SHA"
 
-# Drop build-only files that shouldn't be served at runtime.
-RUN rm -f webtilp.cpp Makefile .htaccess sw.js.in \
+# Drop build-only files that shouldn't be served at runtime. third_party/
+# and NUMWORKS.md are kept: the bundle's license banner points readers at
+# third_party/NUMWORKS-PROVENANCE.md, so it needs to still resolve.
+RUN rm -f webtilp.cpp hp_prime_bridge.cpp hp_prime_app.cpp hp_prime_app.h \
+        Makefile .htaccess sw.js.in \
         webtilp_prejs.js webtilp_prejs_dev.js webtilp_prejs_prod.js \
         webtilp.png webtilp_medium.png webtilp_noshadow.png \
-        i18n/check.py
+        numworks_backend.js numworks_backend_entry.mjs \
+        numworks_storage.js numworks_platform.js numworks_transport.js \
+        i18n/check.py \
+    && rm -rf tests
 
 ########################################################################
 # runner: nginx serving the built app with the COOP/COEP headers the wasm

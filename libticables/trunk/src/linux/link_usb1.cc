@@ -248,6 +248,7 @@ static int tigl_find(void)
 		if (r < 0)
 		{
 			fprintf(stderr, "failed to get device descriptor");
+			libusb_free_device_list(list, 0);
 			return r;
 		}
 		if (desc.idVendor == VID_TI)
@@ -274,6 +275,7 @@ static int tigl_find(void)
 
 					if (j >= MAX_CABLES)
 					{
+						libusb_free_device_list(list, 0);
 						return j;
 					}
 				}
@@ -296,6 +298,7 @@ static int tigl_find(void)
 #endif
 		tigl_n_devices = j;
 	}
+	libusb_free_device_list(list, 0);
 	return j;
 }
 
