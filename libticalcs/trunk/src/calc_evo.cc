@@ -33,6 +33,7 @@
 #define EVO_TYPE_RCL_WINDOW 13
 #define EVO_TYPE_TABLE_SETUP 14
 #define EVO_TYPE_PYTHON_SCRIPT 15
+#define EVO_TYPE_PYTHON_MODULE 18
 
 #define EVO_SCREEN_WIDTH 320
 #define EVO_SCREEN_HEIGHT 240
@@ -748,6 +749,40 @@ static int get_dirlist(CalcHandle *handle, GNode **vars, GNode **apps)
 	return 0;
 }
 
+TICALCS_TESTABLE int evo_send_file_payload(CalcHandle *handle, const VarEntry *ve,
+                                           int (*put)(CalcHandle *, const char *, const uint8_t *, size_t))
+{
+	const int module = ve->type == EVO_TYPE_PYTHON_MODULE || tifiles_evo_is_python_module(ve->data, ve->size);
+	unsigned int archive = ve->attr == ATTRB_ARCHIVED;
+	if (ve->type == EVO_TYPE_PICTURE || ve->type == EVO_TYPE_IMAGE || ve->type == EVO_TYPE_GROUP || module)
+	{
+		archive = 1;
+	}
+	else if (ve->type == EVO_TYPE_FLASH_APP)
+	{
+		// Type 11 is only RAM-staged by the generic endpoint, not installed.
+		archive = 0;
+	}
+	char url[96];
+	snprintf(url, sizeof(url), "hh01/xfr/var?memtarget=%u&policy=1", archive ? 1U : 0U);
+	int ret = put(handle, url, ve->data, ve->size);
+	uint16_t raw = 0;
+	if (module && ret == ERR_EVO_ERROR && !ticalcs_error_get_raw_protocol_code(ret, &raw) && raw == 0x4450) // DP
+	{
+		uint8_t *converted = nullptr;
+		uint32_t converted_size = 0;
+		if (!tifiles_evo_repack_python_module(ve->data, ve->size, &converted, &converted_size))
+		{
+			ticalcs_info("Bytecode wrapper rejected (DP); retrying %s as %s in Archive",
+						 ve->name, ve->type == EVO_TYPE_PYTHON_MODULE ? "8xpy2" : "8mp2");
+			// Deliberately no recursive fallback: preserve the second error.
+			ret = put(handle, url, converted, converted_size);
+			tifiles_ve_free_data(converted);
+		}
+	}
+	return ret;
+}
+
 static int send_var(CalcHandle *handle, CalcMode mode, FileContent *content)
 {
 	VALIDATE_FILECONTENT(content);
@@ -765,20 +800,7 @@ static int send_var(CalcHandle *handle, CalcMode mode, FileContent *content)
 		ticonv_utf8_free(utf8);
 		ticalcs_update_label(handle);
 
-		unsigned int archive = ve->attr == ATTRB_ARCHIVED;
-		if (ve->type == EVO_TYPE_PICTURE || ve->type == EVO_TYPE_IMAGE || ve->type == EVO_TYPE_GROUP)
-		{
-			archive = 1;
-		}
-		else if (ve->type == EVO_TYPE_FLASH_APP)
-		{
-			// Type 11 is only accepted by the generic transfer endpoint as a
-			// RAM-staged object. Installing it as an application is a separate path.
-			archive = 0;
-		}
-		char url[96];
-		snprintf(url, sizeof(url), "hh01/xfr/var?memtarget=%u&policy=1", archive ? 1U : 0U);
-		const int ret = evo_put_request(handle, url, ve->data, ve->size);
+		const int ret = evo_send_file_payload(handle, ve, evo_put_request);
 		if (ret) return ret;
 	}
 	return 0;
