@@ -31,6 +31,8 @@
 #define EVO_TYPE_WINDOW 12
 #define EVO_TYPE_RCL_WINDOW 13
 #define EVO_TYPE_TABLE_SETUP 14
+#define EVO_TYPE_PYTHON_SCRIPT 15
+#define EVO_TYPE_PYTHON_MODULE 18
 
 typedef struct
 {
@@ -44,6 +46,11 @@ typedef struct
 	uint8_t type;
 	uint8_t *name;
 	size_t name_len;
+	const uint8_t *payload;
+	size_t payload_len;
+	uint64_t version, file_version, payload_size, flags;
+	unsigned int fields, meta_fields;
+	int unfamiliar;
 } EvoFileMeta;
 
 typedef struct
@@ -606,7 +613,7 @@ static int evo_cbor_map_done(EvoCborReader *r, uint64_t index, uint64_t count, i
 	return 0;
 }
 
-static int evo_parse_metadata(EvoCborReader *r, EvoFileMeta *meta)
+static int evo_parse_metadata(EvoCborReader *r, EvoFileMeta *meta, int inspect_python)
 {
 	uint64_t count;
 	int indefinite;
@@ -622,25 +629,41 @@ static int evo_parse_metadata(EvoCborReader *r, EvoFileMeta *meta)
 		{
 			return 0;
 		}
+		unsigned int field = 0;
 		if (!strcmp(key, "type"))
 		{
 			uint64_t value;
-			if (!evo_cbor_read_uint_value(r, &value)) return 0;
+			if (!evo_cbor_read_uint_value(r, &value) || value > 255) return 0;
 			meta->type = (uint8_t)value;
+			field = 1;
 		}
 		else if (!strcmp(key, "name"))
 		{
 			if (!evo_cbor_read_bytes_value(r, &meta->name, &meta->name_len)) return 0;
+			field = 2;
 		}
-		else if (!evo_cbor_skip(r, 0))
+		else if (inspect_python && !strcmp(key, "version"))
 		{
-			return 0;
+			if (!evo_cbor_read_uint_value(r, &meta->version)) return 0;
+			field = 4;
 		}
+		else if (inspect_python && !strcmp(key, "flags"))
+		{
+			if (!evo_cbor_read_uint_value(r, &meta->flags)) return 0;
+			field = 8;
+		}
+		else
+		{
+			meta->unfamiliar = 1;
+			if (!evo_cbor_skip(r, 0)) return 0;
+		}
+		if (meta->meta_fields & field) meta->unfamiliar = 1;
+		meta->meta_fields |= field;
 	}
 	return 1;
 }
 
-static int evo_parse_file_meta(const uint8_t *data, size_t len, EvoFileMeta *meta)
+static int evo_parse_file_meta(const uint8_t *data, size_t len, EvoFileMeta *meta, int inspect_python = 0)
 {
 	EvoCborReader r = { data, len >= 2 ? len - 2 : len, 0 };
 	uint64_t count;
@@ -657,16 +680,155 @@ static int evo_parse_file_meta(const uint8_t *data, size_t len, EvoFileMeta *met
 		{
 			return 0;
 		}
+		unsigned int field = 0;
 		if (!strcmp(key, "metaData"))
 		{
-			if (!evo_parse_metadata(&r, meta)) return 0;
+			if (!evo_parse_metadata(&r, meta, inspect_python)) return 0;
+			field = 1;
 		}
-		else if (!evo_cbor_skip(&r, 0))
+		else if (inspect_python && !strcmp(key, "version"))
 		{
-			return 0;
+			if (!evo_cbor_read_uint_value(&r, &meta->file_version)) return 0;
+			field = 2;
 		}
+		else if (inspect_python && !strcmp(key, "size"))
+		{
+			if (!evo_cbor_read_uint_value(&r, &meta->payload_size)) return 0;
+			field = 4;
+		}
+		else if (inspect_python && !strcmp(key, "data"))
+		{
+			uint8_t head;
+			uint64_t size;
+			if (!evo_cbor_read_byte(&r, &head) || (head >> 5) != 2
+			    || !evo_cbor_read_uint_arg(&r, head & 0x1f, &size) || size > r.len - r.off) return 0;
+			meta->payload = r.data + r.off;
+			meta->payload_len = (size_t)size;
+			r.off += (size_t)size;
+			field = 8;
+		}
+		else
+		{
+			meta->unfamiliar = 1;
+			if (!evo_cbor_skip(&r, 0)) return 0;
+		}
+		if (meta->fields & field) meta->unfamiliar = 1;
+		meta->fields |= field;
 	}
-	return meta->name != nullptr;
+	return meta->name != nullptr && r.off == r.len;
+}
+
+static int evo_python_object_valid(const EvoFileMeta *meta)
+{
+	const uint8_t *data = meta->payload;
+	if ((meta->type != EVO_TYPE_PYTHON_SCRIPT && meta->type != EVO_TYPE_PYTHON_MODULE)
+	    || data == nullptr || meta->payload_len < 8 || meta->payload_size != meta->payload_len
+	    || memcmp(data, "\x13\x02\xd8\x20", 4)) return 0;
+	const size_t end = evo_read_le32(data + 4);
+	if (end <= 8 || end > meta->payload_len) return 0;
+	unsigned int seen = 0;
+	for (size_t off = 8; off < end;)
+	{
+		if (end - off < 5) return 0;
+		const size_t len = (size_t)data[off] | ((size_t)data[off + 1] << 8) | ((size_t)data[off + 2] << 16);
+		const unsigned int kind = data[off + 3];
+		if (len > end - off - 5 || data[off + 4 + len] != 0) return 0;
+		if ((kind == 0 && seen != 0) || (kind == 1 && seen != 1)
+		    || (kind == 2 && seen != 1 && seen != 3) || kind > 2) return 0;
+		if (kind == 2 && (len < 4 || memcmp(data + off + 4, "M\x05", 2))) return 0;
+		seen |= 1U << kind;
+		off += 5 + len;
+	}
+	return seen == 5 || seen == 7;
+}
+
+TIEXPORT2 int TICALL tifiles_evo_is_python_module(const uint8_t *data, uint32_t size)
+{
+	EvoFileMeta meta = {};
+	const int valid = evo_file_has_checksum(data, size) && evo_parse_file_meta(data, size, &meta, 1) && evo_python_object_valid(&meta);
+	g_free(meta.name);
+	return valid;
+}
+
+static void evo_cbor_append_arg(GByteArray *out, uint8_t major, uint32_t value)
+{
+	uint8_t bytes[5];
+	unsigned int len;
+	if (value < 24) { bytes[0] = major | (uint8_t)value; len = 1; }
+	else if (value < 256) { bytes[0] = major | 24; bytes[1] = (uint8_t)value; len = 2; }
+	else if (value < 65536)
+	{
+		bytes[0] = major | 25; bytes[1] = (uint8_t)(value >> 8); bytes[2] = (uint8_t)value; len = 3;
+	}
+	else
+	{
+		bytes[0] = major | 26;
+		for (unsigned int i = 0; i < 4; i++) bytes[i + 1] = (uint8_t)(value >> (24 - i * 8));
+		len = 5;
+	}
+	g_byte_array_append(out, bytes, len);
+}
+
+static void evo_cbor_append_key(GByteArray *out, const char *key)
+{
+	const size_t len = strlen(key);
+	evo_cbor_append_arg(out, 0x60, (uint32_t)len);
+	g_byte_array_append(out, (const uint8_t *)key, len);
+}
+
+TIEXPORT2 int TICALL tifiles_evo_repack_python_module(const uint8_t *data, uint32_t size, uint8_t **output, uint32_t *output_size)
+{
+	if (output == nullptr || output_size == nullptr) return ERR_INVALID_FILE;
+	*output = nullptr;
+	*output_size = 0;
+	EvoFileMeta meta = {};
+	int valid = evo_file_has_checksum(data, size) && evo_parse_file_meta(data, size, &meta, 1)
+	    && evo_python_object_valid(&meta) && !meta.unfamiliar && meta.fields == 15
+	    && meta.version == 1 && meta.file_version == 1 && meta.name_len > 0 && !(meta.name_len & 1);
+	const int modern = meta.type == EVO_TYPE_PYTHON_MODULE;
+	size_t name_len = meta.name_len;
+	if (valid && name_len >= 2 && evo_read_le16(meta.name + name_len - 2) == 0) name_len -= 2;
+	if (name_len == 0) valid = 0;
+	for (size_t i = 0; valid && i < name_len; i += 2)
+	{
+		if (evo_read_le16(meta.name + i) == 0) valid = 0;
+	}
+	if (valid)
+	{
+		valid = modern ? (meta.meta_fields == 15 && meta.flags == 1) : meta.meta_fields == 7;
+	}
+	// Bound GByteArray's uint lengths, including the extra wrapper fields.
+	if (!valid || size > G_MAXUINT32 - 128)
+	{
+		g_free(meta.name);
+		return ERR_INVALID_FILE;
+	}
+	const uint8_t start = 0xbf, end = 0xff, zero[] = {0, 0};
+	GByteArray *out = g_byte_array_new();
+	g_byte_array_append(out, &start, 1);
+	evo_cbor_append_key(out, "metaData");
+	g_byte_array_append(out, &start, 1);
+	evo_cbor_append_key(out, "type"); evo_cbor_append_arg(out, 0, modern ? 15 : 18);
+	evo_cbor_append_key(out, "version"); evo_cbor_append_arg(out, 0, 1);
+	if (!modern) { evo_cbor_append_key(out, "flags"); evo_cbor_append_arg(out, 0, 1); }
+	evo_cbor_append_key(out, "name"); evo_cbor_append_arg(out, 0x40, (uint32_t)name_len + (modern ? 0 : 2));
+	g_byte_array_append(out, meta.name, name_len);
+	if (!modern) g_byte_array_append(out, zero, 2);
+	g_byte_array_append(out, &end, 1);
+	evo_cbor_append_key(out, "version"); evo_cbor_append_arg(out, 0, 1);
+	// Preserve stored bytes beyond the Python object's declared size as well.
+	// The OS importer requires neither alignment nor a particular trailer.
+	evo_cbor_append_key(out, "size"); evo_cbor_append_arg(out, 0, (uint32_t)meta.payload_len);
+	evo_cbor_append_key(out, "data"); evo_cbor_append_arg(out, 0x40, (uint32_t)meta.payload_len);
+	g_byte_array_append(out, meta.payload, meta.payload_len);
+	g_byte_array_append(out, &end, 1);
+	const uint16_t checksum = evo_file_checksum(out->data, out->len);
+	const uint8_t sum[] = { (uint8_t)(checksum >> 8), (uint8_t)checksum };
+	g_byte_array_append(out, sum, 2);
+	*output_size = out->len;
+	*output = g_byte_array_free(out, FALSE);
+	g_free(meta.name);
+	return 0;
 }
 
 static int evo_name_word_at(const uint8_t *name, size_t name_len, size_t index, uint16_t *word)
@@ -896,7 +1058,9 @@ int evo_file_read_regular(const char *filename, FileContent *content)
 	entry->type = meta.type;
 	entry->size = (uint32_t)file_size;
 	entry->data = data;
-	if (meta.type == EVO_TYPE_PICTURE || meta.type == EVO_TYPE_IMAGE || meta.type == EVO_TYPE_GROUP)
+	if (meta.type == EVO_TYPE_PICTURE || meta.type == EVO_TYPE_IMAGE || meta.type == EVO_TYPE_GROUP
+	    || meta.type == EVO_TYPE_PYTHON_MODULE
+	    || (meta.type == EVO_TYPE_PYTHON_SCRIPT && tifiles_evo_is_python_module(data, (uint32_t)file_size)))
 	{
 		entry->attr = ATTRB_ARCHIVED;
 	}
