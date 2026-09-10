@@ -219,6 +219,9 @@ int TICALL ticables_library_exit(void)
 #elif defined(HAVE_LIBUSB_1_0)
 	// Must not call libusb_exit() if libusb_init() failed, or call it multiple times.
 	if (ticables_instance == 1 && libusb_working == LIBUSB_SUCCESS) {
+#ifndef NO_CABLE_SLV
+		usb_clear_device_info();
+#endif
 		libusb_exit(nullptr);
 	}
 #endif

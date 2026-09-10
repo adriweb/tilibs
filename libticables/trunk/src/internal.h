@@ -159,6 +159,9 @@ typedef struct {
 } USBCableInfo;
 
 int usb_probe_device_info(const USBCableInfo **list, int *count);
+#if defined(HAVE_LIBUSB_1_0) && !defined(NO_CABLE_SLV)
+void usb_clear_device_info(void);
+#endif
 void translate_usb_device_info(CableDeviceInfo *info, const USBCableInfo *usbinfo);
 
 int dbus_decomp(const char *filename, int resync);
