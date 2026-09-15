@@ -251,6 +251,7 @@
   "status_module_ready": "WebTILP prêt",
   "status_connected": "Connecté",
   "status_connection_failed": "Échec de connexion",
+  "status_evo_serial_authorization_required": "Cliquez à nouveau sur Connecter la calculatrice pour autoriser le port série de l’Evo.",
   "status_disconnected": "Déconnecté",
   "status_device_connected": "Appareil connecté",
   "status_webusb_unsupported": "WebUSB non pris en charge",

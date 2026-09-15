@@ -335,7 +335,7 @@ function isEvoSerialDeviceInfo(info) {
         && info.usbProductId === PID_TI84_EVO_SERIAL;
 }
 
-async function requestTIEvoSerialDevice() {
+async function requestTIEvoSerialDevice(usbDevice = null) {
     if (!navigator.serial) {
         throw new Error('WebSerial is not supported in this browser.');
     }
@@ -343,11 +343,20 @@ async function requestTIEvoSerialDevice() {
         throw new Error('WebSerial requires HTTPS or localhost.');
     }
     try {
+        if (usbDevice && navigator.userActivation?.isActive === false) {
+            throw new DOMException('Serial authorization requires a user gesture.', 'SecurityError');
+        }
         const port = await navigator.serial.requestPort({
             filters: [{ usbVendorId: TI_VENDOR_ID, usbProductId: PID_TI84_EVO_SERIAL }]
         });
         return serialPortToDevice(port, { serialKind: SERIAL_KIND_EVO, productName: 'TI-83/84 Evo' });
     } catch (error) {
+        if (usbDevice && error?.name === 'SecurityError'
+            && /user gesture|user activation/i.test(error.message)) {
+            state.pendingEvoUsbDevice = usbDevice;
+            error.evoSerialAuthorizationRequired = true;
+            throw error;
+        }
         if (error && error.name === 'NotFoundError') {
             console.warn('No TI-83/84 Evo serial device was selected');
             return null;
@@ -384,14 +393,14 @@ async function getAuthorizedEvoSerialDevice(usbDevice = null) {
 }
 
 async function requestEvoSerialForUsbDevice(usbDevice) {
-    if (!isEvoUsbDevice(usbDevice)) {
+    if (isSerialDevice(usbDevice) || !isEvoUsbDevice(usbDevice)) {
         return usbDevice;
     }
     const authorizedSerial = await getAuthorizedEvoSerialDevice(usbDevice);
     if (authorizedSerial) {
         return authorizedSerial;
     }
-    const serialDevice = await requestTIEvoSerialDevice();
+    const serialDevice = await requestTIEvoSerialDevice(usbDevice);
     if (!serialDevice) {
         return null;
     }
@@ -447,6 +456,7 @@ const state = {
     connected: false,
     cableOpen: false,
     authorizedDevice: null,
+    pendingEvoUsbDevice: null,
     deviceModelName: '',
     deviceInfoProductName: '',
     deviceInfoEntries: [],
@@ -797,6 +807,7 @@ const I18N_EN = {
     "status_module_ready": "WebTILP ready",
     "status_connected": "Connected",
     "status_connection_failed": "Connection failed",
+    "status_evo_serial_authorization_required": "Click Connect Calculator again to authorize the Evo serial port.",
     "status_disconnected": "Disconnected",
     "status_device_connected": "Device connected",
     "status_webusb_unsupported": "WebUSB unsupported",
@@ -872,6 +883,7 @@ const STATUS_I18N_KEYS = new Set([
     'status_module_ready',
     'status_connected',
     'status_connection_failed',
+    'status_evo_serial_authorization_required',
     'status_disconnected',
     'status_device_connected',
     'status_webusb_unsupported',
@@ -4483,6 +4495,7 @@ function resetToSplashState() {
     state.numWorksBackend = null;
     state.cableOpen = false;
     state.authorizedDevice = null;
+    state.pendingEvoUsbDevice = null;
     state.connectInProgress = false;
     state.handlePromise = null;
     state.needsReauthorize = false;
@@ -5680,11 +5693,31 @@ async function connectTI(forcePrompt = true, selectedUsbDevice = null) {
 }
 
 async function connect() {
+    if (state.connectInProgress) {
+        return;
+    }
     setButtonLoading(els.btnConnect, true);
     const hadWorkingConnection = state.connected || state.cableOpen || Boolean(state.handle);
     try {
         state.connectInProgress = true;
         const wantsGrayLink = String(state.settings?.cableModel ?? 'auto') === CABLE_GRAYLINK;
+        if (!wantsGrayLink && state.pendingEvoUsbDevice) {
+            // Request directly from this fresh click, before module loading or
+            // another WebUSB chooser can consume the transient user activation.
+            const usbDevice = state.pendingEvoUsbDevice;
+            const device = await requestTIEvoSerialDevice(usbDevice);
+            if (!device) {
+                // Cancelling also abandons this retry, so the next Connect
+                // click can select any calculator, including a non-serial one.
+                state.pendingEvoUsbDevice = null;
+                setStatus(hadWorkingConnection ? 'status_connected' : 'status_select_device', hadWorkingConnection);
+                return;
+            }
+            device.productName = usbDevice.productName || device.productName;
+            state.pendingEvoUsbDevice = null;
+            await connectTI(false, device);
+            return;
+        }
         if (!wantsGrayLink && hasWebUsbTransport()) {
             const device = await requestSupportedWebUsbDevice();
             if (!device) {
@@ -5692,6 +5725,7 @@ async function connect() {
                 cancelError.silent = true;
                 throw cancelError;
             }
+            state.pendingEvoUsbDevice = null;
             const detectedFamily = getWebUsbDeviceFamily(device);
             state.authorizedDevice = device;
             if (detectedFamily === DEVICE_FAMILY_NUMWORKS) {
@@ -5715,6 +5749,11 @@ async function connect() {
         }
         await connectTI(true);
     } catch (err) {
+        if (err?.evoSerialAuthorizationRequired) {
+            setStatus('status_evo_serial_authorization_required', false);
+            log(t('status_evo_serial_authorization_required'));
+            return;
+        }
         if (hadWorkingConnection) {
             setStatus('status_connected', true);
         } else {
@@ -10625,6 +10664,7 @@ async function nukeConnection(tryReconnect = true) {
         state.module = null;
         state.cableOpen = false;
         state.authorizedDevice = null;
+        state.pendingEvoUsbDevice = null;
         state.connectInProgress = false;
         state.handlePromise = null;
         state.needsReauthorize = false;
@@ -10669,6 +10709,7 @@ async function silentReconnectAfterNspireTransfer() {
         state.handle = 0;
         state.cableOpen = false;
         state.authorizedDevice = null;
+        state.pendingEvoUsbDevice = null;
         state.connectInProgress = false;
         state.handlePromise = null;
         state.needsReauthorize = true;
@@ -11186,6 +11227,7 @@ function handleTransportDisconnect(event = null) {
     state.handle = 0;
     state.cableOpen = false;
     state.authorizedDevice = null;
+    state.pendingEvoUsbDevice = null;
     state.connectInProgress = false;
     state.handlePromise = null;
     state.numWorksBackend = null;
@@ -11219,6 +11261,7 @@ function handleTransportConnect(event = null) {
     state.module = null;
     state.cableOpen = false;
     state.authorizedDevice = null;
+    state.pendingEvoUsbDevice = null;
     state.connectInProgress = false;
     state.numWorksBackend = null;
     numWorksBackend?.close().catch(error => {
