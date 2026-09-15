@@ -251,6 +251,7 @@
   "status_module_ready": "WebTILP gereed",
   "status_connected": "Verbonden",
   "status_connection_failed": "Verbinding mislukt",
+  "status_evo_serial_authorization_required": "Klik opnieuw op Rekenmachine verbinden om de seriële poort van de Evo te autoriseren.",
   "status_disconnected": "Verbroken",
   "status_device_connected": "Apparaat verbonden",
   "status_webusb_unsupported": "WebUSB niet ondersteund",

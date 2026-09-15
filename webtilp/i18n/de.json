@@ -251,6 +251,7 @@
   "status_module_ready": "WebTILP bereit",
   "status_connected": "Verbunden",
   "status_connection_failed": "Verbindung fehlgeschlagen",
+  "status_evo_serial_authorization_required": "Klicken Sie erneut auf Rechner verbinden, um den seriellen Anschluss des Evo zu autorisieren.",
   "status_disconnected": "Getrennt",
   "status_device_connected": "Gerät verbunden",
   "status_webusb_unsupported": "WebUSB nicht unterstützt",
