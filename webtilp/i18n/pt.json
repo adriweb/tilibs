@@ -251,6 +251,7 @@
   "status_module_ready": "WebTILP pronto",
   "status_connected": "Ligado",
   "status_connection_failed": "Falha na ligação",
+  "status_evo_serial_authorization_required": "Clique novamente em Ligar calculadora para autorizar a porta série da Evo.",
   "status_disconnected": "Desligado",
   "status_device_connected": "Dispositivo ligado",
   "status_webusb_unsupported": "WebUSB não suportado",
