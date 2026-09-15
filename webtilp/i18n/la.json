@@ -251,6 +251,7 @@
   "status_module_ready": "WebTILP paratus",
   "status_connected": "Coniunctus",
   "status_connection_failed": "Coniunctio defecit",
+  "status_evo_serial_authorization_required": "Preme iterum Machinam iunge ut portum serialem Evo permittas.",
   "status_disconnected": "Disiunctus",
   "status_device_connected": "Apparatus coniunctus",
   "status_webusb_unsupported": "WebUSB non sustinetur",

@@ -251,6 +251,7 @@
   "status_module_ready": "WebTILP جاهز",
   "status_connected": "متصل",
   "status_connection_failed": "فشل الاتصال",
+  "status_evo_serial_authorization_required": "انقر على اتصال بالآلة الحاسبة مرة أخرى للسماح بالوصول إلى المنفذ التسلسلي لـ Evo.",
   "status_disconnected": "غير متصل",
   "status_device_connected": "تم توصيل الجهاز",
   "status_webusb_unsupported": "WebUSB غير مدعوم",
