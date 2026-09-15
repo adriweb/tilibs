@@ -251,6 +251,7 @@
   "status_module_ready": "WebTILP 就绪",
   "status_connected": "已连接",
   "status_connection_failed": "连接失败",
+  "status_evo_serial_authorization_required": "请再次点击“连接计算器”以授权访问 Evo 串口。",
   "status_disconnected": "已断开",
   "status_device_connected": "设备已连接",
   "status_webusb_unsupported": "不支持 WebUSB",

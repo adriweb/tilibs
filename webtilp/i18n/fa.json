@@ -251,6 +251,7 @@
   "status_module_ready": "WebTILP آماده",
   "status_connected": "متصل",
   "status_connection_failed": "اتصال ناموفق",
+  "status_evo_serial_authorization_required": "برای دادن مجوز دسترسی به درگاه سریال Evo، دوباره روی اتصال ماشین‌حساب کلیک کنید.",
   "status_disconnected": "قطع شده",
   "status_device_connected": "دستگاه متصل شد",
   "status_webusb_unsupported": "WebUSB پشتیبانی نمی‌شود",
