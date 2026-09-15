@@ -251,6 +251,7 @@
   "status_module_ready": "WebTILP klar",
   "status_connected": "Ansluten",
   "status_connection_failed": "Anslutning misslyckades",
+  "status_evo_serial_authorization_required": "Klicka på Anslut kalkylator igen för att godkänna Evos serieport.",
   "status_disconnected": "Frånkopplad",
   "status_device_connected": "Enhet ansluten",
   "status_webusb_unsupported": "WebUSB stöds inte",
