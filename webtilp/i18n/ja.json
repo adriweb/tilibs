@@ -251,6 +251,7 @@
   "status_module_ready": "WebTILP 準備完了",
   "status_connected": "接続済み",
   "status_connection_failed": "接続失敗",
+  "status_evo_serial_authorization_required": "Evo のシリアルポートへのアクセスを許可するには、もう一度「電卓を接続」をクリックしてください。",
   "status_disconnected": "未接続",
   "status_device_connected": "デバイス接続",
   "status_webusb_unsupported": "WebUSB 非対応",
