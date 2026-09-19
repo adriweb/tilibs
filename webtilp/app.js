@@ -8978,20 +8978,12 @@ async function receiveBackup() {
         let backupChoice = null;
 
         while (true) {
-            const backupChoicePromise = openBackupModal({
+            // Native backups need no directory listing; TIGroup lists in the backend.
+            backupChoice = await openBackupModal({
                 allowTigroup,
                 defaultFormat,
                 defaultMode
             });
-            if (!state.dirlist.length) {
-                setBackupModalLoading(true, 'Loading directory listing…');
-                try {
-                    await refreshDirlist();
-                } finally {
-                    setBackupModalLoading(false);
-                }
-            }
-            backupChoice = await backupChoicePromise;
             if (!backupChoice) {
                 return;
             }
