@@ -1838,7 +1838,7 @@ extern const CalcFncts calc_cbl =
 	&noop_recv_all_vars_backup,
 	&tixx_control_lab_equipment_legacy,
 	&tixx_send_lab_equipment_data_legacy,
-	&tixx_get_lab_equipment_data_legacy
+	&tixx_get_lab_equipment_data_legacy,
 	&noop_del_folder,
 	&noop_recv_os,
 };
@@ -1917,7 +1917,7 @@ extern const CalcFncts calc_cbr =
 	&noop_recv_all_vars_backup,
 	&tixx_control_lab_equipment_legacy,
 	&tixx_send_lab_equipment_data_legacy,
-	&tixx_get_lab_equipment_data_legacy
+	&tixx_get_lab_equipment_data_legacy,
 	&noop_del_folder,
 	&noop_recv_os,
 };
@@ -1996,7 +1996,7 @@ extern const CalcFncts calc_cbr2 =
 	&noop_recv_all_vars_backup,
 	&tixx_control_lab_equipment_legacy,
 	&tixx_send_lab_equipment_data_legacy,
-	&tixx_get_lab_equipment_data_legacy
+	&tixx_get_lab_equipment_data_legacy,
 	&noop_del_folder,
 	&noop_recv_os,
 };

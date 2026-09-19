@@ -843,9 +843,9 @@ static int tixx_ti68k_raw_list_to_string_impl(const CalcLabEquipmentData * lab_e
 	if (decimal_point_len != 1 || decimal_point_str[0] != '.')
 	{
 		size_t dots = 0;
-		for (size_t i = 0; i < srcstrsize; i++)
+		for (size_t byte_index = 0; byte_index < srcstrsize; byte_index++)
 		{
-			if (srcstr[i] == '.')
+			if (srcstr[byte_index] == '.')
 			{
 				dots++;
 			}
@@ -859,16 +859,16 @@ static int tixx_ti68k_raw_list_to_string_impl(const CalcLabEquipmentData * lab_e
 				goto err;
 			}
 			size_t w = 0;
-			for (size_t i = 0; i < srcstrsize; i++)
+			for (size_t byte_index = 0; byte_index < srcstrsize; byte_index++)
 			{
-				if (srcstr[i] == '.')
+				if (srcstr[byte_index] == '.')
 				{
 					memcpy(numstr + w, decimal_point_str, decimal_point_len);
 					w += decimal_point_len;
 				}
 				else
 				{
-					numstr[w++] = srcstr[i];
+					numstr[w++] = srcstr[byte_index];
 				}
 			}
 			numstr[w] = 0;
