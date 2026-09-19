@@ -804,7 +804,7 @@ static int send_var(CalcHandle * h, int, char *)
 			}
 		}
 
-		content = tifiles_content_create_regular(h->model);
+		FileContent *content = tifiles_content_create_regular(h->model);
 		if (content != nullptr)
 		{
 			ret = tifiles_file_read_regular(filename, content);
