@@ -28,7 +28,6 @@
 #include <cstdlib>
 #include <cstring>
 #include <cerrno>
-#include <strings.h>
 #include <locale.h>
 #include <glib.h>
 #include <sys/types.h>

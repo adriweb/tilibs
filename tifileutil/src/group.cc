@@ -598,7 +598,6 @@ static int tifileutil_group_extract(int * argc, char *** argv, unsigned int offs
 	TigContent * content = nullptr;
 	FileContent * fcontent = nullptr;
 	unsigned int i, count = 0;
-	struct stat st = {};
 
 	int j;
 
@@ -635,7 +634,7 @@ static int tifileutil_group_extract(int * argc, char *** argv, unsigned int offs
 	}
 	infilename = (const char *)(*argv)[first_file];
 
-	if (stat(dirpath, &st) < 0 || !S_ISDIR(st.st_mode)) {
+	if (!g_file_test(dirpath, G_FILE_TEST_IS_DIR)) {
 		tifileutil_critical(_("%s: %s is not a directory."), (*argv)[0], dirpath);
 		goto end;
 	}

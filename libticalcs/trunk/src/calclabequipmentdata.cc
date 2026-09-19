@@ -37,12 +37,20 @@
 // 1) the TI-85/86 raw format covers +/-999 decades. Verify at compile time that long double supports that range. x87 80-bit and binary128 do.
 // On platforms where it doesn't, decoded values beyond the native range will saturate towards +/-inf or +/-0.
 #if defined(LDBL_MAX_10_EXP) && defined(LDBL_MIN_10_EXP) && (LDBL_MAX_10_EXP < 999 || LDBL_MIN_10_EXP > -999)
+#ifdef _MSC_VER
+#pragma message("warning: long double cannot represent the full +/-999 decade range of the TI-85/86 format")
+#else
 #warning "long double cannot represent the full +/-999 decade range of the TI-85/86 format"
+#endif
 #endif
 
 // 2) verify that the mantissa is large enough to hold all 14 BCD digits exactly.
 #if defined(LDBL_MANT_DIG) && LDBL_MANT_DIG < 47
+#ifdef _MSC_VER
+#pragma message("warning: long double mantissa may not hold all 14 BCD digits exactly")
+#else
 #warning "long double mantissa may not hold all 14 BCD digits exactly"
+#endif
 #endif
 
 #include <types82.h>
@@ -843,9 +851,9 @@ static int tixx_ti68k_raw_list_to_string_impl(const CalcLabEquipmentData * lab_e
 	if (decimal_point_len != 1 || decimal_point_str[0] != '.')
 	{
 		size_t dots = 0;
-		for (i = 0; i < srcstrsize; i++)
+		for (size_t byte_index = 0; byte_index < srcstrsize; byte_index++)
 		{
-			if (srcstr[i] == '.')
+			if (srcstr[byte_index] == '.')
 			{
 				dots++;
 			}
@@ -859,16 +867,16 @@ static int tixx_ti68k_raw_list_to_string_impl(const CalcLabEquipmentData * lab_e
 				goto err;
 			}
 			size_t w = 0;
-			for (i = 0; i < srcstrsize; i++)
+			for (size_t byte_index = 0; byte_index < srcstrsize; byte_index++)
 			{
-				if (srcstr[i] == '.')
+				if (srcstr[byte_index] == '.')
 				{
 					memcpy(numstr + w, decimal_point_str, decimal_point_len);
 					w += decimal_point_len;
 				}
 				else
 				{
-					numstr[w++] = srcstr[i];
+					numstr[w++] = srcstr[byte_index];
 				}
 			}
 			numstr[w] = 0;

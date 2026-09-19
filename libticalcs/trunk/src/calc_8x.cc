@@ -1287,7 +1287,8 @@ static int		get_version	(CalcHandle* handle, CalcInfos* infos)
 {
 	int ret;
 	static CalcLabEquipmentData lab_equipment_data_1 = { CALC_LAB_EQUIPMENT_DATA_TYPE_STRING, 4, 1, (const uint8_t *)"{7}", nullptr, TI89_LIST, 0, 0 }; // Request status command.
-	CalcLabEquipmentData lab_equipment_data_2 = { .vartype = TI89_LIST };
+	CalcLabEquipmentData lab_equipment_data_2 = {};
+	lab_equipment_data_2.vartype = TI89_LIST;
 
 	// Use the TI-68k format because it's easier to deal with.
 	ret = tixx_send_lab_equipment_data_legacy(handle, CALC_TI89, &lab_equipment_data_1);
@@ -1838,7 +1839,7 @@ extern const CalcFncts calc_cbl =
 	&noop_recv_all_vars_backup,
 	&tixx_control_lab_equipment_legacy,
 	&tixx_send_lab_equipment_data_legacy,
-	&tixx_get_lab_equipment_data_legacy
+	&tixx_get_lab_equipment_data_legacy,
 	&noop_del_folder,
 	&noop_recv_os,
 };
@@ -1917,7 +1918,7 @@ extern const CalcFncts calc_cbr =
 	&noop_recv_all_vars_backup,
 	&tixx_control_lab_equipment_legacy,
 	&tixx_send_lab_equipment_data_legacy,
-	&tixx_get_lab_equipment_data_legacy
+	&tixx_get_lab_equipment_data_legacy,
 	&noop_del_folder,
 	&noop_recv_os,
 };
@@ -1996,7 +1997,7 @@ extern const CalcFncts calc_cbr2 =
 	&noop_recv_all_vars_backup,
 	&tixx_control_lab_equipment_legacy,
 	&tixx_send_lab_equipment_data_legacy,
-	&tixx_get_lab_equipment_data_legacy
+	&tixx_get_lab_equipment_data_legacy,
 	&noop_del_folder,
 	&noop_recv_os,
 };

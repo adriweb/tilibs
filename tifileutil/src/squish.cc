@@ -460,49 +460,49 @@ static int tifileutil_squish(int * argc, char *** argv, unsigned int offset)
 	}
 
 	if (shellstr) {
-		if (!strcasecmp(shellstr, "crash")) {
+		if (!g_ascii_strcasecmp(shellstr, "crash")) {
 			shell = SHELL_82_CRASH;
 		}
-		else if (!strcasecmp(shellstr, "ace")) {
+		else if (!g_ascii_strcasecmp(shellstr, "ace")) {
 			shell = SHELL_82_ACE;
 		}
-		else if (!strcasecmp(shellstr, "ash")) {
+		else if (!g_ascii_strcasecmp(shellstr, "ash")) {
 			shell = SHELL_82_ASH;
 		}
-		else if (!strcasecmp(shellstr, "sng")) {
+		else if (!g_ascii_strcasecmp(shellstr, "sng")) {
 			shell = SHELL_82_SNG;
 		}
-		else if (!strcasecmp(shellstr, "ion")) {
+		else if (!g_ascii_strcasecmp(shellstr, "ion")) {
 			shell = SHELL_83_ION;
 		}
-		else if (!strcasecmp(shellstr, "ashell")) {
+		else if (!g_ascii_strcasecmp(shellstr, "ashell")) {
 			shell = SHELL_82_ASHELL;
 		}
-		else if (!strcasecmp(shellstr, "venus")) {
+		else if (!g_ascii_strcasecmp(shellstr, "venus")) {
 			shell = SHELL_83_VENUS;
 		}
-		else if (!strcasecmp(shellstr, "mallard")) {
+		else if (!g_ascii_strcasecmp(shellstr, "mallard")) {
 			shell = SHELL_73_MALLARD;
 		}
-		else if (!strcasecmp(shellstr, "nostub")) {
+		else if (!g_ascii_strcasecmp(shellstr, "nostub")) {
 			shell = SHELL_73_NOSTUB;
 		}
-		else if (!strcasecmp(shellstr, "ion83")) {
+		else if (!g_ascii_strcasecmp(shellstr, "ion83")) {
 			shell = SHELL_83_ION83;
 		}
-		else if (!strcasecmp(shellstr, "pse83")) {
+		else if (!g_ascii_strcasecmp(shellstr, "pse83")) {
 			shell = SHELL_83_PSE83;
 		}
-		else if (!strcasecmp(shellstr, "ice")) {
+		else if (!g_ascii_strcasecmp(shellstr, "ice")) {
 			shell = SHELL_83_ICE;
 		}
-		else if (!strcasecmp(shellstr, "sos")) {
+		else if (!g_ascii_strcasecmp(shellstr, "sos")) {
 			shell = SHELL_83_SOS;
 		}
-		else if (!strcasecmp(shellstr, "tse")) {
+		else if (!g_ascii_strcasecmp(shellstr, "tse")) {
 			shell = SHELL_83P_TSE;
 		}
-		else if (!strcasecmp(shellstr, "mirage")) {
+		else if (!g_ascii_strcasecmp(shellstr, "mirage")) {
 			shell = SHELL_83P_MIRAGE;
 		}
 		else {

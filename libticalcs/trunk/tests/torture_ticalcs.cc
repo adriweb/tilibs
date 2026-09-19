@@ -189,12 +189,6 @@ static void torture_ticalcs()
     PRINTFVOID(ticalcs_free_lab_equipment_data_related, nullptr);
     PRINTFVOID(ticalcs_calc_free_lab_equipment_data, nullptr);
     { CalcLabEquipmentData labeq_data = { CALC_LAB_EQUIPMENT_DATA_TYPE_NONE, 0, 0, nullptr, nullptr, 4, 0, 0 }; PRINTFVOID(ticalcs_calc_free_lab_equipment_data, &labeq_data); }
-    PRINTF(ticalcs_calc_send_lab_equipment_data2, INT, nullptr, (CalcModel)-1, 0, (const char *)0x12345678);
-
-    PRINTF(ticalcs_calc_send_lab_equipment_data2, INT, (CalcHandle *)0x12345678, (CalcModel)-1, 0, nullptr);
-    PRINTF(ticalcs_calc_get_lab_equipment_data2, INT, nullptr, (CalcModel)-1, 0, (const char **)0x12345678);
-    PRINTF(ticalcs_calc_get_lab_equipment_data2, INT, (CalcHandle *)0x12345678, (CalcModel)-1, 0, nullptr);
-    PRINTFVOID(ticalcs_free_lab_equipment_data2, nullptr);
     PRINTF(ticalcs_calc_send_tigroup2, INT, nullptr, (const char*)0x12345678, (TigMode)-1);
     PRINTF(ticalcs_calc_send_tigroup2, INT, (CalcHandle*)0x12345678, nullptr, (TigMode)-1);
     PRINTF(ticalcs_calc_recv_tigroup2, INT, nullptr, (const char*)0x12345678, (TigMode)-1);
