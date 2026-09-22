@@ -298,5 +298,8 @@
   "transfer_overwrite_all": "Skriv över alla befintliga objekt (utan bekräftelse per fil)",
   "transfer_all_ram": "Alla till RAM",
   "transfer_all_archive": "Alla till Arkiv",
-  "close": "Stäng"
+  "close": "Stäng",
+  "list_from_backup": "Lista från säkerhetskopia…",
+  "confirm_backup_dirlist": "Den här räknaren kan inte lista variabler direkt. Ta emot en fullständig säkerhetskopia och läsa dess variabeltabell i stället? Det kan ta en stund. Efter bekräftelsen skickar du en Backup från räknarens LINK-meny.",
+  "backup_dirlist_note": "Skrivskyddad lista från en säkerhetskopia. Uppdatera lista tar emot en ny säkerhetskopia; enskilda variabler kan inte tas emot i den här vyn."
 }
