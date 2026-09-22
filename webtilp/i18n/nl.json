@@ -298,5 +298,8 @@
   "transfer_overwrite_all": "Alle bestaande items overschrijven (zonder bevestiging per bestand)",
   "transfer_all_ram": "Alles naar RAM",
   "transfer_all_archive": "Alles naar Archief",
-  "close": "Sluiten"
+  "close": "Sluiten",
+  "list_from_backup": "Lijst uit back-up…",
+  "confirm_backup_dirlist": "Deze rekenmachine kan variabelen niet rechtstreeks opvragen. Een volledige back-up ontvangen en de variabelentabel lezen? Dit kan even duren. Verzend na bevestiging een Backup via het LINK-menu van de rekenmachine.",
+  "backup_dirlist_note": "Alleen-lezen lijst uit een back-up. Lijst vernieuwen ontvangt een nieuwe back-up; afzonderlijke variabelen kunnen hier niet worden ontvangen."
 }
