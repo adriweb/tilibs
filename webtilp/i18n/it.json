@@ -298,5 +298,8 @@
   "transfer_overwrite_all": "Sovrascrivi tutti gli elementi esistenti (senza conferma per file)",
   "transfer_all_ram": "Tutto in RAM",
   "transfer_all_archive": "Tutto in Archivio",
-  "close": "Chiudi"
+  "close": "Chiudi",
+  "list_from_backup": "Elenca da un backup…",
+  "confirm_backup_dirlist": "Questa calcolatrice non può elencare direttamente le variabili. Ricevere un backup completo e leggerne la tabella delle variabili? Potrebbe richiedere tempo. Dopo la conferma, inviare un Backup dal menu LINK della calcolatrice.",
+  "backup_dirlist_note": "Elenco di sola lettura da un backup. Aggiorna elenco riceve un nuovo backup; non è possibile ricevere singole variabili da questa vista."
 }
