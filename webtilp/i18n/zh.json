@@ -298,5 +298,8 @@
   "transfer_overwrite_all": "覆盖所有已存在项目（不再逐文件确认）",
   "transfer_all_ram": "全部设为 RAM",
   "transfer_all_archive": "全部设为归档",
-  "close": "关闭"
+  "close": "关闭",
+  "list_from_backup": "从备份列出变量…",
+  "confirm_backup_dirlist": "此计算器无法直接列出变量。是否接收完整备份并读取其中的变量表？这可能需要一些时间。确认后，请从计算器的 LINK 菜单发送 Backup。",
+  "backup_dirlist_note": "来自备份的只读列表。刷新列表会接收新的备份；此视图无法单独接收变量。"
 }

@@ -298,5 +298,8 @@
   "transfer_overwrite_all": "Omnia iam existentia supercribe (sine confirmatione per fasciculum)",
   "transfer_all_ram": "Omnia ad RAM",
   "transfer_all_archive": "Omnia ad Archivum",
-  "close": "Claudere"
+  "close": "Claudere",
+  "list_from_backup": "Ex exemplari subsidiario indicare…",
+  "confirm_backup_dirlist": "Haec machina variabilia directo enumerare non potest. Visne exemplar subsidiarium integrum accipere eiusque tabulam variabilium legere? Hoc aliquantum temporis requirere potest. Post confirmationem, Backup ex indice LINK machinae mitte.",
+  "backup_dirlist_note": "Index tantum legendus ex exemplari subsidiario. Renovatio indicis novum exemplar accipit; variabilia singula ex hac pagina accipi non possunt."
 }
