@@ -141,6 +141,7 @@ test:
 	node tests/test_hp_prime_frontend.js
 	node tests/test_evo_serial_frontend.js
 	node tests/test_calc_models.js
+	node tests/test_dirlist_capabilities.js
 	node tests/test_numworks_backend.js
 	node tests/test_numworks_frontend.js
 	python3 i18n/check.py
