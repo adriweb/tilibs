@@ -132,6 +132,9 @@ test:
 	$(CXX) -std=c++17 -Wall -Wextra -Werror hp_prime_app.cpp tests/test_hp_prime_app.cpp -o tests/test_hp_prime_app
 	./tests/test_hp_prime_app
 	rm -f tests/test_hp_prime_app
+	$(CXX) -std=c++17 -Wall -Wextra -Werror tests/test_ti_backup_vat.cpp -o tests/test_ti_backup_vat
+	./tests/test_ti_backup_vat
+	rm -f tests/test_ti_backup_vat
 	node --check < sw.js.in
 	node tests/test_service_worker.js
 	node --check $(APP_JS_SRC)

@@ -298,5 +298,8 @@
   "transfer_overwrite_all": "Alle vorhandenen Elemente überschreiben (ohne Bestätigung pro Datei)",
   "transfer_all_ram": "Alle in RAM",
   "transfer_all_archive": "Alle ins Archiv",
-  "close": "Schließen"
+  "close": "Schließen",
+  "list_from_backup": "Aus Sicherung auflisten…",
+  "confirm_backup_dirlist": "Dieser Rechner kann Variablen nicht direkt auflisten. Stattdessen eine vollständige Sicherung empfangen und ihre Variablentabelle lesen? Dies kann etwas dauern. Senden Sie nach der Bestätigung ein Backup über das LINK-Menü des Rechners.",
+  "backup_dirlist_note": "Schreibgeschützte Liste aus einer Sicherung. Liste aktualisieren empfängt eine neue Sicherung; einzelne Variablen können in dieser Ansicht nicht empfangen werden."
 }
