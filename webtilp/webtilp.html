@@ -113,6 +113,7 @@
                     </div>
                     <div class="quick-actions">
                         <button class="btn ghost" id="btnReceiveBackup">📥  Make Backup</button>
+                        <button class="btn ghost hidden" id="btnBackupDirlist">List from backup…</button>
                         <button class="btn ghost hidden" id="btnReceiveOs">📥  Receive OS</button>
                         <button class="btn ghost hidden" id="btnDownloadOsPartial">⬇️  Download OS so far</button>
                         <button class="btn ghost" id="btnDumpRom">🧠  Dump ROM</button>
@@ -153,6 +154,7 @@
                 </div>
             </div>
             <div class="panel-body">
+                <p class="form-note hidden" id="backupDirlistNote">Read-only snapshot from a backup. Refresh List receives a new backup; individual variables cannot be received from this view.</p>
                 <div class="table-wrap" id="tableView">
                     <div class="folder-sticky hidden" id="folderSticky"></div>
                     <table class="var-table">

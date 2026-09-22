@@ -462,6 +462,8 @@ const state = {
     deviceInfoEntries: [],
     features: 0,
     dirlist: [],
+    backupDirlistLoaded: false,
+    backupDirlistInProgress: false,
     hpFileSnapshotLoaded: false,
     hpFileRefreshGeneration: 0,
     hpFileRenderGeneration: 0,
@@ -839,6 +841,9 @@ const I18N_EN = {
     "confirm_switch_to_directlink": "A DirectLink calculator is connected but Settings force SilverLink. Switch to DirectLink?",
     "confirm_replug_after_device_info": "You will have to physically unplug and replug the cable after that. Continue?",
     "confirm_load_dirlist_before_transfer": "Directory listing has not been loaded yet. It is highly recommended before transfers. Load it now?",
+    "list_from_backup": "List from backup…",
+    "confirm_backup_dirlist": "This calculator cannot list variables directly. Receive a full backup and read its variable table instead? This may take a while. After confirming, send a Backup from the calculator's LINK menu.",
+    "backup_dirlist_note": "Read-only snapshot from a backup. Refresh List receives a new backup; individual variables cannot be received from this view.",
     "confirm_overwrite_existing": "{name} already exists there. Overwrite?",
     "confirm_cross_model_evo_os": "The file {file} is for {source}, but the connected calculator expects an OS for {target}. Sending an OS for another model may fail. Continue anyway?",
     "confirm_large_backup_continue_standard": "Backup data may exceed 65535 bytes and fail. TIGroup is recommended for large backups. Continue with standard backup anyway?",
@@ -3195,6 +3200,8 @@ const els = {
     btnNewFolder: document.getElementById('btnNewFolder'),
     btnSendFiles: document.getElementById('btnSendFiles'),
     btnReceiveBackup: document.getElementById('btnReceiveBackup'),
+    btnBackupDirlist: document.getElementById('btnBackupDirlist'),
+    backupDirlistNote: document.getElementById('backupDirlistNote'),
     btnReceiveOs: document.getElementById('btnReceiveOs'),
     btnDownloadOsPartial: document.getElementById('btnDownloadOsPartial'),
     btnDumpRom: document.getElementById('btnDumpRom'),
@@ -3937,6 +3944,8 @@ async function applyTranslations() {
     setTextContent(document.getElementById('dropzoneSubtitle'), t('dropzone_subtitle'));
     setTextContent(els.btnSendFiles, `📤 ${t('send_selected_files')}`);
     setTextContent(els.btnReceiveBackup, `📥  ${t('make_backup')}`);
+    setTextContent(els.btnBackupDirlist, t('list_from_backup'));
+    setTextContent(els.backupDirlistNote, t('backup_dirlist_note'));
     setTextContent(els.btnReceiveOs, `📥  ${t('receive_os')}`);
     setTextContent(els.btnDownloadOsPartial, `⬇️  ${t('download_os_so_far')}`);
     setTextContent(els.btnDumpRom, `🧠  ${t('dump_rom')}`);
@@ -4747,6 +4756,8 @@ function setNumWorksUiState() {
 function applyActiveFamilyUiState(options = {}) {
     if (!options.tiCapabilitiesKnown) {
         els.varsPanel?.classList.remove('hidden');
+        els.btnBackupDirlist?.classList.add('hidden');
+        els.backupDirlistNote?.classList.add('hidden');
     }
     const appFolderButton = document.getElementById('btnChooseHPAppFolder');
     if (appFolderButton) {
@@ -5550,6 +5561,7 @@ async function updateCapabilities() {
     const hasDirlist = (features & FEATURE_FLAGS.OPS_DIRLIST) !== 0;
     const hasFolder = (features & FEATURE_FLAGS.FTS_FOLDER) !== 0;
     const hasBackup = (features & FEATURE_FLAGS.OPS_BACKUP) !== 0 || (features & FEATURE_FLAGS.FTS_BACKUP) !== 0;
+    const canListBackup = !hasDirlist && hasBackup && [2, 6].includes(getActiveCalcModelId()); // TI-82, TI-85
     const hasClock = (features & FEATURE_FLAGS.OPS_CLOCK) !== 0;
     const hasRomDump = (features & FEATURE_FLAGS.OPS_ROMDUMP) !== 0;
     const hasKeys = (features & FEATURE_FLAGS.OPS_KEYS) !== 0;
@@ -5557,10 +5569,12 @@ async function updateCapabilities() {
     const isNspire = isNspireActive();
     const canReceiveOs = hasRomDump && isNspire;
     els.btnIsReady?.classList.remove('hidden');
-    els.varsPanel?.classList.toggle('hidden', !hasDirlist);
+    els.varsPanel?.classList.toggle('hidden', !hasDirlist && !(canListBackup && state.backupDirlistLoaded));
+    els.btnBackupDirlist?.classList.toggle('hidden', !canListBackup);
+    els.backupDirlistNote?.classList.toggle('hidden', !(canListBackup && state.backupDirlistLoaded));
     if (els.btnRefreshDirlist) {
-        els.btnRefreshDirlist.classList.toggle('disabled', !hasDirlist);
-        els.btnRefreshDirlist.disabled = !hasDirlist;
+        els.btnRefreshDirlist.classList.toggle('disabled', !hasDirlist && !canListBackup);
+        els.btnRefreshDirlist.disabled = !hasDirlist && !canListBackup;
         els.btnRefreshDirlist.title = '';
     }
     if (els.btnScreenshot) {
@@ -6152,6 +6166,7 @@ function updateClockInfoRow(clockInfo, settings, fallbackDate) {
 
 function clearDeviceData() {
     state.dirlist = [];
+    state.backupDirlistLoaded = false;
     state.hpFileSnapshotLoaded = false;
     state.hpFileRefreshGeneration += 1;
     state.hpFileRenderGeneration = 0;
@@ -6211,7 +6226,53 @@ function parseLeadingBytes(text) {
     return Number(match[1]);
 }
 
-async function refreshDirlist() {
+async function refreshBackupDirlist(module, handle) {
+    if (state.backupDirlistInProgress) return;
+    const hasBackup = (state.features & (FEATURE_FLAGS.OPS_BACKUP | FEATURE_FLAGS.FTS_BACKUP)) !== 0;
+    if (!hasBackup || ![2, 6].includes(getActiveCalcModelId())) return;
+    if (!confirm(t('confirm_backup_dirlist'))) return;
+    state.backupDirlistInProgress = true;
+    setButtonLoading(els.btnBackupDirlist, true);
+    const epoch = state.operationEpoch;
+    const backupPath = '/dirlist-backup.bin';
+    const jsonPath = '/dirlist-backup.json';
+    try {
+        const result = await ccallAsync(module, 'calc_recv_backup', 'number', ['number', 'string'],
+            [handle, backupPath], { timeoutMs: null, useProgress: true, progressLabel: 'Receiving backup for variable listing' });
+        if (epoch !== state.operationEpoch) return;
+        if (result !== 0) {
+            log(`Backup listing receive failed (${formatErrorResult(module, result)}).`);
+            return;
+        }
+        const parsed = await ccallAsync(module, 'calc_backup_dirlist_json', 'number', ['string', 'string'],
+            [backupPath, jsonPath]);
+        if (epoch !== state.operationEpoch) return;
+        if (parsed !== 0) {
+            log('Cannot list this backup: its format, checksum, or variable table is invalid or unsupported.');
+            return;
+        }
+        const data = JSON.parse(module.FS.readFile(jsonPath, { encoding: 'utf8' }));
+        state.dirlist = data.vars;
+        state.backupDirlistLoaded = true;
+        renderDirlist(state.dirlist);
+        els.varsPanel?.classList.remove('hidden');
+        els.backupDirlistNote?.classList.remove('hidden');
+        log(`Backup variable listing loaded: ${state.dirlist.length} entries.`);
+    } finally {
+        for (const path of [backupPath, jsonPath]) {
+            try { module.FS.unlink(path); } catch { /* Best-effort cleanup. */ }
+        }
+        try {
+            if (module.FS.readFile('/last_recv_path.txt', { encoding: 'utf8' }).trim() === backupPath) {
+                module.FS.unlink('/last_recv_path.txt');
+            }
+        } catch { /* No receive marker. */ }
+        state.backupDirlistInProgress = false;
+        setButtonLoading(els.btnBackupDirlist, false);
+    }
+}
+
+async function refreshDirlist({ manual = false } = {}) {
     setButtonLoading(els.btnRefreshDirlist, true);
     try {
         if (isHPPrimeActive()) {
@@ -6251,6 +6312,7 @@ async function refreshDirlist() {
         const handle = await ensureHandle();
         await updateCapabilities();
         if ((state.features & FEATURE_FLAGS.OPS_DIRLIST) === 0) {
+            if (manual) await refreshBackupDirlist(module, handle);
             return;
         }
         const result = await ccallAsync(module, 'calc_dirlist_json', 'number', ['number', 'string'], [handle, '/dirlist.json'], { timeoutMs: null, useProgress: true, progressLabel: 'Loading directory listing' });
@@ -6356,6 +6418,9 @@ function getHPPrimePreviewKind(entry) {
 
 function formatVariableDisplayName(entry) {
     const name = entry.name || '';
+    if (entry.kind === 'backup-var') {
+        return name;
+    }
     if (entry.kind === 'numworks') {
         return `${name}.py`;
     }
@@ -6437,7 +6502,7 @@ function renderTableView(entries, filter) {
             : '';
         const kindLabel = isFolder
             ? (entry.hpAppRoot ? 'hp' : 'folder')
-            : (entry.kind || '');
+            : (entry.kind === 'backup-var' ? 'var' : (entry.kind || ''));
         const safeTypeLabel = escapeHtml(typeLabel);
         const safeLocation = escapeHtml(isFolder ? '-' : location);
         const safeKindLabel = escapeHtml(kindLabel);
@@ -6466,15 +6531,18 @@ function renderTableView(entries, filter) {
             row.title = t('hp_prime_app_folder_hint');
         }
         row.classList.toggle('integrity-invalid', Boolean(entry.invalid || appContainerInvalid));
-        const canRename = (entry.hpAppChildEditable && state.hpFileSnapshotLoaded)
-            || (state.features & FEATURE_FLAGS.OPS_RENAME) !== 0;
-        const canDelete = (entry.hpAppChildEditable && state.hpFileSnapshotLoaded)
-            || (state.features & FEATURE_FLAGS.OPS_DELVAR) !== 0;
+        const mutableStorageEntry = entry.kind !== 'backup-var';
+        const canRename = mutableStorageEntry
+            && ((entry.hpAppChildEditable && state.hpFileSnapshotLoaded)
+                || (state.features & FEATURE_FLAGS.OPS_RENAME) !== 0);
+        const canDelete = mutableStorageEntry
+            && ((entry.hpAppChildEditable && state.hpFileSnapshotLoaded)
+                || (state.features & FEATURE_FLAGS.OPS_DELVAR) !== 0);
         const canPreview = canPreviewVariable(entry, previewModelId);
         const rowActions = `
             <div class="row-actions">
                 ${canPreview ? `<button class="btn ghost btn-inline action-preview" title="${escapeHtml(t('preview'))}" aria-label="${escapeHtml(t('preview'))}">👁️</button>` : ''}
-                <button class="btn ghost btn-inline action-download" title="Download">⬇️</button>
+                ${entry.kind === 'backup-var' ? '' : '<button class="btn ghost btn-inline action-download" title="Download">⬇️</button>'}
                 ${canRename ? '<button class="btn ghost btn-inline action-rename" title="Rename">✏️</button>' : ''}
                 ${canDelete ? '<button class="btn ghost btn-inline action-delete" title="Delete">🗑️</button>' : ''}
             </div>`;
@@ -6486,7 +6554,7 @@ function renderTableView(entries, filter) {
             : `${safeName}${integrityWarning}`;
         const summaryText = options.summary ? `<em class="folder-summary">(${options.summary})</em>` : '';
         row.innerHTML = `
-            <td><input type="checkbox" data-name="" data-folder="" data-folder-path="" data-is-folder="${isFolder ? '1' : '0'}" data-type="${entry.type}" data-kind=""></td>
+            <td><input type="checkbox" ${entry.kind === 'backup-var' ? 'disabled' : ''} data-name="" data-folder="" data-folder-path="" data-is-folder="${isFolder ? '1' : '0'}" data-type="${entry.type}" data-kind=""></td>
             <td>
                 <div class="name-cell">
                     <div class="name-left">${indentBars}${toggleButton}<span class="name-label">${displayName}${summaryText}</span></div>
@@ -8919,6 +8987,12 @@ async function processIncomingTransfers(files, options = {}) {
                 setSelectedFiles([]);
                 if (!hasOsTransfer && (state.features & FEATURE_FLAGS.OPS_DIRLIST) !== 0) {
                     await refreshDirlist();
+                } else if (state.backupDirlistLoaded) {
+                    state.backupDirlistLoaded = false;
+                    state.dirlist = [];
+                    renderDirlist(state.dirlist);
+                    els.varsPanel?.classList.add('hidden');
+                    els.backupDirlistNote?.classList.add('hidden');
                 }
             }
         } finally {
@@ -10800,7 +10874,8 @@ function bindEvents() {
     els.btnIsReady.addEventListener('click', isReady);
     els.btnGetInfo.addEventListener('click', getDeviceInfo);
     els.btnSyncClock.addEventListener('click', syncClock);
-    els.btnRefreshDirlist.addEventListener('click', refreshDirlist);
+    els.btnRefreshDirlist.addEventListener('click', () => refreshDirlist({ manual: true }));
+    els.btnBackupDirlist?.addEventListener('click', () => refreshDirlist({ manual: true }));
     els.btnSendFiles.addEventListener('click', sendSelectedFiles);
     els.btnReceiveBackup.addEventListener('click', receiveBackup);
     els.btnReceiveOs.addEventListener('click', receiveOs);

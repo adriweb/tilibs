@@ -298,5 +298,8 @@
   "transfer_overwrite_all": "Écraser tous les éléments existants (sans confirmation par fichier)",
   "transfer_all_ram": "Tout en RAM",
   "transfer_all_archive": "Tout en Archive",
-  "close": "Fermer"
+  "close": "Fermer",
+  "list_from_backup": "Lister depuis une sauvegarde…",
+  "confirm_backup_dirlist": "Cette calculatrice ne peut pas lister directement ses variables. Recevoir une sauvegarde complète et lire sa table de variables à la place ? Cela peut prendre un moment. Après confirmation, envoyez une sauvegarde (Backup) depuis le menu LINK de la calculatrice.",
+  "backup_dirlist_note": "Liste en lecture seule issue d'une sauvegarde. Actualiser la liste reçoit une nouvelle sauvegarde ; les variables ne peuvent pas être reçues individuellement depuis cette vue."
 }

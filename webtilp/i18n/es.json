@@ -298,5 +298,8 @@
   "transfer_overwrite_all": "Sobrescribir todos los elementos existentes (sin confirmación por archivo)",
   "transfer_all_ram": "Todo a RAM",
   "transfer_all_archive": "Todo a Archivo",
-  "close": "Cerrar"
+  "close": "Cerrar",
+  "list_from_backup": "Listar desde una copia…",
+  "confirm_backup_dirlist": "Esta calculadora no puede listar variables directamente. ¿Recibir una copia completa y leer su tabla de variables? Puede tardar un rato. Tras confirmar, envíe un Backup desde el menú LINK de la calculadora.",
+  "backup_dirlist_note": "Lista de solo lectura de una copia de seguridad. Actualizar lista recibe una nueva copia; no se pueden recibir variables individuales desde esta vista."
 }
