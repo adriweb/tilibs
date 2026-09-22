@@ -3191,6 +3191,7 @@ const els = {
     btnGetInfo: document.getElementById('btnGetInfo'),
     btnSyncClock: document.getElementById('btnSyncClock'),
     btnRefreshDirlist: document.getElementById('btnRefreshDirlist'),
+    varsPanel: document.getElementById('varsPanel'),
     btnNewFolder: document.getElementById('btnNewFolder'),
     btnSendFiles: document.getElementById('btnSendFiles'),
     btnReceiveBackup: document.getElementById('btnReceiveBackup'),
@@ -4744,6 +4745,9 @@ function setNumWorksUiState() {
 }
 
 function applyActiveFamilyUiState(options = {}) {
+    if (!options.tiCapabilitiesKnown) {
+        els.varsPanel?.classList.remove('hidden');
+    }
     const appFolderButton = document.getElementById('btnChooseHPAppFolder');
     if (appFolderButton) {
         appFolderButton.classList.toggle('hidden', !isHPPrimeActive());
@@ -5543,6 +5547,7 @@ async function updateCapabilities() {
     await ensureCableOpen();
     const features = await ccallAsync(state.module, 'calc_features', 'number', ['number'], [state.handle], { timeoutMs: 8000 });
     state.features = features;
+    const hasDirlist = (features & FEATURE_FLAGS.OPS_DIRLIST) !== 0;
     const hasFolder = (features & FEATURE_FLAGS.FTS_FOLDER) !== 0;
     const hasBackup = (features & FEATURE_FLAGS.OPS_BACKUP) !== 0 || (features & FEATURE_FLAGS.FTS_BACKUP) !== 0;
     const hasClock = (features & FEATURE_FLAGS.OPS_CLOCK) !== 0;
@@ -5552,9 +5557,10 @@ async function updateCapabilities() {
     const isNspire = isNspireActive();
     const canReceiveOs = hasRomDump && isNspire;
     els.btnIsReady?.classList.remove('hidden');
+    els.varsPanel?.classList.toggle('hidden', !hasDirlist);
     if (els.btnRefreshDirlist) {
-        els.btnRefreshDirlist.classList.remove('disabled');
-        els.btnRefreshDirlist.disabled = false;
+        els.btnRefreshDirlist.classList.toggle('disabled', !hasDirlist);
+        els.btnRefreshDirlist.disabled = !hasDirlist;
         els.btnRefreshDirlist.title = '';
     }
     if (els.btnScreenshot) {
@@ -6244,6 +6250,9 @@ async function refreshDirlist() {
         const module = await initModule();
         const handle = await ensureHandle();
         await updateCapabilities();
+        if ((state.features & FEATURE_FLAGS.OPS_DIRLIST) === 0) {
+            return;
+        }
         const result = await ccallAsync(module, 'calc_dirlist_json', 'number', ['number', 'string'], [handle, '/dirlist.json'], { timeoutMs: null, useProgress: true, progressLabel: 'Loading directory listing' });
         if (result !== 0) {
             log(`Dirlist failed (${formatErrorResult(module, result)}).`);
@@ -7306,7 +7315,7 @@ function scheduleStickyUpdate() {
 }
 
 async function ensureDirlistLoadedWithPrompt() {
-    if (state.dirlist.length) {
+    if ((state.features & FEATURE_FLAGS.OPS_DIRLIST) === 0 || state.dirlist.length) {
         return;
     }
     if (state.dirlistPromptPromise) {
@@ -8908,7 +8917,7 @@ async function processIncomingTransfers(files, options = {}) {
             const hasOsTransfer = selections.some(item => item.fileClass === 'os');
             if (successCount > 0) {
                 setSelectedFiles([]);
-                if (!hasOsTransfer) {
+                if (!hasOsTransfer && (state.features & FEATURE_FLAGS.OPS_DIRLIST) !== 0) {
                     await refreshDirlist();
                 }
             }
