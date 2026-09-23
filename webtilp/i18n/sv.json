@@ -253,6 +253,7 @@
   "status_connected": "Ansluten",
   "status_connection_failed": "Anslutning misslyckades",
   "status_evo_serial_authorization_required": "Klicka på Anslut kalkylator igen för att godkänna Evos serieport.",
+  "alert_evo_serial_authorization_required": "För att tillåta åtkomst till Evos serieport för första gången kräver webbläsaren ytterligare ett klick. Klicka på Anslut kalkylator igen och välj sedan Evos serieport i behörighetsdialogrutan.",
   "status_disconnected": "Frånkopplad",
   "status_device_connected": "Enhet ansluten",
   "status_webusb_unsupported": "WebUSB stöds inte",

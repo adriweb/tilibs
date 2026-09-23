@@ -253,6 +253,7 @@
   "status_connected": "متصل",
   "status_connection_failed": "اتصال ناموفق",
   "status_evo_serial_authorization_required": "برای دادن مجوز دسترسی به درگاه سریال Evo، دوباره روی اتصال ماشین‌حساب کلیک کنید.",
+  "alert_evo_serial_authorization_required": "برای اجازه دادن به دسترسی اولیه به درگاه سریال Evo، مرورگر به یک کلیک دیگر نیاز دارد. دوباره روی اتصال ماشین‌حساب کلیک کنید، سپس در پنجرهٔ مجوز، درگاه سریال Evo را انتخاب کنید.",
   "status_disconnected": "قطع شده",
   "status_device_connected": "دستگاه متصل شد",
   "status_webusb_unsupported": "WebUSB پشتیبانی نمی‌شود",
