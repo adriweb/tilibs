@@ -253,6 +253,7 @@
   "status_connected": "Coniunctus",
   "status_connection_failed": "Coniunctio defecit",
   "status_evo_serial_authorization_required": "Preme iterum Machinam iunge ut portum serialem Evo permittas.",
+  "alert_evo_serial_authorization_required": "Ut aditum ad portum serialem Evo primum permittas, navigator tuus alium cliccum requirit. Preme iterum Machinam iunge, deinde portum serialem Evo in fenestra permissionis elige.",
   "status_disconnected": "Disiunctus",
   "status_device_connected": "Apparatus coniunctus",
   "status_webusb_unsupported": "WebUSB non sustinetur",

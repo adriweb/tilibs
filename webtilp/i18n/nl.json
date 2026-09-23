@@ -253,6 +253,7 @@
   "status_connected": "Verbonden",
   "status_connection_failed": "Verbinding mislukt",
   "status_evo_serial_authorization_required": "Klik opnieuw op Rekenmachine verbinden om de seriële poort van de Evo te autoriseren.",
+  "alert_evo_serial_authorization_required": "Om voor het eerst toegang tot de seriële poort van je Evo toe te staan, vereist je browser nog een klik. Klik opnieuw op Rekenmachine verbinden en selecteer vervolgens de seriële poort van de Evo in het toestemmingsvenster.",
   "status_disconnected": "Verbroken",
   "status_device_connected": "Apparaat verbonden",
   "status_webusb_unsupported": "WebUSB niet ondersteund",
