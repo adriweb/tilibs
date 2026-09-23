@@ -9135,7 +9135,12 @@ async function receiveBackup() {
             module.FS.mkdir('/downloads');
         }
         const isTigroup = backupChoice.format === 'tigroup';
-        const target = isTigroup ? '/downloads/backup.tig' : '/downloads/backup.8xg';
+        const extension = isTigroup ? 'tig' : module.ccall('get_backup_ext', 'string', [], []);
+        if (!extension) {
+            throw new Error('No backup file extension is available for this calculator.');
+        }
+        const filename = `backup.${extension}`;
+        const target = `/downloads/${filename}`;
         const result = isTigroup
             ? await ccallAsync(module, 'calc_recv_tigroup', 'number', ['number', 'string', 'number'], [handle, target, backupChoice.mode], { timeoutMs: PROGRESS_IDLE_TIMEOUT_MS, useProgress: true, progressLabel: 'Receiving backup (tigroup)' })
             : await ccallAsync(module, 'calc_recv_backup', 'number', ['number', 'string'], [handle, target], { timeoutMs: PROGRESS_IDLE_TIMEOUT_MS, useProgress: true, progressLabel: 'Receiving backup' });
@@ -9143,7 +9148,7 @@ async function receiveBackup() {
             log(`Backup failed (${formatErrorResult(module, result)}).`);
             return;
         }
-        await downloadLastReceived(module, isTigroup ? 'backup.tig' : 'backup.8xg');
+        await downloadLastReceived(module, filename);
         log(isTigroup ? 'TIGroup backup received.' : 'Backup received.');
     } catch (err) {
         logError(err, 'Receive backup failed');
