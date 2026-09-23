@@ -827,6 +827,17 @@ int get_calc_model_id(void) {
 }
 
 EMSCRIPTEN_KEEPALIVE
+const char* get_backup_ext(void) {
+    if (!g_calc_handle) {
+        return nullptr;
+    }
+    // Match the native-backup / grouped-variables choice in recv_backup2.
+    return (ticalcs_calc_features(g_calc_handle) & FTS_BACKUP)
+        ? tifiles_fext_of_backup(g_calc_handle->model)
+        : tifiles_fext_of_group(g_calc_handle->model);
+}
+
+EMSCRIPTEN_KEEPALIVE
 int consume_cable_reopen_flag(void) {
     const int value = g_cable_reopen_needed;
     g_cable_reopen_needed = 0;
