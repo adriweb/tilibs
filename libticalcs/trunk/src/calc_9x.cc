@@ -672,6 +672,7 @@ static int		send_backup	(CalcHandle* handle, BackupContent* content)
 
 static int		recv_backup	(CalcHandle* handle, BackupContent* content)
 {
+	const uint32_t capacity = 128 * 1024;
 	uint32_t block_size;
 	int ret = 0;
 	uint16_t unused;
@@ -684,7 +685,7 @@ static int		recv_backup	(CalcHandle* handle, BackupContent* content)
 		{
 			content->model = CALC_TI92;
 			tifiles_comment_set_backup_sn(content->comment, sizeof(content->comment));
-			content->data_part = (uint8_t *)tifiles_ve_alloc_data(128 * 1024);
+			content->data_part = (uint8_t *)tifiles_ve_alloc_data(capacity);
 			content->type = TI92_BKUP;
 			content->data_length = 0;
 
@@ -710,17 +711,41 @@ static int		recv_backup	(CalcHandle* handle, BackupContent* content)
 					break;
 				}
 
+				if (ti92_backup_is_pre_1_0(handle, content->rom_version))
+				{
+					// These ROMs advertise N-1 in VAR, including 0 for one byte.
+					if (block_size >= capacity)
+					{
+						ret = ERR_INVALID_PACKET;
+						break;
+					}
+					block_size++;
+				}
+				if (block_size > capacity - content->data_length)
+				{
+					ret = ERR_INVALID_PACKET;
+					break;
+				}
+
 				ret = SEND_CTS(handle);
 				if (!ret)
 				{
 					ret = RECV_ACK(handle, NULL);
 					if (!ret)
 					{
-						uint8_t* ptr = content->data_part + content->data_length;
-						ret = RECV_XDP(handle, &unused, ptr);
+						// Receive into the packet buffer so the four-byte prefix
+						// does not consume space in the accumulated RAM image.
+						uint8_t* packet = (uint8_t *)handle->buffer2;
+						uint16_t xdp_size;
+						ret = RECV_XDP(handle, &xdp_size, packet);
 						if (!ret)
 						{
-							memmove(ptr, ptr + 4, block_size);
+							if (xdp_size < 4 || block_size != (uint32_t)(xdp_size - 4))
+							{
+								ret = ERR_INVALID_PACKET;
+								break;
+							}
+							memcpy(content->data_part + content->data_length, packet + 4, block_size);
 							ret = SEND_ACK(handle);
 							if (!ret)
 							{
