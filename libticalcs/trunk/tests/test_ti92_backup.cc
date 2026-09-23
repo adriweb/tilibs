@@ -8,6 +8,7 @@
 
 #include "../src/ticalcs.h"
 #include "../src/dbus_pkt.h"
+#include "../src/error.h"
 
 #define CHECK(condition) \
 	do { \
@@ -129,13 +130,53 @@ static void check_receive_name(const char *version, const char *name)
 	MockCalculator calc;
 	const std::vector<uint8_t> payload = { 0x19, 0x23, 0xa5 };
 	packet(DBUS_CMD_ACK);
-	backup_block(version, payload.size(), payload);
+	backup_block(version, payload.size() - (version[0] == '0' ? 1 : 0), payload);
 	packet(DBUS_CMD_EOT);
 	BackupContent *content = tifiles_content_create_backup(CALC_TI92);
 	CHECK(ticalcs_calc_recv_backup(calc.handle, content) == 0);
 	CHECK(received == incoming.size());
 	CHECK(strcmp(content->rom_version, name) == 0);
 	check_saved_backup(content, name, payload);
+	tifiles_content_delete_backup(content);
+}
+
+// Exercise consecutive blocks and the final S=0 block: it contains one
+// byte on pre-1.0 ROMs and no bytes on production ROMs.
+static void check_receive_blocks(const char *version, bool pre_1_0, size_t tail)
+{
+	MockCalculator calc;
+	packet(DBUS_CMD_ACK);
+	std::vector<uint8_t> expected;
+	const size_t sizes[] = { 1024, 1024, tail };
+	for (size_t size : sizes)
+	{
+		std::vector<uint8_t> payload(size);
+		for (size_t i = 0; i < size; i++)
+		{
+			payload[i] = (uint8_t)((expected.size() + i) * 37 + 0x5b);
+		}
+		backup_block(version, size - (pre_1_0 ? 1 : 0), payload);
+		expected.insert(expected.end(), payload.begin(), payload.end());
+	}
+	packet(DBUS_CMD_EOT);
+	BackupContent *content = tifiles_content_create_backup(CALC_TI92);
+	CHECK(ticalcs_calc_recv_backup(calc.handle, content) == 0);
+	CHECK(received == incoming.size());
+	CHECK(content->data_length == expected.size());
+	CHECK(memcmp(content->data_part, expected.data(), expected.size()) == 0);
+	check_saved_backup(content, pre_1_0 ? "a" : version, expected);
+	tifiles_content_delete_backup(content);
+}
+
+static void check_inconsistent_block_is_rejected(const char *version)
+{
+	MockCalculator calc;
+	packet(DBUS_CMD_ACK);
+	// A valid checksummed XDP, but too short for the advertised payload.
+	backup_block(version, 3, { 0x19, 0x23 });
+	BackupContent *content = tifiles_content_create_backup(CALC_TI92);
+	CHECK(ticalcs_calc_recv_backup(calc.handle, content) == ERR_INVALID_PACKET);
+	CHECK(content->data_length == 0);
 	tifiles_content_delete_backup(content);
 }
 
@@ -192,6 +233,19 @@ int main(void)
 		const char *name = version[0] == '0' ? "a" : version;
 		check_receive_name(version, name);
 		check_send_name(version, name);
+	}
+	for (const char *version : { "0.5d23", "0.6a19", "0.6a50" })
+	{
+		check_receive_blocks(version, true, 1);
+		check_receive_blocks(version, true, 81);
+		check_inconsistent_block_is_rejected(version);
+	}
+	for (const char *version : { "1.0", "1.0b1", "1.12", "2.1" })
+	{
+		check_receive_blocks(version, false, 0);
+		check_receive_blocks(version, false, 1);
+		check_receive_blocks(version, false, 81);
+		check_inconsistent_block_is_rejected(version);
 	}
 	return 0;
 }
