@@ -24,6 +24,7 @@ function setup({ activation = true, authorized = false, serialError = null } = {
     const port = { getInfo: () => ({ usbVendorId: 0x0451, usbProductId: 0xe018 }) };
     const calls = [];
     const errors = [];
+    const alerts = [];
     const state = { settings: { cableModel: 'auto' }, connected: false, handle: 0 };
     const context = {
         state, DOMException,
@@ -37,6 +38,9 @@ function setup({ activation = true, authorized = false, serialError = null } = {
                     calls.push('serial chooser');
                     assert.equal(options.filters[0].usbProductId, 0xe018);
                     if (serialError) throw serialError;
+                    if (context.navigator.userActivation?.isActive === false) {
+                        throw new DOMException('Must be handling a user gesture', 'SecurityError');
+                    }
                     return port;
                 }
             }
@@ -46,6 +50,7 @@ function setup({ activation = true, authorized = false, serialError = null } = {
         DEVICE_FAMILY_TI: 'ti', DEVICE_FAMILY_NUMWORKS: 'numworks', DEVICE_FAMILY_HP_PRIME: 'hp-prime',
         els: { btnConnect: {} },
         t: key => key,
+        alert(message) { alerts.push(message); },
         setButtonLoading(_button, loading) { state.loading = loading; },
         setStatus(key) { state.status = key; },
         setConnected(value) { state.connected = value; },
@@ -70,16 +75,17 @@ function setup({ activation = true, authorized = false, serialError = null } = {
         'bindSerialPortToModule', 'authorizeDevice', 'connectTI', 'connect']) {
         vm.runInContext(extractFunction(name), context);
     }
-    return { context, state, calls, errors, usbDevice, port };
+    return { context, state, calls, errors, alerts, usbDevice, port };
 }
 
 async function main() {
     const permissionStatus = 'status_evo_serial_authorization_required';
     for (const options of [
         { activation: false },
+        { serialError: new DOMException('No port selected by the user.', 'NotFoundError') },
         { serialError: new DOMException("Failed to execute 'requestPort' on 'Serial': Must be handling a user gesture to show a permission request.", 'SecurityError') }
     ]) {
-        const { context, state, calls, errors, usbDevice, port } = setup(options);
+        const { context, state, calls, errors, alerts, usbDevice, port } = setup(options);
         await context.connect();
         assert.equal(state.status, permissionStatus);
         assert.equal(state.connected, false);
@@ -88,9 +94,11 @@ async function main() {
         assert.equal(state.pendingEvoUsbDevice, usbDevice);
         assert.equal(errors.length, 0, 'gesture expiry is a recoverable authorization step');
         assert.equal(calls.includes('open cable'), false);
-        if (options.activation === false) {
-            assert.equal(calls.includes('serial chooser'), false, 'do not prompt without activation');
-        }
+        assert.equal(calls.includes('serial chooser'), true, 'attempt serial authorization automatically');
+        assert.equal(calls.filter(call => call === 'serial chooser').length,
+            options.serialError?.name === 'NotFoundError' ? 2 : 1,
+            'retry a missing selection automatically once, but defer gesture errors to a fresh click');
+        assert.deepEqual(alerts, ['alert_evo_serial_authorization_required']);
 
         context.navigator.userActivation.isActive = true;
         calls.length = 0;
@@ -106,11 +114,14 @@ async function main() {
         assert.equal(state.authorizedDevice.productName, usbDevice.productName);
         assert.equal(state.pendingEvoUsbDevice, null);
         assert.equal(state.loading, false);
+        assert.equal(alerts.length, 1, 'successful retry does not repeat the alert');
     }
 
     for (const family of ['ti', 'numworks', 'hp-prime']) {
         for (const finishEvoConnection of [false, true]) {
-            const { context, state, calls, errors, port } = setup({ activation: false });
+            const { context, state, calls, errors, alerts, port } = setup({
+                serialError: new DOMException('No port selected by the user.', 'NotFoundError')
+            });
             await context.connect();
             assert.equal(state.status, permissionStatus);
 
@@ -122,6 +133,7 @@ async function main() {
             await context.connect();
             assert.equal(state.pendingEvoUsbDevice, null,
                 'both successful and cancelled serial authorization release the pending selection');
+            assert.equal(alerts.length, 1, 'cancelling the fresh-click chooser does not restart the retry flow');
             assert.equal(state.status, finishEvoConnection ? 'status_connected' : 'status_select_device');
             assert.equal(state.loading, false);
 
@@ -156,17 +168,65 @@ async function main() {
     await authorized.context.connect();
     assert.equal(authorized.state.connected, true);
     assert.equal(authorized.calls.includes('serial chooser'), false, 'existing serial grants need no gesture');
+    assert.deepEqual(authorized.alerts, []);
 
-    const firstTry = setup();
-    await firstTry.context.connect();
-    assert.equal(firstTry.state.connected, true, 'direct authorization still works while activation remains');
+    for (const activation of [true, false, undefined]) {
+        const automatic = setup({ activation });
+        if (activation === undefined) delete automatic.context.navigator.userActivation;
+        automatic.context.navigator.serial.requestPort = async () => {
+            automatic.calls.push('serial chooser');
+            return automatic.port;
+        };
+        await automatic.context.connect();
+        assert.equal(automatic.state.connected, true, 'accept automatic authorization when the browser allows it');
+        assert.deepEqual(automatic.calls, ['usb chooser', 'module', 'serial chooser', 'open cable']);
+        assert.equal(automatic.state.authorizedDevice.productName, automatic.usbDevice.productName);
+        assert.deepEqual(automatic.alerts, []);
+    }
+
+    for (const retryNeedsGesture of [false, true]) {
+        const automaticRetry = setup();
+        let attempts = 0;
+        automaticRetry.context.navigator.serial.requestPort = async options => {
+            attempts++;
+            assert.equal(options.filters[0].usbVendorId, 0x0451);
+            assert.equal(options.filters[0].usbProductId, 0xe018);
+            if (attempts === 1) throw new DOMException('No port selected by the user.', 'NotFoundError');
+            if (retryNeedsGesture) throw new DOMException('Must be handling a user gesture', 'SecurityError');
+            return automaticRetry.port;
+        };
+        await automaticRetry.context.connect();
+        assert.equal(attempts, 2);
+        assert.equal(automaticRetry.state.connected, !retryNeedsGesture);
+        assert.equal(automaticRetry.state.status, retryNeedsGesture ? permissionStatus : 'status_connected');
+        assert.deepEqual(automaticRetry.alerts, retryNeedsGesture ? ['alert_evo_serial_authorization_required'] : []);
+        assert.equal(automaticRetry.errors.length, 0);
+        if (!retryNeedsGesture) assert.equal(automaticRetry.state.authorizedDevice.serialPort, automaticRetry.port);
+    }
+
+    const direct = setup();
+    const directSelection = direct.context.requestTIEvoSerialDevice();
+    assert.deepEqual(direct.calls, ['serial chooser'], 'serial-only authorization prompts before any await');
+    assert.equal((await directSelection).serialPort, direct.port);
+
+    const expired = setup({ activation: false });
+    await expired.context.connect();
+    expired.context.navigator.userActivation.isActive = true;
+    expired.context.navigator.serial.requestPort = async () => {
+        throw new DOMException('Must be handling a user gesture', 'SecurityError');
+    };
+    await expired.context.connect();
+    assert.equal(expired.state.status, permissionStatus, 'gesture errors on the second click remain recoverable');
+    assert.equal(expired.state.pendingEvoUsbDevice, expired.usbDevice);
+    assert.equal(expired.errors.length, 0);
+    assert.equal(expired.alerts.length, 2);
 
     for (const name of ['SecurityError', 'NetworkError']) {
         const genuineError = new DOMException('Access denied by permissions policy', name);
         const blocked = setup({ serialError: genuineError });
         await blocked.context.connect();
         assert.equal(blocked.state.status, 'status_connection_failed');
-        assert.equal(blocked.state.pendingEvoUsbDevice, null);
+        assert.deepEqual(blocked.alerts, [], 'unrelated errors do not ask for a permission retry');
         assert.ok(blocked.errors.includes(genuineError), 'unrelated errors remain visible');
     }
     console.log('Evo serial authorization frontend tests passed');

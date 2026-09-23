@@ -253,6 +253,7 @@
   "status_connected": "Conectado",
   "status_connection_failed": "Error de conexión",
   "status_evo_serial_authorization_required": "Haz clic de nuevo en Conectar calculadora para autorizar el puerto serie de la Evo.",
+  "alert_evo_serial_authorization_required": "Para autorizar por primera vez el acceso al puerto serie de tu Evo, el navegador requiere otro clic. Haz clic de nuevo en Conectar calculadora y selecciona el puerto serie de la Evo en el diálogo de permisos.",
   "status_disconnected": "Desconectado",
   "status_device_connected": "Dispositivo conectado",
   "status_webusb_unsupported": "WebUSB no compatible",
