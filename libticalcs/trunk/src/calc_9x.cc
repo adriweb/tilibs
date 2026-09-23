@@ -610,9 +610,17 @@ static int		get_memfree	(CalcHandle* handle, uint32_t* ram, uint32_t *flash)
 	return 0;
 }
 
+static bool ti92_backup_is_pre_1_0(CalcHandle* handle, const char *rom_version)
+{
+	return handle->model == CALC_TI92 && rom_version[0] == '0' && rom_version[1] == '.'
+	       && rom_version[2] >= '0' && rom_version[2] <= '9';
+}
+
 static int		send_backup	(CalcHandle* handle, BackupContent* content)
 {
-	int ret = SEND_VAR(handle, content->data_length, TI92_BKUP, content->rom_version);
+	// Pre-1.0 ROMs require a one-character backup name, not the ROM version.
+	const char *name = ti92_backup_is_pre_1_0(handle, content->rom_version) ? "a" : content->rom_version;
+	int ret = SEND_VAR(handle, content->data_length, TI92_BKUP, name);
 	if (!ret)
 	{
 		ret = RECV_ACK(handle, NULL);
@@ -626,7 +634,7 @@ static int		send_backup	(CalcHandle* handle, BackupContent* content)
 			{
 				const uint32_t length = (i != nblocks) ? 1024 : content->data_length % 1024;
 
-				ret = SEND_VAR(handle, length, TI92_BKUP, content->rom_version);
+				ret = SEND_VAR(handle, length, TI92_BKUP, name);
 				if (!ret)
 				{
 					ret = RECV_ACK(handle, NULL);
@@ -723,6 +731,14 @@ static int		recv_backup	(CalcHandle* handle, BackupContent* content)
 				}
 			}
 		}
+	}
+
+	// Keep the received version available while processing the blocks, then
+	// store the name accepted by these ROMs in the .92b header.
+	if (!ret && ti92_backup_is_pre_1_0(handle, content->rom_version))
+	{
+		memset(content->rom_version, 0, sizeof(content->rom_version));
+		content->rom_version[0] = 'a';
 	}
 
 	return ret;
