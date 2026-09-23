@@ -253,6 +253,7 @@
   "status_connected": "متصل",
   "status_connection_failed": "فشل الاتصال",
   "status_evo_serial_authorization_required": "انقر على اتصال بالآلة الحاسبة مرة أخرى للسماح بالوصول إلى المنفذ التسلسلي لـ Evo.",
+  "alert_evo_serial_authorization_required": "للسماح بالوصول إلى المنفذ التسلسلي لآلة Evo لأول مرة، يتطلب المتصفح نقرة أخرى. انقر على اتصال بالآلة الحاسبة مرة أخرى، ثم اختر المنفذ التسلسلي لآلة Evo في نافذة الأذونات.",
   "status_disconnected": "غير متصل",
   "status_device_connected": "تم توصيل الجهاز",
   "status_webusb_unsupported": "WebUSB غير مدعوم",
