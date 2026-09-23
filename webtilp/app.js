@@ -343,9 +343,7 @@ async function requestTIEvoSerialDevice(usbDevice = null) {
         throw new Error('WebSerial requires HTTPS or localhost.');
     }
     try {
-        if (usbDevice && navigator.userActivation?.isActive === false) {
-            throw new DOMException('Serial authorization requires a user gesture.', 'SecurityError');
-        }
+        // Let the browser decide whether the current gesture permits a chooser.
         const port = await navigator.serial.requestPort({
             filters: [{ usbVendorId: TI_VENDOR_ID, usbProductId: PID_TI84_EVO_SERIAL }]
         });
@@ -400,9 +398,17 @@ async function requestEvoSerialForUsbDevice(usbDevice) {
     if (authorizedSerial) {
         return authorizedSerial;
     }
-    const serialDevice = await requestTIEvoSerialDevice(usbDevice);
+    let serialDevice = await requestTIEvoSerialDevice(usbDevice);
     if (!serialDevice) {
-        return null;
+        // A chained chooser can report no selection without appearing. Try
+        // once more automatically before asking for a fresh Connect click.
+        serialDevice = await requestTIEvoSerialDevice(usbDevice);
+    }
+    if (!serialDevice) {
+        state.pendingEvoUsbDevice = usbDevice;
+        const error = new Error('TI-83/84 Evo serial port authorization is required.');
+        error.evoSerialAuthorizationRequired = true;
+        throw error;
     }
     serialDevice.productName = usbDevice.productName || serialDevice.productName;
     return serialDevice;
@@ -811,6 +817,7 @@ const I18N_EN = {
     "status_connected": "Connected",
     "status_connection_failed": "Connection failed",
     "status_evo_serial_authorization_required": "Click Connect Calculator again to authorize the Evo serial port.",
+    "alert_evo_serial_authorization_required": "To authorize access to your Evo serial port for the first time, your browser requires another click. Click Connect Calculator again, then select the Evo serial port in the permission dialog.",
     "status_disconnected": "Disconnected",
     "status_device_connected": "Device connected",
     "status_webusb_unsupported": "WebUSB unsupported",
@@ -5802,6 +5809,7 @@ async function connect() {
         if (err?.evoSerialAuthorizationRequired) {
             setStatus('status_evo_serial_authorization_required', false);
             log(t('status_evo_serial_authorization_required'));
+            alert(t('alert_evo_serial_authorization_required'));
             return;
         }
         if (hadWorkingConnection) {
