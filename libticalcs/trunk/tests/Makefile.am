@@ -5,7 +5,7 @@ AM_CPPFLAGS = -I$(top_srcdir)/src \
 
 EXTRA_DIST = ticalcs2.supp vcheck
 
-noinst_PROGRAMS = test_ticalcs_2 torture_ticalcs test_evo_errors test_evo_protocol test_nsp_protocol
+noinst_PROGRAMS = test_ticalcs_2 torture_ticalcs test_evo_errors test_evo_protocol test_nsp_protocol test_ti92_backup
 
 test_ticalcs_2_SOURCES = test_ticalcs_2.cc
 test_ticalcs_2_LDADD = $(top_builddir)/src/libticalcs2.la \
@@ -23,4 +23,8 @@ test_nsp_protocol_SOURCES = test_nsp_protocol.cc
 test_nsp_protocol_LDADD = $(top_builddir)/src/libticalcs2.la \
 	@GLIB_LIBS@ @TICABLES_LIBS@ @TIFILES_LIBS@ @TICONV_LIBS@
 
-TESTS = torture_ticalcs test_evo_errors test_evo_protocol test_nsp_protocol
+TESTS = torture_ticalcs test_evo_errors test_evo_protocol test_nsp_protocol test_ti92_backup
+
+test_ti92_backup_SOURCES = test_ti92_backup.cc
+test_ti92_backup_LDADD = $(top_builddir)/src/libticalcs2.la \
+	@GLIB_LIBS@ @TICABLES_LIBS@ @TIFILES_LIBS@ @TICONV_LIBS@
