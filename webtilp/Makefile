@@ -146,6 +146,7 @@ test:
 	node tests/test_calc_models.js
 	node tests/test_themes.js
 	node tests/test_dirlist_capabilities.js
+	node tests/test_var_send_frontend.js
 	node tests/test_numworks_backend.js
 	node tests/test_numworks_frontend.js
 	python3 i18n/check.py
@@ -153,7 +154,12 @@ test:
 $(TARGET): $(SRC) $(LIBS) $(PREJS)
 	$(EMCC) $(CXXFLAGS) $(SRC) $(INCLUDES) $(LIBS) -o $(TARGET) $(EMCCFLAGS)
 
+test-var-send-wasm:
+	@set -e; test_dir=$$(mktemp -d); trap 'rm -rf "$$test_dir"' EXIT; \
+	$(EMCC) $(CXXFLAGS) tests/test_var_send_wasm.cpp hp_prime_bridge.cpp hp_prime_app.cpp $(INCLUDES) $(LIBS) -o "$$test_dir/var_send.js" $(EMCCFLAGS); \
+	node tests/test_var_send_wasm.cjs "$$test_dir/var_send.js"
+
 clean:
 	rm -f $(TARGET) webtilp.wasm webtilp.worker.js sw.js version.json $(APP_JS_BUNDLE) $(NUMWORKS_JS_BUNDLE) $(BUILD_PROFILE_CSS) $(PYTHON_CONVERTER_ASSETS)
 
-.PHONY: all dev prod prepare_dev prepare_prod prepare_python_converters test clean stamp
+.PHONY: all dev prod prepare_dev prepare_prod prepare_python_converters test test-var-send-wasm clean stamp

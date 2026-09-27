@@ -29,6 +29,7 @@ const TI_USB_DEVICES = [
  // { productId: 0xE011, name: "Nspire CAS+ prototype" },                   // protocol not supported
     { productId: 0xE012, name: "TI-Nspire Hand-Held" },
  // { productId: 0xE013, name: "Network Bridge" },                          // not for us
+ // { productId: 0xE015, name: "TI-Rover BT" },                             // not for us
  // { productId: 0xE016, name: "TI Bluetooth Adapter" },                    // not for us
     { productId: 0xE018, name: "TI-83/84 Evo" },                            // CDC serial: selected through WebUSB, data through WebSerial
     { productId: 0xE01C, name: "Data Collection Sled [Nspire Lab Cradle, Nspire Datatracker Cradle]" },
@@ -8594,6 +8595,18 @@ function findDirlistMatch(name, type, folder, location) {
 
 async function performTransfers(plan, module, options) {
     const handle = await ensureCableOpen();
+    const model = getActiveCalcModelId();
+    const needsEot = model === 2 || model === 6; // TI-82 / TI-85
+    let pendingEot = false;
+    const finishVarSend = async () => {
+        if (!pendingEot) return;
+        pendingEot = false;
+        const result = await ccallAsync(module, 'finish_var_send', 'number', ['number'], [handle],
+            { timeoutMs: 60000, useProgress: true, progressLabel: 'Finishing transfer' });
+        if (result !== 0) {
+            throw new Error(`Failed to finish transfer: ${formatErrorResult(module, result)}`);
+        }
+    };
     let successCount = 0;
     const configuredCableTimeout = Number(state.settings?.cableTimeout);
     const originalCableTimeout = Number.isFinite(configuredCableTimeout) && configuredCableTimeout > 0
@@ -8729,14 +8742,19 @@ async function performTransfers(plan, module, options) {
 
             let result = 0;
             try {
+                const deferEot = needsEot && isVar;
+                if (!deferEot) await finishVarSend();
+                // A failed send may leave the protocol out of sync. Only
+                // finalize after a successful data exchange, never after abort.
+                pendingEot = false;
                 clearNativeWarnings();
                 if (item.sendByEntry && Number.isInteger(item.entryIndex)) {
                     result = await ccallAsync(
                         module,
                         'send_file_entry_custom',
                         'number',
-                        ['number', 'string', 'number', 'number', 'string', 'number'],
-                        [handle, item.path, item.entryIndex, item.containerKind || 0, folderOverride, locationCode],
+                        ['number', 'string', 'number', 'number', 'string', 'number', 'number'],
+                        [handle, item.path, item.entryIndex, item.containerKind || 0, folderOverride, locationCode, Number(deferEot)],
                         { timeoutMs: 60000, useProgress: true, progressLabel: `Sending ${displayName}` }
                     );
                 } else {
@@ -8744,11 +8762,12 @@ async function performTransfers(plan, module, options) {
                         module,
                         'send_file_custom',
                         'number',
-                        ['number', 'string', 'string', 'number'],
-                        [handle, item.path, folderOverride, locationCode],
+                        ['number', 'string', 'string', 'number', 'number'],
+                        [handle, item.path, folderOverride, locationCode, Number(deferEot)],
                         { timeoutMs: 60000, useProgress: true, progressLabel: `Sending ${displayName}` }
                     );
                 }
+                pendingEot = deferEot && result === 0;
             } finally {
                 if (timeoutAdjusted) {
                     try {
@@ -8774,16 +8793,22 @@ async function performTransfers(plan, module, options) {
                     });
                 }
             } else {
+                if (needsEot) {
+                    throw new Error(`Failed to send ${displayName}: ${formatErrorResult(module, result)}.${getNativeWarningSuffix(result)}`);
+                }
                 log(`Failed to send ${displayName}: ${formatErrorResult(module, result)}.${getNativeWarningSuffix(result)}`);
             }
         } catch (err) {
-            if (err?.silent) {
+            if (err?.silent || needsEot) {
                 throw err;
             }
             const label = item?.entryName ? `${item.file?.name || 'file'} (${item.entryName})` : (item.file?.name || 'file');
             log(`Failed to send ${label}: ${err?.message || 'unknown error'}.${getNativeWarningSuffix()}`);
         }
     }
+    // Close even when trailing entries were skipped (e.g. overwrite declined).
+    // Do not report a successful batch until the calculator acknowledges EOT.
+    await finishVarSend();
     return { successCount };
 }
 
