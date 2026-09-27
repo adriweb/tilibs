@@ -2563,8 +2563,29 @@ finish:
     return json_buf;
 }
 
+static CalcMode var_send_mode(int defer_eot) {
+    // TI-82/85 keep receiving until the caller explicitly ends the batch.
+    return !defer_eot && (g_calc_model == CALC_TI82 || g_calc_model == CALC_TI85)
+        ? MODE_SEND_LAST_VAR : MODE_NORMAL;
+}
+
 EMSCRIPTEN_KEEPALIVE
-int send_file_custom(CableHandle* cable_handle, const char* filename, const char* folder, int location) {
+int finish_var_send(CableHandle* cable_handle) {
+    if (g_calc_model != CALC_TI82 && g_calc_model != CALC_TI85) {
+        return 0;
+    }
+    if (!g_calc_handle || !g_calc_attached || cable_handle != g_cable_handle) {
+        return ERR_WEB_INVALID_ARGUMENT;
+    }
+
+    // An empty batch sends only EOT and waits for its ACK, without another VAR.
+    FileContent content{};
+    content.model = content.model_dst = g_calc_model;
+    return ticalcs_calc_send_var(g_calc_handle, MODE_SEND_LAST_VAR, &content);
+}
+
+EMSCRIPTEN_KEEPALIVE
+int send_file_custom(CableHandle* cable_handle, const char* filename, const char* folder, int location, int defer_eot) {
     if (!filename || !*filename) {
         printf("ERROR: No filename provided\n");
         return ERR_WEB_INVALID_ARGUMENT;
@@ -2617,7 +2638,7 @@ int send_file_custom(CableHandle* cable_handle, const char* filename, const char
             apply_var_entry_overrides(ve, folder, location);
         }
 
-        result = ticalcs_calc_send_var(g_calc_handle, MODE_NORMAL, content);
+        result = ticalcs_calc_send_var(g_calc_handle, var_send_mode(defer_eot), content);
         tifiles_content_delete_regular(content);
     }
 
@@ -2626,7 +2647,7 @@ int send_file_custom(CableHandle* cable_handle, const char* filename, const char
 }
 
 EMSCRIPTEN_KEEPALIVE
-int send_file_entry_custom(CableHandle* cable_handle, const char* filename, int entry_index, int container_kind, const char* folder, int location) {
+int send_file_entry_custom(CableHandle* cable_handle, const char* filename, int entry_index, int container_kind, const char* folder, int location, int defer_eot) {
     if (!filename || !*filename) {
         printf("ERROR: No filename provided\n");
         return ERR_WEB_INVALID_ARGUMENT;
@@ -2682,7 +2703,7 @@ int send_file_entry_custom(CableHandle* cable_handle, const char* filename, int 
                 return ERR_WEB_OUT_OF_MEMORY;
             }
             apply_var_entry_overrides(single->entries[0], folder, location);
-            result = ticalcs_calc_send_var(g_calc_handle, MODE_NORMAL, single);
+            result = ticalcs_calc_send_var(g_calc_handle, var_send_mode(defer_eot), single);
             tifiles_content_delete_regular(single);
         }
 
@@ -2709,7 +2730,7 @@ int send_file_entry_custom(CableHandle* cable_handle, const char* filename, int 
         }
 
         apply_var_entry_overrides(single->entries[0], folder, location);
-        result = ticalcs_calc_send_var(g_calc_handle, MODE_NORMAL, single);
+        result = ticalcs_calc_send_var(g_calc_handle, var_send_mode(defer_eot), single);
         tifiles_content_delete_regular(single);
         tifiles_content_delete_regular(content);
     }
