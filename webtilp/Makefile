@@ -147,6 +147,7 @@ test:
 	node tests/test_themes.js
 	node tests/test_dirlist_capabilities.js
 	node tests/test_var_send_frontend.js
+	node tests/test_source_conversion.js
 	node tests/test_numworks_backend.js
 	node tests/test_numworks_frontend.js
 	python3 i18n/check.py
