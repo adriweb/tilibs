@@ -764,8 +764,8 @@ const I18N_EN = {
     "cable_timeout": "Cable timeout (1/10s)",
     "cable_delay": "Cable delay (us)",
     "language": "Language",
-    "convert_python_files": "Convert Python files (.py <-> calculator format)",
-    "convert_python_files_nspire": "Convert Python files (.py -> .tns)",
+    "convert_script_files": "Convert .py and .lua scripts to calculator format",
+    "source_conversion_name_conflict": "Multiple selected files would be sent as {name}. Rename one before transferring.",
     "settings_note": "Changing settings resets the current handle. Reconnect for full effect.",
     "offline_ready": "This app can now run without a network connection.",
     "offline_update_available": "An update is available. Reload to use the latest version.",
@@ -1571,7 +1571,7 @@ const SETTINGS_DEFAULTS = {
     cableTimeout: 50,
     cableDelay: 10,
     language: 'auto',
-    convertPythonFiles: true
+    convertScriptFiles: true
 };
 
 const CABLE_OPTIONS = [
@@ -1644,6 +1644,7 @@ const EVO_PYTHON_CALC_MODELS = new Map([
     [50, '84Evo']
 ]);
 const NSPIRE_CXII_PYTHON_CALC_MODELS = new Set([32, 33, 34, 35]);
+const NSPIRE_LUA_CALC_MODELS = new Set([15, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35]);
 const TIVARS_PREVIEW_CALC_MODELS = new Set([
     1, 2, 3, 4, 5, 13, 17, 18, 19, 20, 21, 22, 36, 48, 49, 50
 ]);
@@ -3275,8 +3276,8 @@ const els = {
     settingTimeout: document.getElementById('settingTimeout'),
     settingDelay: document.getElementById('settingDelay'),
     settingLanguage: document.getElementById('settingLanguage'),
-    settingConvertPythonFiles: document.getElementById('settingConvertPythonFiles'),
-    settingConvertPythonFilesField: document.getElementById('settingConvertPythonFilesField'),
+    settingConvertScriptFiles: document.getElementById('settingConvertScriptFiles'),
+    settingConvertScriptFilesField: document.getElementById('settingConvertScriptFilesField'),
     transferModal: document.getElementById('transferModal'),
     transferTableBody: document.getElementById('transferTableBody'),
     transferOverwriteAll: document.getElementById('transferOverwriteAll'),
@@ -3461,7 +3462,12 @@ function loadSettings() {
     }
     try {
         const parsed = JSON.parse(raw);
-        const { deviceFamily: _legacyDeviceFamily, ...persisted } = parsed;
+        const {
+            deviceFamily: _legacyDeviceFamily,
+            convertPythonFiles: legacyConvertPythonFiles,
+            convertLuaFiles: legacyConvertLuaFiles,
+            ...persisted
+        } = parsed;
         let calcModel = String(parsed.calcModel ?? SETTINGS_DEFAULTS.calcModel);
         // experimental2 reordered lab equipment and inserted five USB models before Evo.
         if (Number(parsed.calcModelSchemaVersion ?? 1) < SETTINGS_DEFAULTS.calcModelSchemaVersion) {
@@ -3477,7 +3483,10 @@ function loadSettings() {
             cableTimeout: Number(parsed.cableTimeout ?? SETTINGS_DEFAULTS.cableTimeout),
             cableDelay: Number(parsed.cableDelay ?? SETTINGS_DEFAULTS.cableDelay),
             language: normalizeLanguageCode(parsed.language) || 'auto',
-            convertPythonFiles: parsed.convertPythonFiles !== false
+            // Keep an existing opt-out when merging the old conversion settings.
+            convertScriptFiles: typeof parsed.convertScriptFiles === 'boolean'
+                ? parsed.convertScriptFiles
+                : legacyConvertPythonFiles !== false && legacyConvertLuaFiles !== false
         };
     } catch (err) {
         console.warn('[WebTILP] Failed to load settings', err);
@@ -3756,29 +3765,20 @@ function getPythonConversionKind(model) {
     return PYTHON_CONVERSION_NONE;
 }
 
-function getSelectedPythonConversionKind() {
+function getSelectedConversionModelId() {
     const selectedModel = els.settingCalcModel?.value ?? state.settings?.calcModel ?? 'auto';
-    const modelId = selectedModel === 'auto' ? getActiveCalcModelId() : Number(selectedModel);
-    return getPythonConversionKind(modelId);
+    return selectedModel === 'auto' ? getActiveCalcModelId() : Number(selectedModel);
 }
 
-function updatePythonConversionSettingAvailability() {
-    if (!els.settingConvertPythonFiles) {
+function updateSourceConversionSettingAvailability() {
+    if (!els.settingConvertScriptFiles) {
         return;
     }
-    const conversionKind = getSelectedPythonConversionKind();
-    const supported = conversionKind !== PYTHON_CONVERSION_NONE;
-    els.settingConvertPythonFiles.disabled = !supported;
-    setTextContent(
-        document.getElementById('settingConvertPythonFilesLabel'),
-        t(conversionKind === PYTHON_CONVERSION_NSPIRE_CXII ? 'convert_python_files_nspire' : 'convert_python_files')
-    );
-    if (els.settingConvertPythonFilesField) {
-        els.settingConvertPythonFilesField.classList.toggle('disabled', !supported);
-        els.settingConvertPythonFilesField.title = supported
-            ? ''
-            : 'Python source conversion is available only for CE, Evo, and TI-Nspire CX II models.';
-    }
+    const modelId = getSelectedConversionModelId();
+    const supported = getPythonConversionKind(modelId) !== PYTHON_CONVERSION_NONE
+        || NSPIRE_LUA_CALC_MODELS.has(modelId);
+    els.settingConvertScriptFiles.disabled = !supported;
+    els.settingConvertScriptFilesField?.classList.toggle('disabled', !supported);
 }
 
 function resolveDeviceModelName(infoProductName) {
@@ -4029,7 +4029,7 @@ async function applyTranslations() {
     setTextContent(document.getElementById('settingTimeoutLabel'), t('cable_timeout'));
     setTextContent(document.getElementById('settingDelayLabel'), t('cable_delay'));
     setTextContent(document.getElementById('settingLanguageLabel'), t('language'));
-    setTextContent(document.getElementById('settingConvertPythonFilesLabel'), t('convert_python_files'));
+    setTextContent(document.getElementById('settingConvertScriptFilesLabel'), t('convert_script_files'));
     setTextContent(document.getElementById('settingsNote'), t('settings_note'));
     setTextContent(document.getElementById('offlineBannerText'), state.offlineUpdateShown ? t('offline_update_available') : t('offline_ready'));
     setIconLabel(els.btnReloadOffline, 'refresh-cw', t('reload_for_update'), '↻');
@@ -4087,7 +4087,7 @@ async function applyTranslations() {
     }
     updateThemeButton();
     updateCalcHint(els.settingCableModel?.value || state.settings?.cableModel || 'auto');
-    updatePythonConversionSettingAvailability();
+    updateSourceConversionSettingAvailability();
     applyActiveFamilyUiState({
         tiCapabilitiesKnown: state.connected
             && state.activeFamily === DEVICE_FAMILY_TI
@@ -4104,11 +4104,11 @@ function seedSettingsForm() {
     els.settingDelay.value = state.settings.cableDelay;
     populateSelect(els.settingLanguage, LANGUAGE_OPTIONS);
     els.settingLanguage.value = state.settings.language || 'auto';
-    if (els.settingConvertPythonFiles) {
-        els.settingConvertPythonFiles.checked = state.settings.convertPythonFiles !== false;
+    if (els.settingConvertScriptFiles) {
+        els.settingConvertScriptFiles.checked = state.settings.convertScriptFiles !== false;
     }
     updateCalcHint(els.settingCableModel.value);
-    updatePythonConversionSettingAvailability();
+    updateSourceConversionSettingAvailability();
 }
 
 function openSettingsModal() {
@@ -4191,7 +4191,7 @@ async function saveSettingsFromModal() {
         cableTimeout: Number(els.settingTimeout.value || SETTINGS_DEFAULTS.cableTimeout),
         cableDelay: Number(els.settingDelay.value || SETTINGS_DEFAULTS.cableDelay),
         language: normalizeLanguageCode(els.settingLanguage.value) || 'auto',
-        convertPythonFiles: els.settingConvertPythonFiles ? els.settingConvertPythonFiles.checked : SETTINGS_DEFAULTS.convertPythonFiles
+        convertScriptFiles: els.settingConvertScriptFiles ? els.settingConvertScriptFiles.checked : SETTINGS_DEFAULTS.convertScriptFiles
     };
     if (JSON.stringify(state.settings) === JSON.stringify(nextSettings)) {
         closeSettingsModal();
@@ -4203,7 +4203,7 @@ async function saveSettingsFromModal() {
         && state.settings.calcModel === nextSettings.calcModel
         && Number(state.settings.cableTimeout) === Number(nextSettings.cableTimeout)
         && Number(state.settings.cableDelay) === Number(nextSettings.cableDelay)
-        && state.settings.convertPythonFiles === nextSettings.convertPythonFiles
+        && state.settings.convertScriptFiles === nextSettings.convertScriptFiles
         && state.settings.language !== nextSettings.language;
     const conversionOnlyChange = state.settings
         && state.settings.cableModel === nextSettings.cableModel
@@ -4211,13 +4211,13 @@ async function saveSettingsFromModal() {
         && Number(state.settings.cableTimeout) === Number(nextSettings.cableTimeout)
         && Number(state.settings.cableDelay) === Number(nextSettings.cableDelay)
         && state.settings.language === nextSettings.language
-        && state.settings.convertPythonFiles !== nextSettings.convertPythonFiles;
+        && state.settings.convertScriptFiles !== nextSettings.convertScriptFiles;
     state.settings = nextSettings;
     saveSettings();
     if (conversionOnlyChange) {
         applySettingsToModule();
         closeSettingsModal();
-        log('Python file conversion setting updated.');
+        log('Source file conversion settings updated.');
         return;
     }
     if (languageOnlyChange) {
@@ -7915,7 +7915,7 @@ async function convertTivarsPythonSource(file, data, module, modelId, conversion
     }
 }
 
-async function convertNspirePythonSource(file, data, module) {
+async function convertNspireScriptSource(file, data, module) {
     const luna = await getWebLuna();
     const inputName = String(file.name || 'python.py').replace(/[\\/]/g, '_');
     const outputName = inputName.replace(/\.[^.]*$/, '') + '.tns';
@@ -7952,7 +7952,7 @@ async function convertPythonSourceForCalc(file, data, module, modelId, conversio
         return convertTivarsPythonSource(file, data, module, modelId, conversionKind);
     }
     if (conversionKind === PYTHON_CONVERSION_NSPIRE_CXII) {
-        return convertNspirePythonSource(file, data, module);
+        return convertNspireScriptSource(file, data, module);
     }
     return '';
 }
@@ -8018,17 +8018,23 @@ async function buildTransferPlan(files, module) {
         const data = new Uint8Array(await file.arrayBuffer());
         const path = `/uploads/${file.name}`;
         module.FS.writeFile(path, data);
-        if (state.settings?.convertPythonFiles !== false
+        const convertPython = state.settings?.convertScriptFiles !== false
             && pythonConversionKind !== PYTHON_CONVERSION_NONE
-            && /\.py$/i.test(file.name)) {
+            && /\.py$/i.test(file.name);
+        const convertLua = state.settings?.convertScriptFiles !== false
+            && NSPIRE_LUA_CALC_MODELS.has(activeModelId)
+            && /\.lua$/i.test(file.name);
+        if (convertPython || convertLua) {
             try {
-                const convertedPath = await convertPythonSourceForCalc(
-                    file,
-                    data,
-                    module,
-                    activeModelId,
-                    pythonConversionKind
-                );
+                const convertedPath = convertLua
+                    ? await convertNspireScriptSource(file, data, module)
+                    : await convertPythonSourceForCalc(
+                        file,
+                        data,
+                        module,
+                        activeModelId,
+                        pythonConversionKind
+                    );
                 if (convertedPath && convertedPath !== path) {
                     try {
                         module.FS.unlink(path);
@@ -8039,7 +8045,7 @@ async function buildTransferPlan(files, module) {
                     continue;
                 }
             } catch (err) {
-                console.warn('[WebTILP] Failed to convert Python source file', err);
+                console.warn(`[WebTILP] Failed to convert ${file.name}; trying the original file`, err);
             }
         }
         if (EVO_PYTHON_CALC_MODELS.has(activeModelId)
@@ -8064,6 +8070,18 @@ async function buildTransferPlan(files, module) {
 
     if (!uploadPaths.length) {
         return [];
+    }
+
+    // Source conversion can give different inputs the same destination name.
+    // Reject the batch before creating a plan that would send the last payload twice.
+    const destinationNames = new Set();
+    for (const path of uploadPaths) {
+        const name = path.split('/').pop();
+        const key = name.toLowerCase();
+        if (destinationNames.has(key)) {
+            throw new Error(tFormat('source_conversion_name_conflict', { name }));
+        }
+        destinationNames.add(key);
     }
 
     let entries = [];
@@ -10659,7 +10677,7 @@ function downloadCanvas() {
 }
 
 async function convertReceivedPythonFile(filename, data) {
-    if (state.settings?.convertPythonFiles === false) {
+    if (state.settings?.convertScriptFiles === false) {
         return null;
     }
     const conversionKind = getPythonConversionKind(getActiveCalcModelId());
@@ -10904,9 +10922,9 @@ function bindEvents() {
         } else {
             els.settingCalcModel.value = options.find(option => option.value !== 'auto')?.value ?? 'auto';
         }
-        updatePythonConversionSettingAvailability();
+        updateSourceConversionSettingAvailability();
     });
-    els.settingCalcModel.addEventListener('change', updatePythonConversionSettingAvailability);
+    els.settingCalcModel.addEventListener('change', updateSourceConversionSettingAvailability);
     els.settingsModal.addEventListener('click', event => {
         if (event.target === els.settingsModal) {
             closeSettingsModal();
