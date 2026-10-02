@@ -4215,7 +4215,7 @@ async function saveSettingsFromModal() {
     state.settings = nextSettings;
     saveSettings();
     if (conversionOnlyChange) {
-        applySettingsToModule();
+        updateFileInputAccept();
         closeSettingsModal();
         log('Source file conversion settings updated.');
         return;
@@ -4652,6 +4652,59 @@ function isNumWorksActive() {
     return state.activeFamily === DEVICE_FAMILY_NUMWORKS;
 }
 
+function buildFileInputAccept(extensions) {
+    // HTML matching is case-insensitive, but some native pickers use literal
+    // patterns. Include mixed case too (TI files commonly use e.g. .8Xp).
+    const specifiers = new Set();
+    for (const extension of extensions) {
+        const ext = String(extension).replace(/^\./, '').toLowerCase();
+        if (!/^[a-z0-9]+$/i.test(ext)) continue;
+        let variants = ['.'];
+        for (const char of ext) {
+            const cases = char === char.toUpperCase() ? [char] : [char, char.toUpperCase()];
+            variants = variants.flatMap(prefix => cases.map(letter => prefix + letter));
+        }
+        variants.forEach(variant => specifiers.add(variant));
+    }
+    return Array.from(specifiers).join(',');
+}
+
+function updateFileInputAccept() {
+    if (!els.fileInput) return;
+    let extensions = [];
+    if (isHPPrimeActive()) {
+        extensions = Array.from(HP_PRIME_UPLOAD_EXTENSIONS);
+    } else if (isNumWorksActive()) {
+        extensions = ['py'];
+    } else {
+        const modelId = getActiveCalcModelId() || Number(state.settings?.calcModel) || 0;
+        try {
+            const getExtensions = model => (state.module?.ccall(
+                'get_file_extensions', 'string', ['number'], [model]) || '').split(',').filter(Boolean);
+            extensions = getExtensions(modelId);
+            if (extensions.length) {
+                if (state.settings?.convertScriptFiles !== false) {
+                    if (getPythonConversionKind(modelId) !== PYTHON_CONVERSION_NONE) extensions.push('py');
+                    if (NSPIRE_LUA_CALC_MODELS.has(modelId)) extensions.push('lua');
+                }
+                if (EVO_PYTHON_CALC_MODELS.has(modelId)) {
+                    // Evo also accepts legacy variables through TIVarsLib conversion.
+                    for (const sourceModel of [2, 3, 4, 18]) {
+                        extensions.push(...getExtensions(sourceModel)
+                            .filter(ext => isLegacyTivarsConversionCandidate(`file.${ext}`)));
+                    }
+                }
+                if (modelId === 19 || modelId === 20) extensions.push('b83', 'b84');
+            }
+        } catch (err) {
+            console.warn('[WebTILP] Failed to query file-picker extensions', err);
+            extensions = [];
+        }
+    }
+    // Leave an unknown target unrestricted until identification succeeds.
+    els.fileInput.accept = buildFileInputAccept(extensions);
+}
+
 function resetFamilySpecificUiText(clearActionTitles = true) {
     setTextContent(document.getElementById('dropzoneTitle'), t('dropzone_title'));
     setTextContent(document.getElementById('dropzoneSubtitle'), t('dropzone_subtitle'));
@@ -4672,7 +4725,7 @@ function setTiUiState(capabilitiesKnown = false) {
     resetFamilySpecificUiText(!capabilitiesKnown);
     if (els.fileInput) {
         els.fileInput.disabled = false;
-        els.fileInput.accept = '';
+        updateFileInputAccept();
     }
     updateSendFilesButtonState();
     if (capabilitiesKnown) {
@@ -4710,7 +4763,7 @@ function setHPPrimeUiState() {
     els.keyCodeInput?.setAttribute('list', KEYMAP_CONFIG_HP_PRIME.listId);
     if (els.fileInput) {
         els.fileInput.disabled = false;
-        els.fileInput.accept = '';
+        updateFileInputAccept();
     }
     updateSendFilesButtonState();
     [els.btnSyncClock, els.btnNewFolder, els.btnDeleteSelected].forEach(button => {
@@ -4754,7 +4807,7 @@ function setNumWorksUiState() {
     clearKeyMapDataList();
     if (els.fileInput) {
         els.fileInput.disabled = false;
-        els.fileInput.accept = '.py,text/x-python,text/plain';
+        updateFileInputAccept();
     }
     updateSendFilesButtonState();
     [els.btnSyncClock, els.btnNewFolder].forEach(button => {
@@ -5596,6 +5649,7 @@ async function updateCapabilities() {
     await ensureCableOpen();
     const features = await ccallAsync(state.module, 'calc_features', 'number', ['number'], [state.handle], { timeoutMs: 8000 });
     state.features = features;
+    updateFileInputAccept();
     const hasDirlist = (features & FEATURE_FLAGS.OPS_DIRLIST) !== 0;
     const hasFolder = (features & FEATURE_FLAGS.FTS_FOLDER) !== 0;
     const hasBackup = (features & FEATURE_FLAGS.OPS_BACKUP) !== 0 || (features & FEATURE_FLAGS.FTS_BACKUP) !== 0;
@@ -11053,6 +11107,7 @@ function bindEvents() {
     els.fileInput.addEventListener('change', () => {
         setSelectedFiles(els.fileInput.files, 'file picker');
     });
+    els.fileInput.addEventListener('click', updateFileInputAccept);
     const hpAppFolderInput = document.getElementById('hpAppFolderInput');
     document.getElementById('btnChooseHPAppFolder').addEventListener('click', () => hpAppFolderInput.click());
     hpAppFolderInput.addEventListener('change', async () => {
