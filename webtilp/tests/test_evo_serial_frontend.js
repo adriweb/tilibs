@@ -71,7 +71,7 @@ function setup({ activation = true, authorized = false, serialError = null } = {
     vm.createContext(context);
     for (const name of ['serialPortToDevice', 'isSerialDevice', 'isEvoUsbDevice',
         'isEvoSerialDeviceInfo', 'requestTIEvoSerialDevice', 'getAuthorizedSerialDevices',
-        'getAuthorizedEvoSerialDevice', 'requestEvoSerialForUsbDevice',
+        'getAuthorizedEvoSerialDevice', 'shouldUseEvoWebUsbSerial', 'evoWebUsbSerialDevice', 'requestEvoSerialForUsbDevice',
         'bindSerialPortToModule', 'authorizeDevice', 'connectTI', 'connect']) {
         vm.runInContext(extractFunction(name), context);
     }
@@ -169,6 +169,50 @@ async function main() {
     assert.equal(authorized.state.connected, true);
     assert.equal(authorized.calls.includes('serial chooser'), false, 'existing serial grants need no gesture');
     assert.deepEqual(authorized.alerts, []);
+
+    for (const version of [16, 17]) {
+        const fallback = setup({ activation: version === 17 });
+        Object.assign(fallback.context, { EventTarget, Event, ReadableStream, WritableStream,
+            Uint8Array, ArrayBuffer, DataView, URLSearchParams });
+        fallback.context.navigator.usb = { async getDevices() { return [fallback.usbDevice]; } };
+        fallback.context.navigator.userAgent = 'Mozilla/5.0 (Linux; Android 10; K)';
+        fallback.context.navigator.userAgentData = {
+            platform: 'Android', async getHighEntropyValues() { return { platformVersion: `${version}.0.0` }; }
+        };
+        vm.runInContext(fs.readFileSync(require.resolve('../evo_webusb_serial.js'), 'utf8'), fallback.context);
+        await fallback.context.connect();
+        assert.equal(fallback.state.connected, true);
+        assert.equal(fallback.calls.includes('serial chooser'), version === 17,
+            'Android 16 bypasses native Serial; Android 17 retains it');
+        assert.deepEqual(fallback.alerts, []);
+        if (version === 16) {
+            const device = fallback.state.authorizedDevice;
+            assert.equal(device.serialPort.device, fallback.usbDevice, 'Reuse selected USBDevice without another chooser');
+            assert.equal((await fallback.context.getAuthorizedEvoSerialDevice(fallback.usbDevice)).serialPort, device.serialPort);
+            assert.equal((await fallback.context.getAuthorizedSerialDevices())[0].serialPort, device.serialPort);
+            delete fallback.context.navigator.serial;
+            assert.equal((await fallback.context.requestEvoSerialForUsbDevice(fallback.usbDevice)).serialPort, device.serialPort);
+            const nspire = { vendorId: 0x0451, productId: 0xe022 };
+            assert.equal(await fallback.context.requestEvoSerialForUsbDevice(nspire), nspire,
+                'Fallback does not intercept other USB calculators');
+        }
+    }
+
+    const usbHelp = setup();
+    usbHelp.state.authorizedDevice = { transport: 'serial', serialPort: {
+        device: usbHelp.usbDevice, lastOpenError: new Error('USB interface <busy>')
+    } };
+    let helpHtml;
+    usbHelp.context.openConnectionHelpModal = (title, html) => {
+        assert.equal(title, 'Evo USB serial connection failed');
+        helpHtml = html;
+    };
+    usbHelp.context.isLinuxPlatform = () => true; // Android UAs contain Linux.
+    vm.runInContext(extractFunction('escapeHtml'), usbHelp.context);
+    vm.runInContext(extractFunction('showCableOpenHelp'), usbHelp.context);
+    usbHelp.context.showCableOpenHelp(58);
+    assert.match(helpHtml, /USB interface &lt;busy&gt;/);
+    assert.doesNotMatch(helpHtml, /dialout|usermod/, 'Android CDC failures do not suggest Linux group changes');
 
     for (const activation of [true, false, undefined]) {
         const automatic = setup({ activation });

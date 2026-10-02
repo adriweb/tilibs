@@ -1,4 +1,4 @@
-/* global TILibsModule */
+/* global TILibsModule, EvoWebUsbSerial */
 
 const TI_VENDOR_ID = 0x0451; // Texas Instruments
 const PID_TI84_EVO_SERIAL = 0xE018;
@@ -366,6 +366,10 @@ async function requestTIEvoSerialDevice(usbDevice = null) {
 }
 
 async function getAuthorizedSerialDevices() {
+    if (await shouldUseEvoWebUsbSerial()) {
+        const devices = await navigator.usb.getDevices();
+        return devices.filter(isEvoUsbDevice).map(evoWebUsbSerialDevice);
+    }
     if (!navigator.serial) {
         return [];
     }
@@ -381,6 +385,9 @@ async function getAuthorizedSerialDevices() {
 }
 
 async function getAuthorizedEvoSerialDevice(usbDevice = null) {
+    if (usbDevice && isEvoUsbDevice(usbDevice) && await shouldUseEvoWebUsbSerial()) {
+        return evoWebUsbSerialDevice(usbDevice);
+    }
     const serialDevices = await getAuthorizedSerialDevices();
     if (!serialDevices || !serialDevices.length) {
         return null;
@@ -389,6 +396,16 @@ async function getAuthorizedEvoSerialDevice(usbDevice = null) {
         return serialDevices[0];
     }
     return serialPortToDevice(serialDevices[0].serialPort, { usbDevice, serialKind: SERIAL_KIND_EVO, productName: 'TI-83/84 Evo' });
+}
+
+async function shouldUseEvoWebUsbSerial() {
+    return typeof EvoWebUsbSerial !== 'undefined' && await EvoWebUsbSerial.shouldUse(navigator);
+}
+
+function evoWebUsbSerialDevice(usbDevice) {
+    const port = EvoWebUsbSerial.createPort(usbDevice);
+    log('Using Evo CDC serial over WebUSB (native wired WebSerial unavailable).');
+    return serialPortToDevice(port, { usbDevice, serialKind: SERIAL_KIND_EVO });
 }
 
 async function requestEvoSerialForUsbDevice(usbDevice) {
@@ -4586,6 +4603,18 @@ function closeConnectionHelpModal() {
 function showCableOpenHelp(result) {
     const code = Number(result);
     const closeAppsReminder = '<p>Before trying again, close any other WebTILP pages, browser tabs, TI tools, terminal sessions, or other apps that may already be using the calculator or cable.</p>';
+
+    const cdcPort = isSerialDevice(state.authorizedDevice) && state.authorizedDevice.serialPort;
+    if (cdcPort?.device) {
+        const detail = cdcPort.lastOpenError?.message;
+        openConnectionHelpModal('Evo USB serial connection failed', `
+            <p>WebTILP selected the Evo through WebUSB, but could not open its USB CDC serial interfaces.</p>
+            ${detail ? `<p>${escapeHtml(detail)}</p>` : ''}
+            ${closeAppsReminder}
+            <p>Unplug and reconnect the Evo, then try again. The browser and phone firmware must allow access to its USB interfaces.</p>
+        `);
+        return;
+    }
 
     if (isLinuxPlatform() && code === 58) {
         openConnectionHelpModal('Linux serial permission needed', `

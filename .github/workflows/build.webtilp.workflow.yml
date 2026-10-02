@@ -157,6 +157,7 @@ jobs:
           make -C webtilp -j"$(nproc)" -o prepare_python_converters prod
           make -C webtilp test
           node webtilp/tests/test_wasm_startup.cjs
+          node webtilp/tests/test_evo_webusb_serial.js webtilp/webtilp.js
           node --input-type=module - <<'JS'
           import assert from 'node:assert/strict';
           import createTIVarsLib from './webtilp/TIVarsLib.js';
