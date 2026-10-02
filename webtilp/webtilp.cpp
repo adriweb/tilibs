@@ -1,6 +1,7 @@
 #include <array>
 #include <cstdint>
 #include <cstring>
+#include <set>
 #include <string>
 #include <utility>
 #include <vector>
@@ -824,6 +825,65 @@ const char* get_calc_model_string(void) {
 EMSCRIPTEN_KEEPALIVE
 int get_calc_model_id(void) {
     return (int)g_calc_model;
+}
+
+// File-picker hints only: the transfer path still validates the actual file.
+EMSCRIPTEN_KEEPALIVE
+const char* get_file_extensions(int model) {
+    static std::string result;
+    result.clear();
+    const CalcModel calc = model ? (CalcModel)model : g_calc_model;
+    const bool z80 = tifiles_calc_is_ti8x(calc) && calc != CALC_TI80;
+    const bool m68k = tifiles_calc_is_ti9x(calc);
+    const bool nspire = tifiles_calc_is_tinspire(calc);
+    const bool evo = ticonv_model_is_tievo(calc);
+    if (!z80 && !m68k && !nspire && !evo) return result.c_str();
+
+    std::set<std::string> extensions;
+    auto add = [&](const char* ext) {
+        if (!ext || !*ext) return;
+        std::string normalized;
+        for (const char* p = ext; *p; ++p) {
+            if (!g_ascii_isalnum(*p)) return; // Ignore unknown-type placeholders.
+            normalized += g_ascii_tolower(*p);
+        }
+        extensions.insert(normalized);
+    };
+    for (int type = 0; type < 256; ++type) {
+        add(tifiles_vartype2fext(calc, (uint8_t)type));
+    }
+    add(tifiles_fext_of_group(calc));
+    add(tifiles_fext_of_backup(calc));
+    add(tifiles_fext_of_flash_os(calc));
+    add(tifiles_fext_of_flash_app(calc));
+    if (z80 || m68k) add("tig");
+
+    // Alternate equation/group extensions are not all in the type tables.
+    if (extensions.count("8xe")) add("8xy");
+    if (extensions.count("8ci")) add("8cg");
+    if (m68k) {
+        // Regular variables can be transferred across the 68k family.
+        for (CalcModel source : {CALC_TI89, CALC_TI92, CALC_TI92P, CALC_V200}) {
+            for (int type = 0; type < 256; ++type) {
+                if (type == 29 || type == 35 || type == 36 || type == 37) continue;
+                add(tifiles_vartype2fext(source, (uint8_t)type));
+            }
+            add(tifiles_fext_of_group(source));
+        }
+        if (tifiles_fext_of_flash_os(calc)) add("tib");
+    }
+    if (evo) {
+        switch (calc) {
+        case CALC_TI83EVO_USB: add("83pk2"); break;
+        case CALC_TI84EVOT_USB: add("84tpk2"); break;
+        default: add("84pk2"); break;
+        }
+    }
+    for (const auto& ext : extensions) {
+        if (!result.empty()) result += ',';
+        result += ext;
+    }
+    return result.c_str();
 }
 
 EMSCRIPTEN_KEEPALIVE
