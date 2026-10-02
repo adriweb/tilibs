@@ -46,7 +46,9 @@ EM_JS(int, webserial_has_bound_evo_js, (), {
 });
 
 EM_ASYNC_JS(int, webserial_open_js, (int kind, int baud_rate, int data_bits, int stop_bits, int require_signals, int vid, int pid), {
-	if (!navigator.serial) {
+	// A bound WebUSB CDC port implements the serial stream API even on
+	// Android browsers without a native navigator.serial implementation.
+	if (!navigator.serial && !Module.__ticablesWebSerial?.port) {
 		return -1;
 	}
 
