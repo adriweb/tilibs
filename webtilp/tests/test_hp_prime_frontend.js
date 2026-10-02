@@ -105,11 +105,14 @@ async function testFamilyUiState() {
         },
         updateSelectionActionButtons() {
             els.btnDeleteSelected.disabled = state.activeFamily === 'hp-prime';
-        }
+        },
+        HP_PRIME_UPLOAD_EXTENSIONS: new Set(['hpprgm', 'hpapp']),
+        getActiveCalcModelId: () => 0
     };
     vm.createContext(context);
     for (const name of [
         'isHPPrimeActive', 'isNumWorksActive', 'resetFamilySpecificUiText',
+        'buildFileInputAccept', 'updateFileInputAccept',
         'setTiUiState', 'setHPPrimeUiState', 'setNumWorksUiState',
         'applyActiveFamilyUiState'
     ]) {
@@ -130,7 +133,9 @@ async function testFamilyUiState() {
     assert.equal(els.btnDeleteSelected.disabled, true);
     assert.equal(els.btnScreenshot.disabled, false);
     assert.equal(els.btnIsReady.classList.contains('hidden'), true);
-    assert.equal(els.fileInput.accept, '');
+    assert.ok(els.fileInput.accept.split(',').includes('.hpprgm'));
+    assert.ok(els.fileInput.accept.split(',').includes('.HPPRGM'));
+    assert.ok(els.fileInput.accept.split(',').includes('.HpPrgm'));
     assert.equal(els.keysPanel.classList.contains('hidden'), false,
         'connected HP Prime calculators expose key controls');
     assert.equal(els.keyCodeInput.attributes.get('list'), 'hp-prime-keys',

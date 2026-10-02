@@ -78,6 +78,7 @@ const context = vm.createContext({
     updateKeyControlsState() {}, clearKeyMapDataList() {},
     getActiveKeyMapConfig: () => null,
     updateNspireOsButtons() {}, updateSelectionActionButtons() {},
+    updateFileInputAccept() {},
     setTiUiState() {}, setHPPrimeUiState() {}, setNumWorksUiState() {},
     setCasioUiState() {}, setHPLegacyUiState() {},
     renderDirlist() { rendered++; },
