@@ -59,7 +59,7 @@ select(0);
 assert.ok(accepts('demo.Py'), 'use explicitly configured model before identification');
 state.settings.calcModel = 'auto';
 select(19);
-for (const name of ['DEMO.8Xp', 'DEMO.8XP', 'DEMO.8xp', 'demo.pY', 'os.8Pu', 'bundle.B83', 'bundle.b84']) {
+for (const name of ['DEMO.8Xp', 'DEMO.8XP', 'DEMO.8xp', 'demo.pY', 'demo.MpY', 'os.8Pu', 'bundle.B83', 'bundle.b84']) {
     assert.ok(accepts(name), name);
 }
 assert.ok(!accepts('script.lua'));
@@ -67,17 +67,20 @@ assert.ok(!accepts('demo.tns'));
 state.settings.convertScriptFiles = false;
 context.updateFileInputAccept();
 assert.ok(!accepts('demo.py'), 'conversion opt-out hides Python sources');
+assert.ok(!accepts('demo.mpy'), 'conversion opt-out hides raw bytecode');
 assert.ok(accepts('demo.8xv'));
 state.settings.convertScriptFiles = true;
 select(28);
 assert.ok(accepts('demo.LuA'));
 assert.ok(accepts('demo.TNS'));
 assert.ok(!accepts('demo.py'), 'original CX has no Python source conversion');
+assert.ok(!accepts('demo.mpy'), 'original CX has no Python bytecode conversion');
 select(32);
 assert.ok(accepts('demo.PY'));
+assert.ok(accepts('demo.mPY'));
 assert.ok(accepts('demo.tCo2'));
 select(48);
-for (const name of ['demo.8Xp2', 'demo.8MP2', 'demo.8XPy2', 'os.84PK2', 'old.82P', 'old.83p', 'old.8xP', 'old.8Ci']) {
+for (const name of ['demo.8Xp2', 'demo.8MP2', 'demo.8XPy2', 'demo.MPY', 'os.84PK2', 'old.82P', 'old.83p', 'old.8xP', 'old.8Ci']) {
     assert.ok(accepts(name), name);
 }
 assert.ok(!accepts('old.8XK'), 'legacy flash apps are not converted for Evo');
@@ -85,6 +88,7 @@ assert.ok(!accepts('old.8CU'), 'legacy OS files are not converted for Evo');
 state.settings.convertScriptFiles = false;
 context.updateFileInputAccept();
 assert.ok(!accepts('demo.py'));
+assert.ok(!accepts('demo.mpy'));
 assert.ok(accepts('old.8xp'), 'legacy variable conversion remains enabled independently');
 state.activeFamily = 'hp-prime';
 context.updateFileInputAccept();
@@ -126,11 +130,13 @@ async function checkSettingsChange() {
     assert.equal(activeModel, 32);
     assert.ok(!accepts('demo.py'));
     assert.ok(!accepts('demo.lua'));
+    assert.ok(!accepts('demo.mpy'));
     assert.ok(accepts('demo.TNS'));
     els.settingConvertScriptFiles.checked = true;
     await context.saveSettingsFromModal();
     assert.ok(accepts('demo.Py'));
     assert.ok(accepts('demo.LuA'));
+    assert.ok(accepts('demo.MpY'));
 }
 
 // Optional verification against a freshly compiled production WASM module.
