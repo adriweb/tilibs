@@ -21,7 +21,7 @@ jobs:
     env:
       EMSDK_VERSION: '6.0.9'
       EMSDK_REF: 5eb0bde7585670252e8ba05e9d361627bffd08b5
-      TIVARS_REF: 865dd74a1abff0a8cb27a4cab1ca4267b0024e8d
+      TIVARS_REF: cfb3529ccdc2f34918a928a5080b195585d11842
       LUNA_REF: a9924a9a968954eba9adcc161a58ac607f97ce8c
       MESON_VERSION: '1.12.0'
       BUN_VERSION: '1.4.2'
@@ -148,14 +148,15 @@ jobs:
           make -C "$LUNA_DIR" clean
           make -C webtilp -j"$(nproc)" prepare_python_converters
 
-      - name: Build and test production WebTILP
+      - name: Build and test development WebTILP
         run: |
           source "$EMSDK/emsdk_env.sh"
           PATH="$(dirname "$EMSDK_NODE"):$PATH"
           export PATH
           # Converter assets were restored or built above; keep their smoke tests below.
-          make -C webtilp -j"$(nproc)" -o prepare_python_converters prod
+          make -C webtilp -j"$(nproc)" -o prepare_python_converters dev
           make -C webtilp test
+          make -C webtilp test-python-bytecode-wasm
           node webtilp/tests/test_wasm_startup.cjs
           node webtilp/tests/test_evo_webusb_serial.js webtilp/webtilp.js
           node --input-type=module - <<'JS'
@@ -207,7 +208,7 @@ jobs:
           print(f'Packaged {len(assets)} site assets with build provenance')
           PY
 
-      - name: Upload production site
+      - name: Upload development site
         uses: actions/upload-pages-artifact@v5
         with:
           path: build-wasm-deps/site
