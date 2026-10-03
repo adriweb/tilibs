@@ -151,12 +151,16 @@ test:
 	node tests/test_dirlist_capabilities.js
 	node tests/test_var_send_frontend.js
 	node tests/test_source_conversion.js
+	node tests/test_python_bytecode.cjs
 	node tests/test_numworks_backend.js
 	node tests/test_numworks_frontend.js
 	python3 i18n/check.py
 
 $(TARGET): $(SRC) $(LIBS) $(PREJS)
 	$(EMCC) $(CXXFLAGS) $(SRC) $(INCLUDES) $(LIBS) -o $(TARGET) $(EMCCFLAGS)
+
+test-python-bytecode-wasm:
+	node tests/test_python_bytecode.cjs --wasm
 
 test-var-send-wasm:
 	@set -e; test_dir=$$(mktemp -d); trap 'rm -rf "$$test_dir"' EXIT; \
@@ -166,4 +170,4 @@ test-var-send-wasm:
 clean:
 	rm -f $(TARGET) webtilp.wasm webtilp.worker.js sw.js version.json $(APP_JS_BUNDLE) $(NUMWORKS_JS_BUNDLE) $(BUILD_PROFILE_CSS) $(PYTHON_CONVERTER_ASSETS)
 
-.PHONY: all dev prod prepare_dev prepare_prod prepare_python_converters test test-var-send-wasm clean stamp
+.PHONY: all dev prod prepare_dev prepare_prod prepare_python_converters test test-python-bytecode-wasm test-var-send-wasm clean stamp
