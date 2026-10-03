@@ -781,7 +781,14 @@ const I18N_EN = {
     "cable_timeout": "Cable timeout (1/10s)",
     "cable_delay": "Cable delay (us)",
     "language": "Language",
-    "convert_script_files": "Convert .py and .lua scripts to calculator format",
+    "convert_script_files": "Convert .py, .lua and .mpy files to calculator format",
+    "mpy_conversion_disabled": "Enable script conversion in Settings to send {file}.",
+    "mpy_unsupported_target": "{file} requires a CE Python, Evo, or TI-Nspire CX II calculator.",
+    "mpy_incompatible": "{file} is not compatible bytecode for {target}. Recompile the source for this calculator; changing the file extension does not convert bytecode.",
+    "mpy_invalid_name": "Invalid module filename {file}. Use {rule}; the Python import name is preserved.",
+    "mpy_name_rule_short": "1–8 letters, digits or underscores, starting with a letter",
+    "mpy_name_rule_nspire": "1–240 letters, digits or underscores",
+    "mpy_ce_too_large": "{file} is too large to fit in a CE AppVar.",
     "source_conversion_name_conflict": "Multiple selected files would be sent as {name}. Rename one before transferring.",
     "settings_note": "Changing settings resets the current handle. Reconnect for full effect.",
     "offline_ready": "This app can now run without a network connection.",
@@ -4713,7 +4720,7 @@ function updateFileInputAccept() {
             extensions = getExtensions(modelId);
             if (extensions.length) {
                 if (state.settings?.convertScriptFiles !== false) {
-                    if (getPythonConversionKind(modelId) !== PYTHON_CONVERSION_NONE) extensions.push('py');
+                    if (getPythonConversionKind(modelId) !== PYTHON_CONVERSION_NONE) extensions.push('py', 'mpy');
                     if (NSPIRE_LUA_CALC_MODELS.has(modelId)) extensions.push('lua');
                 }
                 if (EVO_PYTHON_CALC_MODELS.has(modelId)) {
@@ -8040,6 +8047,87 @@ async function convertPythonSourceForCalc(file, data, module, modelId, conversio
     return '';
 }
 
+function validatePythonBytecode(file, data, conversionKind) {
+    const targets = {
+        [PYTHON_CONVERSION_CE]: { header: [3, 2], label: 'CE Python (MPY v3)' },
+        [PYTHON_CONVERSION_EVO]: { header: [5, 3], label: 'Evo (MPY v5)' },
+        [PYTHON_CONVERSION_NSPIRE_CXII]: { header: [4, 3], label: 'TI-Nspire CX II (MPY v4)' }
+    };
+    const target = targets[conversionKind];
+    if (!target) {
+        throw new Error(tFormat('mpy_unsupported_target', { file: file.name }));
+    }
+    if (data.length <= 4 || data[0] !== 0x4d || data[1] !== target.header[0]
+        || data[2] !== target.header[1] || data[3] < 1 || data[3] > 31) {
+        throw new Error(tFormat('mpy_incompatible', { file: file.name, target: target.label }));
+    }
+    const name = file.name.replace(/\.mpy$/i, '');
+    const nspire = conversionKind === PYTHON_CONVERSION_NSPIRE_CXII;
+    if (!(nspire ? /^[A-Za-z0-9_]{1,240}$/ : /^[A-Za-z][A-Za-z0-9_]{0,7}$/).test(name)) {
+        throw new Error(tFormat('mpy_invalid_name', {
+            file: file.name,
+            rule: t(nspire ? 'mpy_name_rule_nspire' : 'mpy_name_rule_short')
+        }));
+    }
+    return name;
+}
+
+async function packagePythonBytecode(file, data, module, modelId, conversionKind) {
+    const name = validatePythonBytecode(file, data, conversionKind);
+    if (conversionKind === PYTHON_CONVERSION_NSPIRE_CXII) {
+        const luna = await getWebLuna();
+        const inputPath = `/${name}.mpy`;
+        // A separate editor page can import the module without a same-name .py
+        // source shadowing its bytecode. Luna references the first .py argument.
+        const launcherPath = name.toLowerCase() === 'main' ? '/run.py' : '/main.py';
+        const converterPath = `/${name}.tns`;
+        try {
+            luna.FS.writeFile(inputPath, data, { encoding: 'binary' });
+            luna.FS.writeFile(launcherPath, new TextEncoder().encode(`__import__('${name}')\n`));
+            if (luna.FS.analyzePath(converterPath).exists) luna.FS.unlink(converterPath);
+            const result = luna.callMain([launcherPath, inputPath, converterPath]);
+            if (result !== 0) throw new Error(`Luna exited with status ${result}`);
+            const outputPath = `/uploads/${name}.tns`;
+            module.FS.writeFile(outputPath, luna.FS.readFile(converterPath, { encoding: 'binary' }));
+            return outputPath;
+        } finally {
+            for (const path of [inputPath, launcherPath, converterPath]) {
+                try { luna.FS.unlink(path); } catch { /* Already absent. */ }
+            }
+        }
+    }
+
+    const tivars = await getTivarsLib();
+    const evo = conversionKind === PYTHON_CONVERSION_EVO;
+    const varName = name.toUpperCase();
+    const modelName = (evo ? EVO_PYTHON_CALC_MODELS : CE_PYTHON_CALC_MODELS).get(modelId);
+    let variable;
+    let converterPath = '';
+    try {
+        variable = tivars.TIVarFile.createNew(evo ? 'PythonAppVar' : 'PythonModuleAppVar', varName, modelName);
+        const bytecodeHex = Array.from(data, byte => byte.toString(16).padStart(2, '0')).join('');
+        variable.setContentFromString(JSON.stringify(evo
+            ? { python: { compiledModule: true, name, bodyHex: bytecodeHex } }
+            : { typeName: 'PythonModuleAppVar', filename: name, compiledDataHex: bytecodeHex }));
+        if (evo) variable.convertToEvoPythonFormat('8mp2');
+        if (!evo && variable.getRawContentHexStr().length / 2 > 65535 - 17) {
+            throw new Error(tFormat('mpy_ce_too_large', { file: file.name }));
+        }
+        variable.setArchived(true);
+        converterPath = variable.saveVarToFile('.', varName);
+        const outputPath = `/uploads/${varName}.${evo ? '8mp2' : '8xv'}`;
+        module.FS.writeFile(outputPath, tivars.FS.readFile(converterPath, { encoding: 'binary' }));
+        return outputPath;
+    } catch (error) {
+        throw new Error(`${file.name}: ${formatTivarsException(tivars, error)}`);
+    } finally {
+        if (converterPath) {
+            try { tivars.FS.unlink(converterPath); } catch { /* Already absent. */ }
+        }
+        variable?.delete();
+    }
+}
+
 function isLegacyTivarsConversionCandidate(fileName) {
     const match = String(fileName || '').toLowerCase().match(/\.([^.]+)$/);
     const extension = match?.[1] || '';
@@ -8099,6 +8187,15 @@ async function buildTransferPlan(files, module) {
     const pythonConversionKind = getPythonConversionKind(activeModelId);
     for (const file of files) {
         const data = new Uint8Array(await file.arrayBuffer());
+        if (/\.mpy$/i.test(file.name)) {
+            if (state.settings?.convertScriptFiles === false) {
+                throw new Error(tFormat('mpy_conversion_disabled', { file: file.name }));
+            }
+            // Bytecode incompatibility or packaging errors must abort the batch;
+            // sending a raw .mpy as a calculator container cannot be a fallback.
+            uploadPaths.push(await packagePythonBytecode(file, data, module, activeModelId, pythonConversionKind));
+            continue;
+        }
         const path = `/uploads/${file.name}`;
         module.FS.writeFile(path, data);
         const convertPython = state.settings?.convertScriptFiles !== false
