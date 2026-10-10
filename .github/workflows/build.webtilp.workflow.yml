@@ -215,7 +215,7 @@ jobs:
           retention-days: 90
 
   deploy:
-    if: ${{ github.repository == 'adriweb/tilibs' && github.ref == 'refs/heads/exp2-full-emscripten' && github.event_name != 'pull_request' }}
+    if: ${{ github.repository == 'adriweb/tilibs' && (github.ref == 'refs/heads/exp2-full-emscripten' || github.ref == 'refs/heads/other-calc-families') && github.event_name != 'pull_request' }}
     needs: build
     runs-on: ubuntu-24.04
     timeout-minutes: 15
