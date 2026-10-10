@@ -28,7 +28,8 @@ async function main() {
     const context = vm.createContext({
         state, console, webUsbSelections: new WeakMap(),
         navigator: {usb: {async getDevices() { enumerations++; return devices.slice(); }}},
-        CABLE_GRAYLINK: '1', DEVICE_FAMILY_TI: 'ti',
+        CABLE_GRAYLINK: '1', DEVICE_FAMILY_TI: 'ti', DEVICE_FAMILY_SHARP: 'sharp',
+        getAuthorizedSharpSerialDevices: async () => [],
         getWebUsbDeviceFamily: device => device.vendorId === 0x0451 ? 'ti' : null,
         isEvoUsbDevice: device => device.productId === 0xe018,
         initModule: async () => ({}), hasSilverlinkConnected: () => false,

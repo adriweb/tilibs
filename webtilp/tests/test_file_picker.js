@@ -112,6 +112,16 @@ assert.equal(els.fileInput.accept, '', 'unavailable metadata does not hide all f
 assert.ok(queries.includes(20));
 assert.equal(context.buildFileInputAccept(['8Xp', '.8XP', '8x?', '', 'text/plain']), '.8xp,.8xP,.8Xp,.8XP');
 
+state.activeFamily = 'sharp';
+state.settings.convertScriptFiles = true;
+context.updateFileInputAccept();
+for (const name of ['demo.BaS', 'demo.TXT', 'photo.PnG', 'photo.JPEG', 'picture.g4i', 'group.g4g']) assert.ok(accepts(name), name);
+state.settings.convertScriptFiles = false;
+context.updateFileInputAccept();
+for (const name of ['demo.bas', 'demo.txt', 'photo.png']) assert.ok(!accepts(name), name);
+assert.ok(accepts('group.g4g'), 'native groups do not depend on conversion setting');
+state.activeFamily = 'ti';
+
 async function checkSettingsChange() {
     state.module = mockModule;
     context.console = console;

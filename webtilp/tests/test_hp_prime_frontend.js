@@ -214,6 +214,7 @@ async function testTableDropUsesPrimeTransferPath() {
     let primeSends = 0;
     let tiTransfers = 0;
     const context = {
+        state: { activeFamily: 'hp-prime' },
         console,
         log() {},
         logError(error) { throw error; },
@@ -298,6 +299,7 @@ async function testApplicationMappingAndDropDispatch() {
     let appDrop = null;
     let topLevelSends = 0;
     const dropContext = {
+        state: { activeFamily: 'hp-prime' },
         console,
         log() {},
         logError(error) { throw error; },

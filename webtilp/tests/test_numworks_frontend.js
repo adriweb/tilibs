@@ -165,6 +165,7 @@ async function testCombinedWebUsbChooserAndFamilyDetection() {
         HP_PRIME_PRODUCT_IDS: hpProductIds,
         NUMWORKS_VENDOR_ID: 0x0483,
         NUMWORKS_PRODUCT_ID: 0xA291,
+        DEVICE_FAMILY_SHARP: 'sharp', SHARP_VENDOR_ID: 0x04fc, SHARP_PRODUCT_ID: 0x0201,
         DEVICE_FAMILY_TI: 'ti',
         DEVICE_FAMILY_HP_PRIME: 'hp-prime',
         DEVICE_FAMILY_NUMWORKS: 'numworks',
@@ -202,9 +203,9 @@ async function testCombinedWebUsbChooserAndFamilyDetection() {
         [
             [0x0451, 0xE003], [0x0451, 0xE022],
             [0x03F0, 0x0441], [0x03F0, 0x1541], [0x03F0, 0x2441],
-            [0x0483, 0xA291]
+            [0x0483, 0xA291], [0x04fc, 0x0201]
         ],
-        'the WebUSB chooser receives the union of supported TI, HP, and NumWorks filters'
+        'the WebUSB chooser receives the union of supported TI, HP, NumWorks, and Sharp filters'
     );
 }
 
@@ -227,6 +228,7 @@ async function testAutoConnectDispatchesSelectedWebUsbFamily() {
         console,
         state,
         els: { btnConnect: {} },
+        DEVICE_FAMILY_SHARP: 'sharp',
         DEVICE_FAMILY_TI: 'ti',
         DEVICE_FAMILY_HP_PRIME: 'hp-prime',
         DEVICE_FAMILY_NUMWORKS: 'numworks',
