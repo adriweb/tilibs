@@ -111,7 +111,7 @@ packaging. Both include the service worker's required site
 assets, every translation, third-party notices, `webtilp-deps.txt`, and a
 `build-sources.json` recording source revisions and tool versions. Packaging
 fails if any precached asset is missing. The site workflow deploys to Pages
-from `exp2-full-emscripten`. Hosting must provide the cross-origin isolation
+from `exp2-full-emscripten` and `other-calc-families`. Hosting must provide the cross-origin isolation
 headers needed by the pthread build: `Cross-Origin-Opener-Policy: same-origin`
 and `Cross-Origin-Embedder-Policy: require-corp`.
 
