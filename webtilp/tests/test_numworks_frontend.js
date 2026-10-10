@@ -4,6 +4,15 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
 
+function createContext(context) {
+    Object.assign(context, Object.assign({
+        DEVICE_FAMILY_SHARP: 'sharp', SERIAL_KIND_SHARP: 4,
+        SHARP_VENDOR_ID: 0x04FC, SHARP_PRODUCT_ID: 0x0201,
+        getAuthorizedSharpSerialDevices: async () => []
+    }, context));
+    vm.createContext(context);
+}
+
 const appSource = fs.readFileSync(require.resolve('../app.js'), 'utf8');
 
 function extractFunction(name) {
@@ -52,7 +61,7 @@ async function testRawBackupBypassesStorageParser() {
         tFormat(key, values) { return `${key}:${JSON.stringify(values)}`; },
         log(message) { logs.push(message); }
     };
-    vm.createContext(context);
+    createContext(context);
     vm.runInContext(extractFunction('receiveBackup'), context);
     await context.receiveBackup();
 
@@ -94,7 +103,7 @@ async function testOverwritePreservesDisabledAutoImport() {
         readNumWorksInfo() {},
         applyNumWorksStorageSnapshot() {}
     };
-    vm.createContext(context);
+    createContext(context);
     vm.runInContext(extractFunction('sendNumWorksFiles'), context);
     await context.sendNumWorksFiles([{
         name: 'Existing.py',
@@ -135,7 +144,7 @@ async function testTransportConnectClosesMatchingBackendOnly() {
         isHPLegacyActive() { return false; },
         isCasioActive() { return false; }
     };
-    vm.createContext(context);
+    createContext(context);
     vm.runInContext(extractFunction('isTransportEventForActiveDevice'), context);
     vm.runInContext(extractFunction('handleTransportConnect'), context);
 
@@ -199,7 +208,7 @@ async function testCombinedWebUsbChooserAndFamilyDetection() {
             return device?.vendorId === 0x03F0 && device?.productId === 0x0121;
         }
     };
-    vm.createContext(context);
+    createContext(context);
     for (const name of [
         'getWebUsbDeviceFamily', 'getSupportedWebUsbFilters',
         'requestSupportedWebUsbDevice'
@@ -219,7 +228,7 @@ async function testCombinedWebUsbChooserAndFamilyDetection() {
             [0x0451, 0xE003], [0x0451, 0xE022],
             [0x03F0, 0x0441], [0x03F0, 0x1541], [0x03F0, 0x2441],
             [0x03F0, 0x0121],
-            [0x0483, 0xA291], [0x07CF, 0x6101]
+            [0x0483, 0xA291], [0x07CF, 0x6101], [0x04FC, 0x0201]
         ],
         'the WebUSB chooser receives the union of supported calculator filters'
     );
@@ -277,7 +286,7 @@ async function testAutoConnectDispatchesSelectedWebUsbFamily() {
         setStatus() {},
         logError(error) { throw error; }
     };
-    vm.createContext(context);
+    createContext(context);
     vm.runInContext(extractFunction('connect'), context);
 
     await context.connect();
@@ -323,7 +332,7 @@ function testLegacyFamilySettingIsDiscarded() {
         },
         normalizeLanguageCode(value) { return value; }
     };
-    vm.createContext(context);
+    createContext(context);
     vm.runInContext(extractFunction('loadSettings'), context);
     assert.equal(Object.hasOwn(context.loadSettings(), 'deviceFamily'), false,
         'obsolete family preferences are removed instead of migrated');
@@ -360,7 +369,7 @@ async function testNumWorksScriptPreview() {
         log() {},
         logError(error) { throw error; }
     };
-    vm.createContext(context);
+    createContext(context);
     vm.runInContext('let previewSession = null;', context);
     for (const name of [
         'canPreviewVariable', 'previewEntry', 'downloadPreviewFile'

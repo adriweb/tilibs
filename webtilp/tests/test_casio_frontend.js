@@ -4,6 +4,15 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
 
+function createContext(context) {
+    Object.assign(context, Object.assign({
+        DEVICE_FAMILY_SHARP: 'sharp', SERIAL_KIND_SHARP: 4,
+        SHARP_VENDOR_ID: 0x04FC, SHARP_PRODUCT_ID: 0x0201,
+        getAuthorizedSharpSerialDevices: async () => []
+    }, context));
+    vm.createContext(context);
+}
+
 const appSource = fs.readFileSync(require.resolve('../app.js'), 'utf8');
 
 function extractFunction(name) {
@@ -71,7 +80,7 @@ function testCas300UiDisablesStorageActions() {
             els.btnSendFiles.disabled = !state.casioStorageSupported;
         }
     };
-    vm.createContext(context);
+    createContext(context);
     vm.runInContext(extractFunction('setCasioUiState'), context);
 
     context.setCasioUiState();
@@ -91,7 +100,7 @@ function testCas300UiDisablesStorageActions() {
 
 function testStorageNameLimitMatchesCahuteListingLimit() {
     const context = {};
-    vm.createContext(context);
+    createContext(context);
     vm.runInContext(extractFunction('isValidCasioStorageName'), context);
 
     assert.equal(context.isValidCasioStorageName('A'.repeat(22)), true);
@@ -110,7 +119,7 @@ function testTransportEventsAreScopedToActiveCasio() {
         isHPLegacyActive() { return false; },
         isCasioActive() { return true; }
     };
-    vm.createContext(context);
+    createContext(context);
     vm.runInContext(extractFunction('isTransportEventForActiveDevice'), context);
 
     assert.equal(context.isTransportEventForActiveDevice({ device: casio }), true);
@@ -147,7 +156,7 @@ function connectionContext(module, selected) {
         setStatus() {}, log() {},
         t: key => key, tFormat: key => key
     };
-    vm.createContext(context);
+    createContext(context);
     for (const name of ['getModuleCallState', 'makeModuleDeadError', 'ccallAsync', 'connectCasio']) {
         vm.runInContext(extractFunction(name), context);
     }
@@ -313,7 +322,7 @@ async function testUploadConfirmsOverwriteBeforeNativeCall() {
         tFormat(key) { return key; },
         log(message) { logs.push(message); }
     };
-    vm.createContext(context);
+    createContext(context);
     vm.runInContext(extractFunction('isValidCasioStorageName'), context);
     vm.runInContext(extractFunction('sendCasioFiles'), context);
     const file = {
@@ -365,7 +374,7 @@ async function testBatchUploadConfirmsEachExistingFile() {
             tFormat: (key, values) => `${key}:${values.file}`,
             log() {}
         };
-        vm.createContext(context);
+        createContext(context);
         vm.runInContext(extractFunction('isValidCasioStorageName'), context);
         vm.runInContext(extractFunction('sendCasioFiles'), context);
         const files = ['A.txt', 'b.TXT'].map(name => ({
@@ -397,7 +406,7 @@ async function testFolderDownloadExpandsToFiles() {
         async downloadCasioEntry(entry) { downloaded.push(entry.name); },
         log() {}
     };
-    vm.createContext(context);
+    createContext(context);
     vm.runInContext(extractFunction('downloadCasioEntries'), context);
     await context.downloadCasioEntries([{
         name: 'main', folderPath: 'main', isFolder: true, kind: 'folder'

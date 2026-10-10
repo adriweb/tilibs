@@ -3,6 +3,15 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
+function createContext(context) {
+    Object.assign(context, Object.assign({
+        DEVICE_FAMILY_SHARP: 'sharp', SERIAL_KIND_SHARP: 4,
+        SHARP_VENDOR_ID: 0x04FC, SHARP_PRODUCT_ID: 0x0201,
+        getAuthorizedSharpSerialDevices: async () => []
+    }, context));
+    vm.createContext(context);
+}
+
 const appSource = fs.readFileSync(require.resolve('../app.js'), 'utf8');
 
 function extractFunction(name) {
@@ -70,7 +79,7 @@ function setup({ activation = true, authorized = false, serialError = null } = {
         isTi92Selected: () => false,
         hasSilverlinkConnected: () => false
     };
-    vm.createContext(context);
+    createContext(context);
     for (const name of ['serialPortToDevice', 'isSerialDevice', 'isEvoUsbDevice',
         'isEvoSerialDeviceInfo', 'requestTIEvoSerialDevice', 'getAuthorizedSerialDevices',
         'getAuthorizedEvoSerialDevice', 'shouldUseEvoWebUsbSerial', 'evoWebUsbSerialDevice', 'requestEvoSerialForUsbDevice',

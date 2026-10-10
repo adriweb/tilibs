@@ -4,6 +4,15 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
 
+function createContext(context) {
+    Object.assign(context, Object.assign({
+        DEVICE_FAMILY_SHARP: 'sharp', SERIAL_KIND_SHARP: 4,
+        SHARP_VENDOR_ID: 0x04FC, SHARP_PRODUCT_ID: 0x0201,
+        getAuthorizedSharpSerialDevices: async () => []
+    }, context));
+    vm.createContext(context);
+}
+
 const appSource = fs.readFileSync(require.resolve('../app.js'), 'utf8');
 
 function extractFunction(name) {
@@ -65,7 +74,7 @@ function testCapabilityGateRequiresKermitServerMode() {
             els.btnSendFiles.disabled = !state.hpLegacyKermitEnabled;
         }
     };
-    vm.createContext(context);
+    createContext(context);
     vm.runInContext(extractFunction('setHPLegacyUiState'), context);
 
     context.setHPLegacyUiState();
@@ -96,7 +105,7 @@ function testDisconnectIsolationForRawUsbAndSerial() {
         isHPLegacyActive() { return true; },
         isCasioActive() { return false; }
     };
-    vm.createContext(context);
+    createContext(context);
     vm.runInContext(extractFunction('isTransportEventForActiveDevice'), context);
     assert.equal(context.isTransportEventForActiveDevice({ device: usb }), true);
     assert.equal(context.isTransportEventForActiveDevice({ device: unrelated }), false);
@@ -125,7 +134,7 @@ function testDetectedModelReplacesAmbiguousUsbLabel() {
         renderDeviceInfo(entries) { rendered = entries; },
         updateDeviceModelDisplay(model) { displayed = model; }
     };
-    vm.createContext(context);
+    createContext(context);
     vm.runInContext(extractFunction('readHPLegacyInfo'), context);
     context.readHPLegacyInfo();
     assert.equal(state.deviceModelName, 'HP 50g');
@@ -160,7 +169,7 @@ function testUnknownModelIsReportedWithoutClaimingExactDetection() {
         renderDeviceInfo(entries) { rendered = entries; },
         updateDeviceModelDisplay() {}
     };
-    vm.createContext(context);
+    createContext(context);
     vm.runInContext(extractFunction('readHPLegacyInfo'), context);
     context.readHPLegacyInfo();
     assert.equal(state.deviceModelName,
@@ -234,7 +243,7 @@ async function testConnectionReadsSerialNumberForDeviceInfo() {
         setConnected(value) { state.connected = value; },
         setStatus() {}
     };
-    vm.createContext(context);
+    createContext(context);
     vm.runInContext(extractFunction('connectHPLegacy'), context);
     const device = { vendorId: 0x03F0, productId: 0x0121 };
     await context.connectHPLegacy(false, device);
@@ -286,7 +295,7 @@ async function testSerialFailureDoesNotFailConnection() {
         setConnected(value) { state.connected = value; },
         setStatus() {}
     };
-    vm.createContext(context);
+    createContext(context);
     vm.runInContext(extractFunction('connectHPLegacy'), context);
     await context.connectHPLegacy(false,
         { vendorId: 0x03F0, productId: 0x0121 });
@@ -344,7 +353,7 @@ async function testStaleModelProbeCannotCommitConnection() {
         setConnected(value) { state.connected = value; },
         setStatus() {}
     };
-    vm.createContext(context);
+    createContext(context);
     vm.runInContext(extractFunction('connectHPLegacy'), context);
     const device = { vendorId: 0x03F0, productId: 0x0121 };
     const pending = context.connectHPLegacy(false, device);
@@ -408,7 +417,7 @@ async function testHPLegacyScreenshotRendersIntoCanvas() {
     const logs = [];
     const scaled = { count: 0 };
     const context = makeScreenshotContext(state, canvas, logs, scaled);
-    vm.createContext(context);
+    createContext(context);
     vm.runInContext(extractFunction('takeScreenshot'), context);
     await context.takeScreenshot();
     assert.equal(canvas.width, 2);
@@ -433,7 +442,7 @@ async function testStaleHPLegacyScreenshotCannotRepaintCanvas() {
     const logs = [];
     const scaled = { count: 0 };
     const context = makeScreenshotContext(state, canvas, logs, scaled);
-    vm.createContext(context);
+    createContext(context);
     vm.runInContext(extractFunction('takeScreenshot'), context);
     const pending = context.takeScreenshot();
     state.hpLegacyBackend = null;
@@ -514,7 +523,7 @@ function setupSerialPermission({ activation = true, serialError = null, authoriz
         clearActiveOperations() {}, retireModule() {},
         clearDeviceData() { state.hpLegacyConnectionGeneration += 1; }
     };
-    vm.createContext(context);
+    createContext(context);
     for (const name of ['serialPortToDevice', 'hpLegacySerialPortToDevice',
         'isHPLegacySerialPortInfo', 'getAuthorizedHPLegacySerialDevices',
         'requestHPLegacySerialDevice', 'connectHPLegacy', 'connect',
@@ -711,7 +720,7 @@ async function testUploadPromptPreservesNativeNameBytes() {
         t: key => key, tFormat: key => key, log() {},
         setSelectedFiles() {}, async refreshDirlist() {}
     };
-    vm.createContext(context);
+    createContext(context);
     vm.runInContext(extractFunction('sendHPLegacyFiles'), context);
     await context.sendHPLegacyFiles([{
         name: `${nativeName}.49g`,

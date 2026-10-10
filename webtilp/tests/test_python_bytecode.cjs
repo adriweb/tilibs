@@ -69,7 +69,8 @@ async function run(model, inputs, {enabled = true, failure = '', realLibraries, 
             };
         }}},
         isLegacyTivarsConversionCandidate: () => false,
-        isHPPrimeActive: () => false, isNumWorksActive: () => false, log() {},
+        isHPPrimeActive: () => false, isNumWorksActive: () => false,
+        isHPLegacyActive: () => false, isCasioActive: () => false, log() {},
         async ccallAsync(_module, name, _type, _types, args) {
             metadataCalls++;
             assert.equal(name, 'files_get_entries_json');
