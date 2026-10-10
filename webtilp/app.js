@@ -4,6 +4,10 @@ const TI_VENDOR_ID = 0x0451; // Texas Instruments
 const PID_TI84_EVO_SERIAL = 0xE018;
 const SERIAL_KIND_EVO = 1;
 const SERIAL_KIND_GRAYLINK = 2;
+const SERIAL_KIND_SHARP = 4;
+const DEVICE_FAMILY_SHARP = 'sharp';
+const SHARP_VENDOR_ID = 0x04FC;
+const SHARP_PRODUCT_ID = 0x0201;
 const CABLE_GRAYLINK = '1';
 const CABLE_SILVERLINK = '4';
 const CABLE_DIRECTLINK = '5';
@@ -72,6 +76,7 @@ function bindWebUsbDeviceSelection(device) {
 }
 
 function getWebUsbDeviceFamily(device) {
+    if (device?.vendorId === SHARP_VENDOR_ID && device?.productId === SHARP_PRODUCT_ID) return DEVICE_FAMILY_SHARP;
     if (isHPPrimeDevice(device)) {
         return DEVICE_FAMILY_HP_PRIME;
     }
@@ -94,7 +99,8 @@ function getSupportedWebUsbFilters() {
             vendorId: HP_VENDOR_ID,
             productId
         })),
-        { vendorId: NUMWORKS_VENDOR_ID, productId: NUMWORKS_PRODUCT_ID }
+        { vendorId: NUMWORKS_VENDOR_ID, productId: NUMWORKS_PRODUCT_ID },
+        { vendorId: SHARP_VENDOR_ID, productId: SHARP_PRODUCT_ID }
     ];
 }
 
@@ -528,6 +534,10 @@ const state = {
     hpFileRefreshGeneration: 0,
     hpFileRenderGeneration: 0,
     hpPrimeProtocolVersion: null,
+    sharpBackend: null,
+    sharpConnectionGeneration: 0,
+    pendingSharpUsbDevice: null,
+    sharpProgress: null,
     numWorksBackend: null,
     selectedFiles: [],
     logLines: [],
@@ -614,11 +624,45 @@ const LANGUAGE_OPTIONS = [
 ];
 
 const I18N_EN = {
+    "sharp_backend_unavailable": "The Sharp link backend failed to load.",
+    "sharp_serial_required": "Sharp PC-Link requires WebSerial and the Sunplus serial driver. Use a Chromium browser on HTTPS or localhost.",
+    "status_sharp_serial_authorization_required": "Click Connect Calculator again to authorize the Sharp serial port.",
+    "sharp_serial_choose_port": "Select the Sharp adapter's COM/serial port. All serial ports are shown, including ports without USB IDs.",
+    "sharp_serial_diagnostics": "Sharp serial discovery (actual browser metadata): {details}",
+    "sharp_serial_unknown_ids": "USB IDs not exposed",
+    "sharp_connected": "Sharp cable connected. Leave the calculator powered on at its normal screen for transfers; use REPROGRAM for system or ROM reception.",
+    "sharp_model": "Selected model",
+    "sharp_transport": "Transport",
+    "sharp_protocol": "Protocol",
+    "sharp_version": "Firmware version",
+    "sharp_info": "Reading Sharp information",
+    "sharp_list": "Listing Sharp variables",
+    "sharp_backup": "Receiving Sharp RAM backup",
+    "sharp_screen": "Receiving Sharp screenshot",
+    "sharp_receive": "Receiving Sharp variables",
+    "sharp_send": "Sending Sharp files",
+    "sharp_dump": "Receiving Sharp dump",
+    "sharp_operation_failed": "Sharp operation failed",
+    "sharp_busy": "Connect the Sharp calculator first and wait for any current operation to finish.",
+    "sharp_vars_title": "Sharp variables",
+    "sharp_drop_title": "Send Sharp PC-Link files",
+    "sharp_drop_hint": "Native g4 files and groups, BASIC source (.bas/.txt), and pictures (.png/.jpg/.bmp/.gif/.webp). Leave the calculator powered on at its normal screen.",
+    "sharp_confirm_send": "Send {count} Sharp file(s)? Existing fixed variables may be replaced; duplicate program names are rejected.",
+    "sharp_confirm_restore": "Restore the native Sharp RAM backup? This replaces calculator memory. Select the exact model in Settings and ensure this backup comes from that same model and firmware version.",
+    "sharp_program_name": "Calculator program name for {file} (1–8 letters, digits or underscores, starting with a letter):",
+    "sharp_picture_slot": "Picture slot for {file} (0–9). This replaces that picture. Images are fitted to 127×64 without cropping, on white:",
+    "sharp_conversion_disabled": "Enable source and image conversion in Settings before sending this file.",
+    "sharp_converted": "Converted {file} → {target}.",
+    "sharp_sent": "Sent {file} to Sharp.",
+    "sharp_dump_system_notice": "Receive the Sharp system image (without boot)? Open the calculator’s REPROGRAM menu. Click OK here first, then choose 2:Send on the calculator. No firmware will be written.",
+    "sharp_dump_rom_notice": "Receive the full Sharp ROM? Open the calculator’s REPROGRAM menu. Click OK here first, then choose 3:Send(with Boot Page) on the calculator. No firmware will be written.",
+    "sharp_dump_header_recovered": "Recovered the first system-block header after the baud change. All 16384 payload bytes were received and the checksum validated; recovery details are saved in the capture JSON.",
+
     "brand_subtitle": "Universal linking, right from your browser!",
     "settings": "Settings",
     "calculator_family": "Calculator family",
-    "calculator_family_auto": "Auto-detect (TI or NumWorks)",
-    "calculator_family_auto_hint": "TI and NumWorks are detected from one WebUSB chooser. HP Prime uses WebHID and can be selected here when needed.",
+    "calculator_family_auto": "Auto-detect (TI, NumWorks, or Sharp)",
+    "calculator_family_auto_hint": "TI, NumWorks and Sharp cables are detected from one WebUSB chooser. HP Prime uses WebHID and can be selected here when needed.",
     "hp_prime_family_hint": "HP Prime uses WebHID for info, screenshots, backups, and file transfers.",
     "hp_prime_welcome_text": "Plug in your HP Prime, then click \"Connect Calculator\" and authorize it through WebHID.",
     "webhid_unavailable_title": "WebHID is not available in this browser.",
@@ -823,7 +867,7 @@ const I18N_EN = {
     "cable_timeout": "Cable timeout (1/10s)",
     "cable_delay": "Cable delay (us)",
     "language": "Language",
-    "convert_script_files": "Convert .py, .lua and .mpy files to calculator format",
+    "convert_script_files": "Convert source files and images to calculator format",
     "mpy_conversion_disabled": "Enable script conversion in Settings to send {file}.",
     "mpy_unsupported_target": "{file} requires a CE Python, Evo, or TI-Nspire CX II calculator.",
     "mpy_incompatible": "{file} is not compatible bytecode for {target}. Recompile the source for this calculator; changing the file extension does not convert bytecode.",
@@ -988,6 +1032,7 @@ const STATUS_I18N_KEYS = new Set([
     'status_module_ready',
     'status_connected',
     'status_connection_failed',
+    'status_sharp_serial_authorization_required',
     'status_evo_serial_authorization_required',
     'status_disconnected',
     'status_device_connected',
@@ -1910,6 +1955,11 @@ const CALC_MODEL_OPTIONS = [
     { value: 'auto', label: 'Auto' },
     { value: 'casio-rm7000', label: 'Casio RM-7000 (native OS loader)' },
     { value: 'casio-rm9000', label: 'Casio RM-9000 (native OS loader)' },
+    { value: 'sharp-auto', label: 'Sharp EL-99xx (auto)' },
+    { value: 'sharp-el9900', label: 'Sharp EL-9900' },
+    { value: 'sharp-el9900g', label: 'Sharp EL-9900G' },
+    { value: 'sharp-el9900gsii', label: 'Sharp EL-9900G SII' },
+    { value: 'sharp-el9950', label: 'Sharp EL-9950' },
     { value: 1, label: 'TI-73' },
     { value: 2, label: 'TI-82' },
     { value: 3, label: 'TI-83' },
@@ -4003,7 +4053,7 @@ function applySettingsToModule() {
     }
 
 
-    if (settings.calcModel === 'auto') {
+    if (settings.calcModel === 'auto' || String(settings.calcModel).startsWith('sharp-')) {
         module._set_calc_model(0);
         module._set_force_calc(0);
     } else {
@@ -4087,6 +4137,8 @@ function getActiveCalcModelString() {
 }
 
 function getActiveCalcModelId() {
+    if (state?.activeFamily === 'sharp') return 0;
+
     if (!state.module) {
         return 0;
     }
@@ -4121,13 +4173,19 @@ function updateSourceConversionSettingAvailability() {
         return;
     }
     const modelId = getSelectedConversionModelId();
-    const supported = getPythonConversionKind(modelId) !== PYTHON_CONVERSION_NONE
+    const selectedModel = els.settingCalcModel?.value ?? state.settings?.calcModel;
+    const supported = String(selectedModel).startsWith('sharp-')
+        || (selectedModel === 'auto' && state.activeFamily === DEVICE_FAMILY_SHARP)
+        || getPythonConversionKind(modelId) !== PYTHON_CONVERSION_NONE
         || NSPIRE_LUA_CALC_MODELS.has(modelId);
     els.settingConvertScriptFiles.disabled = !supported;
     els.settingConvertScriptFilesField?.classList.toggle('disabled', !supported);
 }
 
 function resolveDeviceModelName(infoProductName) {
+    if (state.activeFamily === DEVICE_FAMILY_SHARP) {
+        return { primary: state.deviceModelName || 'Sharp EL-99xx', secondary: '' };
+    }
     let calcModelLabel = getActiveCalcModelString() || '';
     if (hasSilverlinkConnected()) {
         const calcModel = state.settings?.calcModel ?? 'auto';
@@ -4279,10 +4337,10 @@ function sortCalcOptions(options) {
 
 function getCalcOptionsForCable(cableModel) {
     if (String(cableModel) === CABLE_SILVERLINK || String(cableModel) === CABLE_GRAYLINK) {
-        return sortCalcOptions(CALC_MODEL_OPTIONS.filter(option => option.value === 'auto' || ['casio-rm7000', 'casio-rm9000'].includes(option.value) || SILVERLINK_CALC_VALUES.has(Number(option.value))));
+        return sortCalcOptions(CALC_MODEL_OPTIONS.filter(option => option.value === 'auto' || ['casio-rm7000', 'casio-rm9000'].includes(option.value) || String(option.value).startsWith('sharp-') || SILVERLINK_CALC_VALUES.has(Number(option.value))));
     }
     if (String(cableModel) === CABLE_DIRECTLINK) {
-        return sortCalcOptions(CALC_MODEL_OPTIONS.filter(option => option.value === 'auto' || ['casio-rm7000', 'casio-rm9000'].includes(option.value) || DIRECTLINK_CALC_VALUES.has(Number(option.value))));
+        return sortCalcOptions(CALC_MODEL_OPTIONS.filter(option => option.value === 'auto' || ['casio-rm7000', 'casio-rm9000'].includes(option.value) || String(option.value).startsWith('sharp-') || DIRECTLINK_CALC_VALUES.has(Number(option.value))));
     }
     return sortCalcOptions(CALC_MODEL_OPTIONS);
 }
@@ -4745,6 +4803,19 @@ function formatRate(bytesPerMs) {
 }
 
 function refreshProgressDetails() {
+    if (state?.activeFamily === 'sharp') {
+        const progress = state.sharpProgress;
+        if (!els.progressBarFill) return;
+        const percent = Number.isFinite(progress?.total) && progress.total > 0 && Number.isFinite(progress.completed)
+            ? Math.max(0, Math.min(100, Math.floor(progress.completed / progress.total * 100))) : null;
+        const value = percent === null ? '' : `${percent}%`;
+        els.progressBarFill.classList.toggle('determinate', percent !== null);
+        if (els.progressBarFill.style.width !== value) els.progressBarFill.style.width = value;
+        if (els.progressPercent && els.progressPercent.textContent !== value) els.progressPercent.textContent = value;
+        if (els.progressRate) els.progressRate.textContent = '';
+        return;
+    }
+
     if (!state.module || !els.progressBarFill) {
         return;
     }
@@ -5044,7 +5115,10 @@ function buildFileInputAccept(extensions) {
 function updateFileInputAccept() {
     if (!els.fileInput) return;
     let extensions = [];
-    if (isHPPrimeActive()) {
+    if (state?.activeFamily === 'sharp') {
+        extensions = ['g4p', 'g4e', 'g4s', 'g4y', 'g4m', 'g4i', 'g4d', 'g4l', 'g4n', 'g4v', 'g4z', 'g4w', 'g4t', 'g4b', 'g4g'];
+        if (state.settings?.convertScriptFiles !== false) extensions.push('bas', 'txt', 'png', 'jpg', 'jpeg', 'bmp', 'gif', 'webp');
+    } else if (isHPPrimeActive()) {
         extensions = Array.from(HP_PRIME_UPLOAD_EXTENSIONS);
     } else if (isNumWorksActive()) {
         extensions = ['py'];
@@ -5243,7 +5317,9 @@ function applyActiveFamilyUiState(options = {}) {
         appFolderButton.classList.toggle('hidden', !isHPPrimeActive());
         appFolderButton.textContent = t('hp_prime_choose_app_folder');
     }
-    if (isHPPrimeActive()) {
+    if (state?.activeFamily === 'sharp') {
+        setSharpUiState();
+    } else if (isHPPrimeActive()) {
         setHPPrimeUiState();
     } else if (isNumWorksActive()) {
         setNumWorksUiState();
@@ -5848,6 +5924,16 @@ async function autoConnectIfAuthorized() {
     if (state.connectInProgress) {
         return;
     }
+    const sharpPorts = await getAuthorizedSharpSerialDevices();
+    if (String(state.settings?.calcModel).startsWith('sharp-')) {
+        if (sharpPorts.length === 1) {
+            state.connectInProgress = true;
+            try { await connectSharp(null, sharpPorts[0]); }
+            catch (error) { logError(error, t('sharp_operation_failed')); }
+            finally { state.connectInProgress = false; }
+        }
+        return;
+    }
     let autoDetectedTiDevice = null;
     const devices = navigator.usb ? await getAuthorizedSupportedWebUsbDevices() : [];
     if (devices.length > 1) {
@@ -5857,6 +5943,15 @@ async function autoConnectIfAuthorized() {
     if (devices.length === 1) {
         const device = devices[0];
         const detectedFamily = getWebUsbDeviceFamily(device);
+        if (detectedFamily === DEVICE_FAMILY_SHARP) {
+            if (sharpPorts.length === 1) {
+                state.connectInProgress = true;
+                try { await connectSharp(device, sharpPorts[0]); }
+                catch (error) { logError(error, t('sharp_operation_failed')); }
+                finally { state.connectInProgress = false; }
+            }
+            return;
+        }
         if (detectedFamily === DEVICE_FAMILY_NUMWORKS) {
             try {
                 state.connectInProgress = true;
@@ -6226,6 +6321,8 @@ async function releaseDeviceForSwitch(device) {
     if (!previous || deviceMatches(previous, device)) return;
     const module = state.module;
     try {
+        await state.sharpBackend?.close();
+        state.sharpBackend = null;
         await state.numWorksBackend?.close();
         if (module) {
             await getModuleCallState(module).tail;
@@ -6265,6 +6362,15 @@ async function connect() {
     let switchedDevice = false;
     try {
         state.connectInProgress = true;
+        const wantsSharp = String(state.settings?.calcModel).startsWith('sharp-');
+        if (wantsSharp || state.pendingSharpUsbDevice) {
+            const usbDevice = state.pendingSharpUsbDevice;
+            const device = await requestSharpSerialDevice(usbDevice);
+            state.pendingSharpUsbDevice = null;
+            if (!device) return;
+            await connectSharp(null, device);
+            return;
+        }
         const wantsGrayLink = String(state.settings?.cableModel ?? 'auto') === CABLE_GRAYLINK;
         if (!wantsGrayLink && state.pendingEvoUsbDevice) {
             // Request directly from this fresh click, before module loading or
@@ -6299,6 +6405,10 @@ async function connect() {
             switchedDevice = Boolean(state.authorizedDevice && !deviceMatches(state.authorizedDevice, selectedDevice));
             await releaseDeviceForSwitch(selectedDevice);
             state.authorizedDevice = selectedDevice;
+            if (detectedFamily === DEVICE_FAMILY_SHARP) {
+                await connectSharp(device);
+                return;
+            }
             if (detectedFamily === DEVICE_FAMILY_NUMWORKS) {
                 await connectNumWorks(false);
                 return;
@@ -6320,13 +6430,20 @@ async function connect() {
         }
         await connectTI(true);
     } catch (err) {
+        if (err?.sharpConnectionCancelled) return;
+        if (err?.sharpSerialAuthorizationRequired) {
+            setStatus('status_sharp_serial_authorization_required', false);
+            alert(t('status_sharp_serial_authorization_required'));
+            return;
+        }
+        state.pendingSharpUsbDevice = null;
         if (err?.evoSerialAuthorizationRequired) {
             setStatus('status_evo_serial_authorization_required', false);
             log(t('status_evo_serial_authorization_required'));
             alert(t('alert_evo_serial_authorization_required'));
             return;
         }
-        if (hadWorkingConnection && !switchedDevice) {
+        if (hadWorkingConnection && !switchedDevice && (state.connected || state.cableOpen || Boolean(state.handle))) {
             setStatus('status_connected', true);
         } else {
             state.activeFamily = DEVICE_FAMILY_TI;
@@ -6362,7 +6479,16 @@ async function isReady() {
     }
 }
 
-async function getDeviceInfo() {
+async function getDeviceInfo({ automatic = false } = {}) {
+    if (state?.activeFamily === 'sharp') {
+        await runSharpOperation(t('sharp_info'), async backend => {
+            const version = await backend.readVersion({ keepOpenOnSilentStart: automatic });
+            if (state.sharpBackend !== backend) return;
+            readSharpInfo(version);
+        });
+        return;
+    }
+
     setButtonLoading(els.btnGetInfo, true);
     try {
         if (isHPPrimeActive()) {
@@ -6722,6 +6848,8 @@ function updateClockInfoRow(clockInfo, settings, fallbackDate) {
 
 function clearDeviceData() {
     updateDeviceInfoCapability();
+    state.sharpConnectionGeneration = (state.sharpConnectionGeneration || 0) + 1;
+    state.sharpProgress = null;
     state.dirlist = [];
     state.backupDirlistLoaded = false;
     state.hpFileSnapshotLoaded = false;
@@ -6830,6 +6958,15 @@ async function refreshBackupDirlist(module, handle) {
 }
 
 async function refreshDirlist({ manual = false } = {}) {
+    if (state?.activeFamily === 'sharp') {
+        await runSharpOperation(t('sharp_list'), async backend => {
+            const entries = await backend.listVariables();
+            if (state.sharpBackend !== backend) return;
+            state.dirlist = entries; renderDirlist(entries);
+        });
+        return;
+    }
+
     setButtonLoading(els.btnRefreshDirlist, true);
     try {
         if (isHPPrimeActive()) {
@@ -6914,6 +7051,8 @@ function renderDirlist(entries) {
 }
 
 function calcSupportsFolders() {
+    if (state?.activeFamily === 'sharp') return false;
+
     return (state.features & FEATURE_FLAGS.FTS_FOLDER) !== 0;
 }
 
@@ -6935,6 +7074,9 @@ function canPreviewVariable(entry, modelId = getActiveCalcModelId()) {
     }
     if (getHPPrimePreviewKind(entry)) {
         return true;
+    }
+    if (entry.kind === 'sharp') {
+        return Boolean(entry.category && entry.selector?.length === 11 && globalThis.WebTILPSharpFiles);
     }
     if (entry.kind === 'numworks') {
         return !entry.invalid;
@@ -6975,7 +7117,7 @@ function getHPPrimePreviewKind(entry) {
 
 function formatVariableDisplayName(entry) {
     const name = entry.name || '';
-    if (entry.kind === 'backup-var') {
+    if (entry.kind === 'sharp' || entry.kind === 'backup-var') {
         return name;
     }
     if (entry.kind === 'numworks') {
@@ -7053,7 +7195,7 @@ function renderTableView(entries, filter) {
             ? (entry.hpAppRoot ? entry.type_name : 'Directory')
             : (entry.type_name || `Unknown (${entry.type})`);
         const sizeValue = Number(entry.size) || 0;
-        const sizeLabel = options.sizeLabel ?? (isFolder ? '-' : formatBytes(sizeValue));
+        const sizeLabel = options.sizeLabel ?? (entry.kind === 'sharp' && !entry.size ? '—' : isFolder ? '-' : formatBytes(sizeValue));
         const indentBars = depth > 0
             ? `<span class="indent-bars">${'<span class="indent-bar"></span>'.repeat(depth)}</span>`
             : '';
@@ -7088,7 +7230,7 @@ function renderTableView(entries, filter) {
             row.title = t('hp_prime_app_folder_hint');
         }
         row.classList.toggle('integrity-invalid', Boolean(entry.invalid || appContainerInvalid));
-        const mutableStorageEntry = entry.kind !== 'backup-var';
+        const mutableStorageEntry = state?.activeFamily !== 'sharp' && entry.kind !== 'backup-var';
         const canRename = mutableStorageEntry
             && ((entry.hpAppChildEditable && state.hpFileSnapshotLoaded)
                 || (state.features & FEATURE_FLAGS.OPS_RENAME) !== 0);
@@ -7119,7 +7261,7 @@ function renderTableView(entries, filter) {
                 </div>
             </td>
             <td>${safeTypeLabel}</td>
-            <td title="${isFolder ? '' : `${sizeValue} bytes`}">${sizeHtml}</td>
+            <td title="${isFolder || entry.kind === 'sharp' && !entry.size ? '' : `${sizeValue} bytes`}">${sizeHtml}</td>
             <td>${safeLocation}</td>
             <td>${safeFolderCell}</td>
             <td>${safeKindLabel}</td>
@@ -7484,7 +7626,7 @@ function updateSelectionActionButtons() {
         els.btnRecvSelected.disabled = !hasSelection;
     }
     if (els.btnDeleteSelected) {
-        const disabled = !hasSelection || isHPPrimeActive();
+        const disabled = !hasSelection || state?.activeFamily === 'sharp' || isHPPrimeActive();
         els.btnDeleteSelected.disabled = disabled;
         els.btnDeleteSelected.classList.toggle('disabled', disabled);
     }
@@ -7774,6 +7916,11 @@ function applySelectionKeys(keys, container) {
 }
 
 function buildEntryFromCheckbox(checkbox) {
+    if (checkbox.dataset.kind === 'sharp') {
+        return state.dirlist.find(entry => entry.kind === 'sharp' && entry.name === checkbox.dataset.name
+            && String(entry.type) === checkbox.dataset.type);
+    }
+
     return {
         name: checkbox.dataset.name,
         folder: checkbox.dataset.folder,
@@ -8115,6 +8262,8 @@ function chooseHPPrimeAppForFile(file) {
 }
 
 async function sendDroppedFiles(files, dropFolder) {
+    if (state?.activeFamily === 'sharp') { await sendSharpFiles(files); return; }
+
     if (!files.length) {
         return;
     }
@@ -9630,6 +9779,7 @@ async function sendSelectedFiles() {
     }
     setButtonLoading(els.btnSendFiles, true);
     try {
+        if (state?.activeFamily === 'sharp') { await sendSharpFiles(files); return; }
         if (isHPPrimeActive()) {
             const module = await initModule();
             let successCount = 0;
@@ -9828,6 +9978,11 @@ async function processIncomingTransfers(files, options = {}) {
 }
 
 async function receiveBackup() {
+    if (state?.activeFamily === 'sharp') {
+        await runSharpOperation(t('sharp_backup'), async backend => saveSharpDownload(await backend.receiveBackup(), backend));
+        return;
+    }
+
     setButtonLoading(els.btnReceiveBackup, true);
     try {
         if (isHPPrimeActive()) {
@@ -9939,6 +10094,8 @@ async function receiveBackup() {
 }
 
 async function receiveOs() {
+    if (state?.activeFamily === 'sharp') { await receiveSharpDump(false); return; }
+
     setButtonLoading(els.btnReceiveOs, true);
     try {
         if (!isNspireActive()) {
@@ -9997,6 +10154,8 @@ async function downloadPartialOs() {
 }
 
 async function dumpRom() {
+    if (state?.activeFamily === 'sharp') { await receiveSharpDump(true); return; }
+
     setButtonLoading(els.btnDumpRom, true);
     const notice = t('confirm_dump_rom_notice');
     if (!confirm(notice)) {
@@ -10153,6 +10312,14 @@ function downloadNumWorksEntry(entry) {
 }
 
 async function receiveSelected() {
+    if (state?.activeFamily === 'sharp') {
+        const entries = getSelectedVarInputs().map(buildEntryFromCheckbox);
+        await runSharpOperation(t('sharp_receive'), async backend => {
+            for (const entry of entries) saveSharpDownload(await backend.receiveVariable(entry), backend);
+        });
+        return;
+    }
+
     const selections = getSelectedVarInputs().map(buildEntryFromCheckbox);
     if (!selections.length) {
         log('No variables selected.');
@@ -10348,6 +10515,8 @@ async function deleteEntriesWithSession(module, handle, selections) {
 }
 
 async function deleteSelected() {
+    if (state?.activeFamily === 'sharp') return;
+
     const selections = getSelectedVarInputs()
         .map(buildEntryFromCheckbox);
     if (!selections.length) {
@@ -10379,6 +10548,7 @@ async function deleteSelected() {
 }
 
 async function renameEntry(entry) {
+    if (state?.activeFamily === 'sharp') return;
     if (entry.isFolder && !isNspireActive()) {
         log('Folder renaming is only supported on TI-Nspire.');
         return;
@@ -10473,6 +10643,7 @@ async function renameEntry(entry) {
 }
 
 async function deleteEntry(entry) {
+    if (state?.activeFamily === 'sharp') return;
     if (!confirm(tFormat(entry.isFolder ? 'confirm_delete_folder_contents' : 'confirm_delete_entry', {
         kind: t(entry.isFolder ? 'kind_folder' : 'kind_item'),
         name: entry.name
@@ -10536,6 +10707,10 @@ async function deleteEntry(entry) {
 }
 
 async function downloadEntry(entry) {
+    if (state?.activeFamily === 'sharp') {
+        await runSharpOperation(t('sharp_receive'), async backend => saveSharpDownload(await backend.receiveVariable(entry), backend));
+        return;
+    }
     if (isHPPrimeActive()) {
         setButtonLoading(els.btnRecvSelected, true);
         try {
@@ -10613,6 +10788,7 @@ function disposePreviewSession() {
 }
 
 function closePreviewModal() {
+    if (els.previewModal?.contains(document.activeElement)) document.activeElement.blur();
     if (els.previewModal) {
         els.previewModal.classList.add('hidden');
         els.previewModal.setAttribute('aria-hidden', 'true');
@@ -10937,6 +11113,10 @@ async function previewEntry(entry, actionButton) {
     let options = null;
     let objectUrl = '';
     try {
+        if (entry.kind === 'sharp') {
+            await previewSharpEntry(entry);
+            return;
+        }
         if (entry.kind === 'numworks') {
             if (!state.numWorksBackend) {
                 throw new Error(t('numworks_backend_not_connected'));
@@ -11395,6 +11575,20 @@ async function drawHPPrimeScreenshot(canvas, png) {
 }
 
 async function takeScreenshot() {
+    if (state?.activeFamily === 'sharp') {
+        await runSharpOperation(t('sharp_screen'), async backend => {
+            const screenshot = await backend.captureScreenshot();
+            if (state.sharpBackend !== backend) return;
+            const canvas = els.screenshotCanvas;
+            canvas.width = screenshot.width; canvas.height = screenshot.height;
+            const ctx = canvas.getContext('2d');
+            const image = ctx.createImageData(screenshot.width, screenshot.height);
+            image.data.set(screenshot.rgba); ctx.putImageData(image, 0, 0);
+            canvas.classList.add('filled'); updateScreenshotCanvasScale();
+        });
+        return;
+    }
+
     setButtonLoading(els.btnScreenshot, true);
     try {
         if (isHPPrimeActive()) {
@@ -11620,6 +11814,12 @@ function clearLog() {
 async function nukeConnection(tryReconnect = true) {
     if (state.nukeInProgress) return;
     state.nukeInProgress = true;
+    const sharpBackend = state.sharpBackend;
+    state.sharpConnectionGeneration = (state.sharpConnectionGeneration || 0) + 1;
+    state.pendingSharpUsbDevice = null;
+    if (sharpBackend) await sharpBackend.close().catch(error => console.warn(error));
+    state.sharpBackend = null;
+
     if (els.btnNuke) {
         setButtonLoading(els.btnNuke, true);
     }
@@ -11637,6 +11837,7 @@ async function nukeConnection(tryReconnect = true) {
             console.warn('[WebTILP] TI USB I/O did not stop; retiring the module without native teardown', error);
         }
     }
+    const wasSharp = state.activeFamily === DEVICE_FAMILY_SHARP;
     const wasHPPrime = isHPPrimeActive();
     const wasNumWorks = isNumWorksActive();
     if (wasHPPrime && state.module) {
@@ -11653,14 +11854,14 @@ async function nukeConnection(tryReconnect = true) {
             console.warn('[WebTILP] Failed to close the NumWorks WebUSB session cleanly', err);
         }
     }
-    if (!transport && !wasHPPrime && !wasNumWorks) {
+    if (!transport && !wasSharp && !wasHPPrime && !wasNumWorks) {
         try { await state.authorizedDevice?.reset(); } catch (e) {}
     }
     if (isNspireActive()) {
         try { await state.authorizedDevice?.forget(); } catch (e) {}
     }
     try {
-        if (state.module && nativeIdle && !wasHPPrime && !wasNumWorks) {
+        if (state.module && nativeIdle && !wasSharp && !wasHPPrime && !wasNumWorks) {
             try {
                 retireModule(state.module, 'emergency reset');
                 if (transport) {
@@ -12264,8 +12465,13 @@ function handleTransportDisconnect(event = null) {
     if (numWorksBackend && event?.device && event.device !== numWorksBackend.device) {
         return;
     }
+    const sharpBackend = state.sharpBackend;
+    state.sharpBackend = null;
+    state.pendingSharpUsbDevice = null;
+    state.sharpConnectionGeneration = (state.sharpConnectionGeneration || 0) + 1;
+    sharpBackend?.close().catch(error => console.warn(error));
     const silent = state.silentReconnectInProgress;
-    clearActiveOperations(silent ? undefined : 'Active operation cancelled due to disconnect.');
+    clearActiveOperations(silent || event?.operationCompleted ? undefined : 'Active operation cancelled due to disconnect.');
     state.handle = 0;
     state.cableOpen = false;
     state.authorizedDevice = null;
@@ -12296,6 +12502,11 @@ function handleTransportConnect(event = null) {
         && event.device !== numWorksBackend.device) {
         return;
     }
+    const sharpBackend = state.sharpBackend;
+    state.sharpBackend = null;
+    state.pendingSharpUsbDevice = null;
+    state.sharpConnectionGeneration = (state.sharpConnectionGeneration || 0) + 1;
+    sharpBackend?.close().catch(error => console.warn(error));
     if (state.silentReconnectInProgress) {
         return;
     }
@@ -12352,4 +12563,322 @@ if (!self.isSecureContext) {
 } else {
     setStatus('status_webusb_unsupported', false);
     log('WebUSB is not available in this browser. Use a WebUSB-compatible browser for full calculator support.');
+}
+
+
+function sharpSerialDevice(port, usbDevice = null) {
+    const device = serialPortToDevice(port, { usbDevice, serialKind: SERIAL_KIND_SHARP,
+        vendorId: SHARP_VENDOR_ID, productId: SHARP_PRODUCT_ID, productName: 'Sharp EL-99xx' });
+    device.serialInfo = port.getInfo?.() || {};
+    device.usbDevice = usbDevice;
+    return device;
+}
+
+async function logSharpSerialDiagnostics(port, usbDevice) {
+    // getPorts lists granted ports only. getInfo can legitimately omit USB IDs;
+    // never substitute the wrapper's Sharp defaults in these diagnostics.
+    let authorized = null;
+    try {
+        authorized = (await navigator.serial.getPorts()).map(p => p.getInfo?.() || {});
+    } catch (error) { console.warn(error); }
+    log(tFormat('sharp_serial_diagnostics', { details: JSON.stringify({
+        selected: port ? port.getInfo?.() || {} : null,
+        authorized,
+        usbDiscovery: usbDevice ? { vendorId: usbDevice.vendorId, productId: usbDevice.productId } : null
+    }) }));
+}
+
+async function getAuthorizedSharpSerialDevices() {
+    if (globalThis.WebTILPSharpUsb?.shouldUse()) {
+        try { return (await navigator.usb.getDevices())
+            .filter(device => globalThis.WebTILPSharp?.isSharpUsbDevice(device))
+            .map(device => sharpSerialDevice(globalThis.WebTILPSharpUsb.createPort(device), device));
+        } catch (error) { console.warn(error); return []; }
+    }
+    if (!navigator.serial) return [];
+    try {
+        return (await navigator.serial.getPorts())
+            .filter(port => globalThis.WebTILPSharp?.isSharpSerialInfo(port.getInfo?.() || {}))
+            .map(port => sharpSerialDevice(port));
+    } catch (error) { console.warn(error); return []; }
+}
+
+async function requestSharpSerialDevice(usbDevice = null) {
+    if (globalThis.WebTILPSharpUsb?.shouldUse()) {
+        const generation = state.sharpConnectionGeneration;
+        try {
+            const device = usbDevice || await navigator.usb.requestDevice({filters:[{vendorId: SHARP_VENDOR_ID, productId: SHARP_PRODUCT_ID}]});
+            if (generation !== state.sharpConnectionGeneration) {
+                const error = new Error('Sharp connection cancelled.'); error.sharpConnectionCancelled = true; throw error;
+            }
+            return sharpSerialDevice(globalThis.WebTILPSharpUsb.createPort(device), device);
+        } catch (error) { if (error?.name === 'NotFoundError') return null; throw error; }
+    }
+    if (!navigator.serial) throw new Error(t('sharp_serial_required'));
+    if (!self.isSecureContext) throw new Error(t('transport_secure_context_error'));
+    const generation = state.sharpConnectionGeneration;
+    const checkGeneration = () => {
+        if (generation === state.sharpConnectionGeneration) return;
+        const error = new Error('Sharp connection cancelled.');
+        error.sharpConnectionCancelled = true; throw error;
+    };
+    try {
+        log(t('sharp_serial_choose_port'));
+        // Only reached for explicit Sharp intent or a discovered Sharp USB
+        // adapter. Some serial drivers omit/change the USB identity, so let
+        // the user select the COM port without a VID/PID filter. Keep this
+        // request ahead of any await to preserve the click's activation.
+        const port = await navigator.serial.requestPort();
+        checkGeneration();
+        await logSharpSerialDiagnostics(port, usbDevice);
+        checkGeneration();
+        return sharpSerialDevice(port, usbDevice);
+    } catch (error) {
+        if (generation !== state.sharpConnectionGeneration) {
+            error.sharpConnectionCancelled = true; throw error;
+        }
+        if (usbDevice && error?.name === 'SecurityError') {
+            state.pendingSharpUsbDevice = usbDevice;
+            error.sharpSerialAuthorizationRequired = true;
+        }
+        if (error?.name === 'NotFoundError') {
+            await logSharpSerialDiagnostics(null, usbDevice);
+            checkGeneration();
+            return null;
+        }
+        throw error;
+    }
+}
+
+async function connectSharp(usbDevice = null, serialDevice = null) {
+    const Backend = globalThis.WebTILPSharp?.SharpBackend;
+    if (!Backend) throw new Error(t('sharp_backend_unavailable'));
+    const generation = ++state.sharpConnectionGeneration;
+    const checkGeneration = () => {
+        if (generation === state.sharpConnectionGeneration) return;
+        const error = new Error('Sharp connection cancelled.');
+        error.sharpConnectionCancelled = true; throw error;
+    };
+    if (!serialDevice && usbDevice && globalThis.WebTILPSharpUsb?.shouldUse()) {
+        serialDevice = sharpSerialDevice(globalThis.WebTILPSharpUsb.createPort(usbDevice), usbDevice);
+    }
+    if (!serialDevice) {
+        const authorized = await getAuthorizedSharpSerialDevices();
+        checkGeneration();
+        serialDevice = authorized.length === 1 ? authorized[0] : await requestSharpSerialDevice(usbDevice);
+    }
+    checkGeneration();
+    if (!serialDevice) return;
+    if (usbDevice) serialDevice.usbDevice = usbDevice;
+    if (state.sharpBackend) {
+        await state.sharpBackend.close();
+        state.sharpBackend = null;
+        state.cableOpen = false;
+        setConnected(false);
+        checkGeneration();
+    }
+    const model = String(state.settings?.calcModel).startsWith('sharp-') ? state.settings.calcModel : 'sharp-auto';
+    const backend = new Backend({ serialPort: serialDevice.serialPort, model,
+        onProgress(progress) {
+            if (state.sharpBackend !== backend) return;
+            state.sharpProgress = progress; refreshProgressDetails();
+        }
+    });
+    try {
+        await backend.connect();
+        if (generation !== state.sharpConnectionGeneration) {
+            const error = new Error('Sharp connection cancelled.');
+            error.sharpConnectionCancelled = true; throw error;
+        }
+    } catch (error) { await backend.close().catch(() => {}); throw error; }
+    state.sharpBackend = backend; state.activeFamily = DEVICE_FAMILY_SHARP;
+    state.authorizedDevice = serialDevice; state.handle = 0; state.cableOpen = true;
+    state.features = FEATURE_FLAGS.OPS_SCREEN | FEATURE_FLAGS.OPS_DIRLIST | FEATURE_FLAGS.OPS_VARS
+        | FEATURE_FLAGS.OPS_BACKUP | FEATURE_FLAGS.OPS_ROMDUMP | FEATURE_FLAGS.OPS_OS;
+    state.dirlist = []; renderDirlist([]); readSharpInfo(); applyActiveFamilyUiState();
+    setConnected(true); setStatus('status_connected', true); log(t('sharp_connected'));
+    await getDeviceInfo({ automatic: true });
+}
+
+function readSharpInfo(version = null) {
+    const backend = state.sharpBackend;
+    version ??= backend.version;
+    state.deviceModelName = globalThis.WebTILPSharp.MODELS[backend.model];
+    state.deviceInfoProductName = state.deviceModelName;
+    const info = state.authorizedDevice?.serialInfo || {};
+    const hex = value => Number.isInteger(value) ? value.toString(16).toUpperCase().padStart(4, '0') : '?';
+    const serialIdentity = info.usbVendorId !== undefined || info.usbProductId !== undefined
+        ? `${hex(info.usbVendorId)}:${hex(info.usbProductId)}` : t('sharp_serial_unknown_ids');
+    const entries = [{ key: t('model'), value: state.deviceModelName },
+        { key: t('sharp_transport'), value: `${serialIdentity} / ${state.authorizedDevice?.serialPort?.device ? "WebUSB" : "WebSerial"}` },
+        { key: t('sharp_protocol'), value: 'PC-Link / REPROGRAM' }];
+    if (version) entries.push({ key: t('sharp_version'), value: version });
+    state.deviceInfoEntries = entries; renderDeviceInfo(entries);
+    updateDeviceModelDisplay(state.deviceModelName);
+    if (els.memoryInfo) els.memoryInfo.textContent = '—';
+}
+
+function setSharpUiState() {
+    resetFamilySpecificUiText(); updateKeyControlsState(false); clearKeyMapDataList();
+    els.keyCodeInput?.removeAttribute('list');
+    for (const button of [els.btnSyncClock, els.btnNewFolder, els.btnDeleteSelected]) {
+        if (!button) continue;
+        button.disabled = true; button.classList.add('disabled');
+    }
+    for (const button of [els.btnScreenshot, els.btnRefreshDirlist, els.btnReceiveBackup,
+        els.btnReceiveOs, els.btnDumpRom]) {
+        if (!button) continue;
+        button.disabled = false; button.classList.remove('disabled', 'hidden');
+    }
+    for (const button of [els.btnIsReady, els.btnDownloadOsPartial, els.btnLeaveExam]) button?.classList.add('hidden');
+    if (els.fileInput) { els.fileInput.disabled = false; updateFileInputAccept(); }
+    setTextContent(document.getElementById('dropzoneTitle'), t('sharp_drop_title'));
+    setTextContent(document.getElementById('dropzoneSubtitle'), t('sharp_drop_hint'));
+    setTextContent(document.getElementById('panelVarsTitle'), t('sharp_vars_title'));
+    updateSendFilesButtonState(); updateSelectionActionButtons();
+}
+
+async function runSharpOperation(label, callback) {
+    const backend = state.sharpBackend, generation = state.sharpConnectionGeneration;
+    if (!backend || backend.busy) { log(t('sharp_busy')); return; }
+    state.sharpProgress = null; startProgress(label);
+    try {
+        await callback(backend);
+        if (backend.closed && state.sharpBackend === backend && generation === state.sharpConnectionGeneration) {
+            handleTransportDisconnect({ port: backend.port, operationCompleted: true });
+        } else if (state.sharpBackend === backend && generation === state.sharpConnectionGeneration) {
+            readSharpInfo();
+        }
+    } catch (error) {
+        if (state.sharpBackend === backend && generation === state.sharpConnectionGeneration) {
+            logError(error, t('sharp_operation_failed'));
+            if (backend.closed) handleTransportDisconnect({ port: backend.port });
+        }
+    } finally {
+        if (generation === state.sharpConnectionGeneration) stopProgress(label);
+    }
+}
+
+function saveSharpDownload(result, backend) {
+    if (!state.connected || state.sharpBackend !== backend) return;
+    triggerDownload(result.filename, result.data);
+}
+
+async function convertSharpImage(file, slot) {
+    const codec = globalThis.WebTILPSharpFiles;
+    const bitmap = await createImageBitmap(file);
+    try {
+        const canvas = document.createElement('canvas');
+        canvas.width = codec.PICTURE_WIDTH; canvas.height = codec.PICTURE_HEIGHT;
+        const context = canvas.getContext('2d');
+        context.fillStyle = '#fff'; context.fillRect(0, 0, canvas.width, canvas.height);
+        const scale = Math.min(canvas.width / bitmap.width, canvas.height / bitmap.height);
+        const width = Math.max(1, Math.round(bitmap.width * scale));
+        const height = Math.max(1, Math.round(bitmap.height * scale));
+        context.drawImage(bitmap, Math.floor((canvas.width - width) / 2), Math.floor((canvas.height - height) / 2), width, height);
+        return codec.pictureFile(context.getImageData(0, 0, canvas.width, canvas.height).data, slot);
+    } finally { bitmap.close(); }
+}
+
+function createSharpPreview(data, filename) {
+    const preview = globalThis.WebTILPSharpFiles.previewFile(data, filename);
+    if (preview.text !== undefined) return { readable: preview.text, language: preview.language || '' };
+    const value = { ...preview.value };
+    if (preview.image) {
+        const canvas = document.createElement('canvas');
+        canvas.width = preview.image.width; canvas.height = preview.image.height;
+        canvas.getContext('2d').putImageData(new ImageData(preview.image.rgba, canvas.width, canvas.height), 0, 0);
+        value.previewImageDataUrl = canvas.toDataURL('image/png');
+    }
+    return { readable: JSON.stringify(value, null, 2), language: 'json' };
+}
+
+async function previewSharpEntry(entry) {
+    const generation = state.sharpConnectionGeneration, renderId = previewRenderId;
+    await runSharpOperation(t('sharp_receive'), async backend => {
+        const result = await backend.receiveVariable(entry);
+        if (!state.connected || state.sharpBackend !== backend || generation !== state.sharpConnectionGeneration
+            || renderId !== previewRenderId) return;
+        const preview = createSharpPreview(result.data, result.filename);
+        const metadata = { ...entry, typeName: entry.typeName || entry.type_name || entry.category.name, size: result.data.length - 54 };
+        closePreviewModal();
+        previewSession = { entry: metadata, isTIBasic: false, language: preview.language,
+            data: result.data, downloadName: result.filename };
+        openPreviewModal(metadata, preview.readable);
+    });
+}
+
+async function sendSharpFiles(files) {
+    if (!files.length) return;
+    const backend = state.sharpBackend, generation = state.sharpConnectionGeneration;
+    // Convert and validate the entire batch (including groups) before sending.
+    const prepared = [], codec = globalThis.WebTILPSharpFiles;
+    try {
+        for (const file of files) {
+            let name = file.name, data;
+            const source = /\.(bas|txt)$/i.test(name), image = /\.(png|jpe?g|bmp|gif|webp)$/i.test(name);
+            if (source || image) {
+                if (state.settings?.convertScriptFiles === false) throw new Error(t('sharp_conversion_disabled'));
+                if (!codec) throw new Error(t('sharp_backend_unavailable'));
+                if (source) {
+                    let programName = name.replace(/\.[^.]*$/, '');
+                    if (!/^[A-Za-z][A-Za-z0-9_]{0,7}$/.test(programName)) {
+                        programName = prompt(tFormat('sharp_program_name', { file: name }), programName.replace(/[^A-Za-z0-9_]/g, '').slice(0, 8));
+                        if (programName === null) return;
+                    }
+                    data = codec.programFile(new TextDecoder('utf-8', { fatal: true }).decode(await file.arrayBuffer()), programName);
+                    name = programName + '.g4p';
+                } else {
+                    const answer = prompt(tFormat('sharp_picture_slot', { file: name }), '1');
+                    if (answer === null) return;
+                    if (!/^[0-9]$/.test(answer.trim())) throw new Error('Choose a Sharp picture slot from 0 to 9.');
+                    const slot = Number(answer.trim());
+                    data = await convertSharpImage(file, slot); name = `Pict${slot}.g4i`;
+                }
+                log(tFormat('sharp_converted', { file: file.name, target: name }));
+            } else {
+                data = new Uint8Array(await file.arrayBuffer());
+            }
+            if (/\.g4g$/i.test(name)) {
+                if (!codec) throw new Error(t('sharp_backend_unavailable'));
+                for (const member of codec.decodeGroup(data, name)) prepared.push({ ...member });
+            } else {
+                const decoded = globalThis.WebTILPSharp.decodeNative(data, name);
+                globalThis.WebTILPSharp.validateRestore(decoded, backend?.model, true);
+                prepared.push({ name, data, decoded });
+            }
+        }
+        const destinations = new Set();
+        for (const item of prepared) {
+            const decoded = item.decoded;
+            const key = decoded.backup ? 'backup' : decoded.category.ext + ':' + Array.from(decoded.selector).join(',');
+            if (destinations.has(key)) throw new Error(tFormat('source_conversion_name_conflict', { name: item.name }));
+            destinations.add(key);
+        }
+        if (prepared.length > 1 && prepared.some(item => item.decoded.backup)) {
+            throw new Error('Send a Sharp RAM backup on its own. Restore requires reconnecting afterward.');
+        }
+    } catch (error) { logError(error, t('sharp_operation_failed')); return; }
+    if (!prepared.length || state.sharpBackend !== backend || generation !== state.sharpConnectionGeneration) return;
+    if (!confirm(tFormat('sharp_confirm_send', { count: prepared.length }) + '\n' + prepared.map(item => item.name).join('\n'))) return;
+    if (prepared.some(item => item.decoded.backup) && !confirm(t('sharp_confirm_restore'))) return;
+    await runSharpOperation(t('sharp_send'), async current => {
+        for (const item of prepared) {
+            await current.sendFile(item.data, item.name, { allowRestore: item.decoded.backup });
+            if (state.sharpBackend !== current) return;
+            log(tFormat('sharp_sent', { file: item.name }));
+        }
+        state.dirlist = []; renderDirlist([]);
+    });
+}
+
+async function receiveSharpDump(includeBoot) {
+    if (!confirm(t(includeBoot ? 'sharp_dump_rom_notice' : 'sharp_dump_system_notice'))) return;
+    await runSharpOperation(t('sharp_dump'), async backend => {
+        const result = await backend.receiveDump({ includeBoot });
+        if (state.sharpBackend !== backend) return;
+        if (result.manifest.recoveredFirstHeader) log(t('sharp_dump_header_recovered'));
+        saveSharpDownload(result, backend);
+        triggerDownload(result.filename + '.json', JSON.stringify(result.manifest, null, 2));
+    });
 }

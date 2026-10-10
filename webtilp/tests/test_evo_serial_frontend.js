@@ -48,7 +48,7 @@ function setup({ activation = true, authorized = false, serialError = null } = {
         },
         TI_VENDOR_ID: 0x0451, PID_TI84_EVO_SERIAL: 0xe018,
         SERIAL_KIND_EVO: 1, CABLE_GRAYLINK: '1',
-        DEVICE_FAMILY_TI: 'ti', DEVICE_FAMILY_NUMWORKS: 'numworks', DEVICE_FAMILY_HP_PRIME: 'hp-prime',
+        DEVICE_FAMILY_SHARP: 'sharp', DEVICE_FAMILY_TI: 'ti', DEVICE_FAMILY_NUMWORKS: 'numworks', DEVICE_FAMILY_HP_PRIME: 'hp-prime',
         els: { btnConnect: {} },
         t: key => key,
         alert(message) { alerts.push(message); },
