@@ -135,6 +135,13 @@ static int tifileutil_group_add_files(int * argc, char *** argv, unsigned int fi
 			ret = (fc == TIFILE_FLASH) ? err_print(argv, "tifiles_file_read_flash", tifiles_file_read_flash(src, te->content.flash))
 			                           : err_print(argv, "tifiles_file_read_regular", tifiles_file_read_regular(src, te->content.regular));
 			if (ret) {
+				// Both readers consume content on failure; retain only the entry wrapper.
+				if (fc == TIFILE_FLASH) {
+					te->content.flash = nullptr;
+				}
+				else {
+					te->content.regular = nullptr;
+				}
 				tifiles_te_delete(te);
 				return 1;
 			}
@@ -182,7 +189,6 @@ static int tifileutil_group_add_regular(char *** argv, FileContent * content, co
 	}
 	int ret = err_print(argv, "tifiles_file_read_regular", tifiles_file_read_regular(src, fc));
 	if (ret) {
-		tifiles_content_delete_regular(fc);
 		return 1;
 	}
 	CalcModel model = fc->model;
@@ -390,6 +396,7 @@ static int tifileutil_group_list(int * argc, char *** argv, unsigned int offset)
 		}
 		ret = err_print(argv, "tifiles_file_read_regular", tifiles_file_read_regular(infilename, fcontent));
 		if (ret) {
+			fcontent = nullptr; // The reader consumes content on failure.
 			ret = 3;
 			goto end;
 		}
@@ -650,6 +657,7 @@ static int tifileutil_group_extract(int * argc, char *** argv, unsigned int offs
 		}
 		ret = err_print(argv, "tifiles_file_read_regular", tifiles_file_read_regular(infilename, fcontent));
 		if (ret) {
+			fcontent = nullptr; // The reader consumes content on failure.
 			ret = 3;
 			goto end;
 		}
@@ -871,6 +879,7 @@ static int tifileutil_group_append(int * argc, char *** argv, unsigned int offse
 		}
 		ret = err_print(argv, "tifiles_file_read_regular", tifiles_file_read_regular(tigfilename, fcontent));
 		if (ret) {
+			fcontent = nullptr; // The reader consumes content on failure.
 			ret = 3;
 			goto end;
 		}

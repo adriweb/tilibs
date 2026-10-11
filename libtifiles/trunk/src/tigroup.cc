@@ -120,11 +120,17 @@ int TICALL tifiles_te_delete(TigEntry* entry)
 
 		if (entry->type == TIFILE_FLASH || entry->type == TIFILE_APP)
 		{
-			tifiles_content_delete_flash(entry->content.flash);
+			if (entry->content.flash != nullptr)
+			{
+				tifiles_content_delete_flash(entry->content.flash);
+			}
 		}
 		else if (entry->type & TIFILE_REGULAR)
 		{
-			tifiles_content_delete_regular(entry->content.regular);
+			if (entry->content.regular != nullptr)
+			{
+				tifiles_content_delete_regular(entry->content.regular);
+			}
 		}
 
 		g_free(entry);
@@ -468,6 +474,7 @@ int TICALL tifiles_tigroup_add_file(const char *src_filename, const char *dst_fi
 		ret = tifiles_file_read_flash(src_filename, te->content.flash);
 		if (ret)
 		{
+			te->content.flash = nullptr; // The reader consumes content on failure.
 			goto ttaf;
 		}
 	}
@@ -476,6 +483,7 @@ int TICALL tifiles_tigroup_add_file(const char *src_filename, const char *dst_fi
 		ret = tifiles_file_read_regular(src_filename, te->content.regular);
 		if (ret)
 		{
+			te->content.regular = nullptr; // The reader consumes content on failure.
 			goto ttaf;
 		}
 	}
@@ -774,6 +782,7 @@ int TICALL tifiles_tigroup_files(char **src_filenames, const char *dst_filename)
 			ret = tifiles_file_read_regular(src_filenames[k], src1[i]);
 			if (ret)
 			{
+				src1[i] = nullptr; // The reader consumes content on failure.
 				goto tgf;
 			}
 			i++;
@@ -784,6 +793,7 @@ int TICALL tifiles_tigroup_files(char **src_filenames, const char *dst_filename)
 			ret = tifiles_file_read_flash(src_filenames[k], src2[j]);
 			if (ret)
 			{
+				src2[j] = nullptr; // The reader consumes content on failure.
 				goto tgf;
 			}
 			j++;
@@ -801,12 +811,18 @@ int TICALL tifiles_tigroup_files(char **src_filenames, const char *dst_filename)
 tgf:
 	for (i = 0; i < m; i++)
 	{
-		g_free(src1[i]);
+		if (src1[i] != nullptr)
+		{
+			tifiles_content_delete_regular(src1[i]);
+		}
 	}
 	g_free(src1);
 	for (i = 0; i < n; i++)
 	{
-		g_free(src2[i]);
+		if (src2[i] != nullptr)
+		{
+			tifiles_content_delete_flash(src2[i]);
+		}
 	}
 	g_free(src2);
 	tifiles_content_delete_tigroup(dst);
@@ -1134,7 +1150,8 @@ int TICALL tifiles_file_read_tigroup(const char *filename, TigContent *content)
 					ret = tifiles_file_read_regular(fname, tigentry->content.regular);
 					if (ret)
 					{
-						g_free(tigentry);
+						tigentry->content.regular = nullptr; // The reader consumed content.
+						tifiles_te_delete(tigentry);
 						g_unlink(fname);
 						g_free(fname);
 						break;
@@ -1152,7 +1169,8 @@ int TICALL tifiles_file_read_tigroup(const char *filename, TigContent *content)
 					ret = tifiles_file_read_flash(fname, tigentry->content.flash);
 					if (ret)
 					{
-						g_free(tigentry);
+						tigentry->content.flash = nullptr; // The reader consumed content.
+						tifiles_te_delete(tigentry);
 						g_unlink(fname);
 						g_free(fname);
 						break;

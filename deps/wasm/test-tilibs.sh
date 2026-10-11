@@ -2,7 +2,7 @@
 set -euo pipefail
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 PREFIX=${WASM_DEPS_PREFIX:-"$ROOT/wasm-deps"}
-BUILD="$ROOT/build-emscripten"
+BUILD=${WASM_BUILD_DIR:-"$ROOT/build-emscripten"}
 if ! command -v emcc >/dev/null 2>&1; then
     set +u
     # shellcheck source=/dev/null
@@ -21,3 +21,13 @@ em++ "$ROOT/deps/wasm/evo-files-smoke.cpp" -o "$OUTPUT/evo-files.js" \
     "$BUILD/libtifiles/trunk/libtifiles2.a" "$BUILD/libticonv/trunk/libticonv.a" \
     "$PREFIX/lib/libarchive.a" "$PREFIX/lib/libglib-2.0.a" "$PREFIX/lib/libz.a"
 node "$OUTPUT/evo-files.js"
+em++ "$ROOT/libtifiles/trunk/tests/test_reader_cleanup_wasm.cpp" -o "$OUTPUT/reader-cleanup.js" \
+    -std=c++17 -O2 -pthread -sPTHREAD_POOL_SIZE=2 -sPROXY_TO_PTHREAD=1 \
+    -sEXIT_RUNTIME=1 -sASSERTIONS=1 -sSTACK_SIZE=5242880 -sASYNCIFY=1 \
+    -Wl,--wrap=g_free -Wl,--wrap=tifiles_file_read_regular -Wl,--wrap=tifiles_file_read_flash \
+    -I"$ROOT/libtifiles/trunk/src" -I"$ROOT/libticonv/trunk/src" \
+    -I"$PREFIX/include" -I"$PREFIX/include/glib-2.0" \
+    -I"$PREFIX/lib/glib-2.0/include" \
+    "$BUILD/libtifiles/trunk/libtifiles2.a" "$BUILD/libticonv/trunk/libticonv.a" \
+    "$PREFIX/lib/libarchive.a" "$PREFIX/lib/libglib-2.0.a" "$PREFIX/lib/libz.a"
+node "$OUTPUT/reader-cleanup.js"
