@@ -1,3 +1,4 @@
+const { installFrontendFunctions } = require('./frontend_context');
 'use strict';
 
 const assert = require('node:assert/strict');
@@ -11,24 +12,6 @@ function createContext(context) {
         getAuthorizedSharpSerialDevices: async () => []
     }, context));
     vm.createContext(context);
-}
-
-const appSource = fs.readFileSync(require.resolve('../app.js'), 'utf8');
-
-function extractFunction(name) {
-    const asyncMarker = `async function ${name}(`;
-    const plainMarker = `function ${name}(`;
-    let start = appSource.indexOf(asyncMarker);
-    if (start < 0) start = appSource.indexOf(plainMarker);
-    assert.notEqual(start, -1, `function ${name} exists`);
-    const bodyStart = appSource.indexOf(') {', start) + 2;
-    let depth = 0;
-    for (let index = bodyStart; index < appSource.length; index++) {
-        if (appSource[index] === '{') depth += 1;
-        if (appSource[index] === '}') depth -= 1;
-        if (depth === 0) return appSource.slice(start, index + 1);
-    }
-    throw new Error(`unterminated function ${name}`);
 }
 
 async function testRawBackupBypassesStorageParser() {
@@ -62,7 +45,7 @@ async function testRawBackupBypassesStorageParser() {
         log(message) { logs.push(message); }
     };
     createContext(context);
-    vm.runInContext(extractFunction('receiveBackup'), context);
+    installFrontendFunctions(context, ['receiveBackup']);
     await context.receiveBackup();
 
     assert.equal(rawReads, 1);
@@ -104,7 +87,7 @@ async function testOverwritePreservesDisabledAutoImport() {
         applyNumWorksStorageSnapshot() {}
     };
     createContext(context);
-    vm.runInContext(extractFunction('sendNumWorksFiles'), context);
+    installFrontendFunctions(context, ['sendNumWorksFiles']);
     await context.sendNumWorksFiles([{
         name: 'Existing.py',
         async text() { return 'print("replacement")\n'; }
@@ -136,6 +119,7 @@ async function testTransportConnectClosesMatchingBackendOnly() {
         state,
         DEVICE_FAMILY_TI: 'ti',
         retireModule() {},
+        clearActiveOperations(message, options) { context.session.invalidate(message, options); },
         setConnected() {},
         setStatus() {},
         log() {},
@@ -145,8 +129,8 @@ async function testTransportConnectClosesMatchingBackendOnly() {
         isCasioActive() { return false; }
     };
     createContext(context);
-    vm.runInContext(extractFunction('isTransportEventForActiveDevice'), context);
-    vm.runInContext(extractFunction('handleTransportConnect'), context);
+    installFrontendFunctions(context, ['isTransportEventForActiveDevice']);
+    installFrontendFunctions(context, ['handleTransportConnect']);
 
     context.handleTransportConnect({ device: { productName: 'Another USB device' } });
     assert.equal(state.numWorksBackend, backend,
@@ -213,7 +197,7 @@ async function testCombinedWebUsbChooserAndFamilyDetection() {
         'getWebUsbDeviceFamily', 'getSupportedWebUsbFilters',
         'requestSupportedWebUsbDevice'
     ]) {
-        vm.runInContext(extractFunction(name), context);
+        installFrontendFunctions(context, [name]);
     }
 
     assert.equal(context.getWebUsbDeviceFamily(selected), 'numworks');
@@ -287,7 +271,7 @@ async function testAutoConnectDispatchesSelectedWebUsbFamily() {
         logError(error) { throw error; }
     };
     createContext(context);
-    vm.runInContext(extractFunction('connect'), context);
+    installFrontendFunctions(context, ['connect']);
 
     await context.connect();
     assert.deepEqual(calls, [['numworks', false]]);
@@ -333,7 +317,7 @@ function testLegacyFamilySettingIsDiscarded() {
         normalizeLanguageCode(value) { return value; }
     };
     createContext(context);
-    vm.runInContext(extractFunction('loadSettings'), context);
+    installFrontendFunctions(context, ['loadSettings']);
     assert.equal(Object.hasOwn(context.loadSettings(), 'deviceFamily'), false,
         'obsolete family preferences are removed instead of migrated');
 }
@@ -370,11 +354,11 @@ async function testNumWorksScriptPreview() {
         logError(error) { throw error; }
     };
     createContext(context);
-    vm.runInContext('let previewSession = null;', context);
+    context.previewSession = null;
     for (const name of [
         'canPreviewVariable', 'previewEntry', 'downloadPreviewFile'
     ]) {
-        vm.runInContext(extractFunction(name), context);
+        installFrontendFunctions(context, [name]);
     }
 
     assert.equal(context.canPreviewVariable({
@@ -392,7 +376,7 @@ async function testNumWorksScriptPreview() {
     await context.previewEntry(entry, {});
     assert.equal(opened.length, 1);
     assert.equal(opened[0][1], source);
-    const session = vm.runInContext('previewSession', context);
+    const session = context.previewSession;
     assert.equal(session.language, 'python');
     assert.equal(session.downloadName, 'roots.py');
     assert.equal(new TextDecoder().decode(session.data), source);

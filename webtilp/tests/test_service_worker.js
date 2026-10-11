@@ -1,3 +1,4 @@
+const { installFrontendFunctions } = require('./frontend_context');
 'use strict';
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -51,8 +52,8 @@ async function testResponses() {
 }
 
 async function testStartup() {
-    const source = fs.readFileSync(require.resolve('../app.js'), 'utf8');
-    const setup = source.slice(source.indexOf('function waitForIsolationWorker('), source.indexOf('async function bootstrap()'));
+
+    const setup = ["waitForIsolationWorker","prepareServiceWorker"];
     const originalUrl = 'https://example.test/tilibs/webtilp.html?backend=ti#settings';
     const location = { href: originalUrl, replace(url) { this.href = url; reloads++; } };
     let reloads = 0;
@@ -88,7 +89,7 @@ async function testStartup() {
         URL, MessageChannel, setTimeout(fn, ms) { return setTimeout(fn, Math.min(ms, 1000)); }, clearTimeout,
         showOfflineBanner() {}, showOfflineUpdateBanner() {}, console: { warn() {} }
     });
-    vm.runInContext(setup, context);
+    installFrontendFunctions(context, setup);
     assert.equal(await context.prepareServiceWorker(), true);
     assert.equal(reloads, 1);
     assert.equal(new URL(location.href).searchParams.get('__webtilp_isolation'), 'test-build');

@@ -1,27 +1,24 @@
+const { installFrontendFunctions } = require('./frontend_context');
 'use strict';
 
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
 const path = require('node:path');
-const app = fs.readFileSync(require.resolve('../app.js'), 'utf8');
-const section = (start, end) => app.slice(app.indexOf(start), app.indexOf(end, app.indexOf(start)));
+
+
 let activeModel = 0;
 const queries = [];
 const state = {settings: {calcModel: 'auto', convertScriptFiles: true}, activeFamily: 'ti'};
 const els = {fileInput: {accept: ''}};
 const context = vm.createContext({
+    ...require('../catalog/devices'),
+    ...require('../catalog/file-types'),
     state, els, console,
     CABLE_SILVERLINK: '4', CABLE_GRAYLINK: '1',
     getActiveCalcModelId: () => activeModel
 });
-vm.runInContext([
-    section('const DEVICE_FAMILY_TI =', '// Known TI USB devices'),
-    section('const CE_PYTHON_CALC_MODELS =', 'const PID_SILVERLINK ='),
-    section('function getPythonConversionKind(', 'function getSelectedConversionModelId('),
-    section('function isHPPrimeActive(', 'function resetFamilySpecificUiText('),
-    section('function isLegacyTivarsConversionCandidate(', 'async function convertLegacyTivarsFileForEvo(')
-].join('\n'), context);
+installFrontendFunctions(context, [["getPythonConversionKind"], ["isHPPrimeActive","isHPLegacyActive","isNumWorksActive","buildFileInputAccept","updateFileInputAccept","isCasioActive"], ["isLegacyTivarsConversionCandidate"]].flat());
 
 // Model the native bridge for frontend lifecycle and conversion checks.
 const nativeExtensions = new Map([
@@ -123,7 +120,7 @@ async function checkSettingsChange() {
         normalizeLanguageCode: value => value,
         applySettingsToModule() { throw new Error('conversion setting must preserve the detected model'); }
     });
-    vm.runInContext(section('async function saveSettingsFromModal(', 'function log('), context);
+    installFrontendFunctions(context, ["saveSettingsFromModal"]);
     select(32);
     assert.ok(accepts('demo.py'));
     await context.saveSettingsFromModal();

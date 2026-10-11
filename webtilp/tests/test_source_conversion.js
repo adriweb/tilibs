@@ -1,22 +1,14 @@
+const { installFrontendFunctions } = require('./frontend_context');
 'use strict';
 
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
-const app = fs.readFileSync(require.resolve('../app.js'), 'utf8');
 
-function section(start, end) {
-    const first = app.indexOf(start);
-    const last = app.indexOf(end, first);
-    assert.ok(first >= 0 && last > first, `source section ${start} exists`);
-    return app.slice(first, last);
-}
+const fileTypes = require('../catalog/file-types');
+const { SETTINGS_DEFAULTS } = require('../catalog/models');
 
-const source = [
-    section('const CE_PYTHON_CALC_MODELS =', 'const PID_SILVERLINK ='),
-    section('function getPythonConversionKind(', 'function getSelectedConversionModelId('),
-    section('function sanitizePythonVarName(', 'async function extractBundleFiles(')
-].join('\n');
+const source = [["getPythonConversionKind"], ["sanitizePythonVarName","convertTivarsPythonSource","convertNspireScriptSource","convertPythonSourceForCalc","validatePythonBytecode","packagePythonBytecode","isLegacyTivarsConversionCandidate","convertLegacyTivarsFileForEvo","buildTransferPlan","buildTransferPlanFromFsEntries"]].flat();
 const sourceBytes = new TextEncoder().encode('print("source")\n');
 const convertedBytes = Uint8Array.of(0x54, 0x4e, 0x53, 0x01);
 
@@ -47,6 +39,7 @@ async function run(model, names, settings = {}, failure = '') {
     const warnings = [];
     let deletedVariables = 0;
     const context = vm.createContext({
+        ...fileTypes, SETTINGS_DEFAULTS,
         TextDecoder, Uint8Array,
         state: {settings},
         console: {warn: (...args) => warnings.push(args)},
@@ -89,7 +82,7 @@ async function run(model, names, settings = {}, failure = '') {
             }))});
         }
     });
-    vm.runInContext(source, context);
+    installFrontendFunctions(context, source);
     // Exercise removal of a leftover converter file as well as final cleanup.
     for (const name of names) {
         lunaFS.writeFile(`/${name.replace(/\.[^.]*$/, '')}.tns`, Uint8Array.of(0xff));
@@ -107,10 +100,7 @@ function assertPaths(result, paths) {
 }
 
 function testSettings() {
-    const settingsSource = [
-        section('const SETTINGS_DEFAULTS =', 'const CABLE_OPTIONS ='),
-        section('function loadSettings(', 'function normalizeOptionValue(')
-    ].join('\n');
+    const settingsSource = [["loadSettings"]].flat();
     for (const [stored, expected] of [
         [null, true],
         [{}, true],
@@ -122,11 +112,12 @@ function testSettings() {
         [{convertScriptFiles: false, convertPythonFiles: true, convertLuaFiles: true}, false]
     ]) {
         const context = vm.createContext({
+            ...fileTypes, SETTINGS_DEFAULTS,
             localStorage: {getItem: () => stored === null ? null : JSON.stringify(stored)},
             normalizeLanguageCode: value => value,
             console
         });
-        vm.runInContext(settingsSource, context);
+        installFrontendFunctions(context, settingsSource);
         const loaded = context.loadSettings();
         assert.equal(loaded.convertScriptFiles, expected);
         assert.ok(!Object.hasOwn(loaded, 'convertPythonFiles'));
@@ -135,11 +126,12 @@ function testSettings() {
 }
 
 async function testReceiveSetting() {
-    const receiveSource = section('async function convertReceivedPythonFile(', 'async function downloadLastReceived(');
+    const receiveSource = ["convertReceivedPythonFile"];
     for (const [model, filename] of [[19, 'python.8xv'], [48, 'python.8xpy2']]) {
         for (const enabled of [false, true]) {
             let converterCalls = 0;
             const context = vm.createContext({
+                ...fileTypes, SETTINGS_DEFAULTS,
                 state: {settings: {convertScriptFiles: enabled}},
                 getActiveCalcModelId: () => model,
                 async getTivarsLib() {
@@ -147,7 +139,7 @@ async function testReceiveSetting() {
                     throw new Error('converter unavailable');
                 }
             });
-            vm.runInContext(source + '\n' + receiveSource, context);
+            installFrontendFunctions(context, [source, receiveSource].flat());
             assert.equal(await context.convertReceivedPythonFile(filename, sourceBytes), null);
             assert.equal(converterCalls, enabled ? 1 : 0,
                 'the shared setting gates received Python conversion before loading the converter');

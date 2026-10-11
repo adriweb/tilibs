@@ -2,6 +2,7 @@
 
 # Tools
 EMCC = em++
+BUN ?= bun
 
 # Project structure
 ROOT_DIR = ..
@@ -88,6 +89,7 @@ PREJS = webtilp_prejs.js
 PREJS_DEV = webtilp_prejs_dev.js
 PREJS_PROD = webtilp_prejs_prod.js
 APP_JS_SRC = app.js
+APP_JS_ENTRY = app_entry.mjs
 APP_JS_BUNDLE = app.bundle.js
 HP_LEGACY_JS_SRC = hp_legacy_backend.js
 SHARP_JS_SRC = sharp_backend.js
@@ -112,16 +114,20 @@ prod: prepare_prod
 	$(MAKE) $(TARGET)
 	$(MAKE) stamp
 
-prepare_dev: prepare_python_converters
+bundle-dev:
+	$(BUN) build $(APP_JS_ENTRY) --outfile $(APP_JS_BUNDLE) --format=iife --sourcemap=linked
+	$(BUN) build $(NUMWORKS_JS_ENTRY) --outfile $(NUMWORKS_JS_BUNDLE) --format=iife --sourcemap=linked --banner='$(NUMWORKS_JS_BANNER)'
+
+bundle-prod:
+	$(BUN) build $(APP_JS_ENTRY) --outfile $(APP_JS_BUNDLE) --format=iife --minify --sourcemap=linked
+	$(BUN) build $(NUMWORKS_JS_ENTRY) --outfile $(NUMWORKS_JS_BUNDLE) --format=iife --minify --sourcemap=linked --banner='$(NUMWORKS_JS_BANNER)'
+
+prepare_dev: prepare_python_converters bundle-dev
 	cp -a $(PREJS_DEV) $(PREJS)
-	cp -a $(APP_JS_SRC) $(APP_JS_BUNDLE)
-	bun build $(NUMWORKS_JS_ENTRY) --outfile $(NUMWORKS_JS_BUNDLE) --format=iife --sourcemap=linked --banner='$(NUMWORKS_JS_BANNER)'
 	printf "%s\n" ".brand-mark { background: linear-gradient(135deg, #ff8a8a, #ff3b3b); box-shadow: 0 10px 24px rgba(255, 59, 59, 0.25); } .brand-mark > span.brand-beta { font-size: 0; } .brand-mark > span.brand-beta::after { content: \"DEV\"; font-size: 8px; }" > $(BUILD_PROFILE_CSS)
 
-prepare_prod: prepare_python_converters
+prepare_prod: prepare_python_converters bundle-prod
 	cp -a $(PREJS_PROD) $(PREJS)
-	bun build $(APP_JS_SRC) --outfile $(APP_JS_BUNDLE) --minify --sourcemap=linked
-	bun build $(NUMWORKS_JS_ENTRY) --outfile $(NUMWORKS_JS_BUNDLE) --format=iife --minify --sourcemap=linked --banner='$(NUMWORKS_JS_BANNER)'
 	printf "%s\n" "/* prod build profile */" > $(BUILD_PROFILE_CSS)
 
 prepare_python_converters:
@@ -148,7 +154,14 @@ test:
 	rm -f tests/test_webtilp_json
 	node --check < sw.js.in
 	node tests/test_service_worker.js
+	node tests/test_wasm_runtime.js
+	node tests/test_runtime_transports.js
+	node tests/test_connection_lifecycle.js
+	node tests/test_transfer_lifecycle.js
+	node tests/test_file_actions.js
+	node tests/test_frontend_composition.js
 	node --check $(APP_JS_SRC)
+	node --check $(APP_JS_ENTRY)
 	node --check evo_webusb_serial.js
 	node tests/test_evo_webusb_serial.js
 	node --check $(SHARP_JS_SRC)
@@ -196,6 +209,6 @@ test-ti-catalog-wasm:
 	node tests/test_ti_file_catalog_wasm.cjs "$$test_dir/catalog.js"
 
 clean:
-	rm -f $(TARGET) webtilp.wasm webtilp.worker.js sw.js version.json $(APP_JS_BUNDLE) $(NUMWORKS_JS_BUNDLE) $(BUILD_PROFILE_CSS) $(PYTHON_CONVERTER_ASSETS)
+	rm -f $(TARGET) webtilp.wasm webtilp.worker.js sw.js version.json $(APP_JS_BUNDLE) $(APP_JS_BUNDLE).map $(NUMWORKS_JS_BUNDLE) $(NUMWORKS_JS_BUNDLE).map $(BUILD_PROFILE_CSS) $(PYTHON_CONVERTER_ASSETS) app.test.bundle.js app.test.bundle.js.map
 
-.PHONY: all dev prod prepare_dev prepare_prod prepare_python_converters test test-python-bytecode-wasm test-var-send-wasm clean stamp test-ti-catalog-wasm test-wasm
+.PHONY: all dev prod bundle-dev bundle-prod prepare_dev prepare_prod prepare_python_converters test test-python-bytecode-wasm test-var-send-wasm test-ti-catalog-wasm test-wasm clean stamp

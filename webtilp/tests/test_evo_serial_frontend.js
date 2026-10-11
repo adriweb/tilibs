@@ -1,3 +1,4 @@
+const { installFrontendFunctions } = require('./frontend_context');
 'use strict';
 
 const assert = require('node:assert/strict');
@@ -10,22 +11,6 @@ function createContext(context) {
         getAuthorizedSharpSerialDevices: async () => []
     }, context));
     vm.createContext(context);
-}
-
-const appSource = fs.readFileSync(require.resolve('../app.js'), 'utf8');
-
-function extractFunction(name) {
-    let start = appSource.indexOf(`async function ${name}(`);
-    if (start < 0) start = appSource.indexOf(`function ${name}(`);
-    assert.notEqual(start, -1, `function ${name} exists`);
-    const bodyStart = appSource.indexOf(') {', start) + 2;
-    let depth = 0;
-    for (let index = bodyStart; index < appSource.length; index++) {
-        if (appSource[index] === '{') depth++;
-        if (appSource[index] === '}') depth--;
-        if (!depth) return appSource.slice(start, index + 1);
-    }
-    throw new Error(`unterminated function ${name}`);
 }
 
 function setup({ activation = true, authorized = false, serialError = null } = {}) {
@@ -84,7 +69,7 @@ function setup({ activation = true, authorized = false, serialError = null } = {
         'isEvoSerialDeviceInfo', 'requestTIEvoSerialDevice', 'getAuthorizedSerialDevices',
         'getAuthorizedEvoSerialDevice', 'shouldUseEvoWebUsbSerial', 'evoWebUsbSerialDevice', 'requestEvoSerialForUsbDevice',
         'bindSerialPortToModule', 'authorizeDevice', 'connectTI', 'connect']) {
-        vm.runInContext(extractFunction(name), context);
+        installFrontendFunctions(context, [name]);
     }
     return { context, state, calls, errors, alerts, usbDevice, port };
 }
@@ -219,8 +204,8 @@ async function main() {
         helpHtml = html;
     };
     usbHelp.context.isLinuxPlatform = () => true; // Android UAs contain Linux.
-    vm.runInContext(extractFunction('escapeHtml'), usbHelp.context);
-    vm.runInContext(extractFunction('showCableOpenHelp'), usbHelp.context);
+    installFrontendFunctions(usbHelp.context, ['escapeHtml']);
+    installFrontendFunctions(usbHelp.context, ['showCableOpenHelp']);
     usbHelp.context.showCableOpenHelp(58);
     assert.match(helpHtml, /USB interface &lt;busy&gt;/);
     assert.doesNotMatch(helpHtml, /dialout|usermod/, 'Android CDC failures do not suggest Linux group changes');

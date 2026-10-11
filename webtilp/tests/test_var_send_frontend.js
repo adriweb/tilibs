@@ -1,9 +1,10 @@
+const { installFrontendFunctions } = require('./frontend_context');
 'use strict';
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
-const app = fs.readFileSync(require.resolve('../app.js'), 'utf8');
-const source = app.slice(app.indexOf('async function performTransfers('), app.indexOf('\nasync function sendNumWorksFiles('));
+
+const source = ["performTransfers"];
 
 function item(name, extra = {}) {
     return { path: `/${name}.82p`, file: {name, size: 12}, fileClass: 'single', entryName: name,
@@ -31,7 +32,7 @@ async function run(model, plan, {finishResult = 0, sendResult = 0, rejectSend = 
             return sendResult;
         }
     });
-    vm.runInContext(source, context);
+    installFrontendFunctions(context, source);
     let result, error;
     try { result = await context.performTransfers(plan, {}, {}); } catch (err) { error = err; }
     return {calls, result, error};

@@ -1,20 +1,12 @@
+const { installFrontendFunctions } = require('./frontend_context');
 'use strict';
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
 const sharp = require('../sharp_backend.js');
-const source = fs.readFileSync(require.resolve('../app.js'), 'utf8');
-function extract(name) {
-    let start = source.indexOf(`async function ${name}(`);
-    if (start < 0) start = source.indexOf(`function ${name}(`);
-    assert.ok(start >= 0, name);
-    let depth = 0;
-    for (let i = source.indexOf(') {', start) + 2; i < source.length; i++) {
-        if (source[i] === '{') depth++;
-        if (source[i] === '}' && --depth === 0) return source.slice(start, i + 1);
-    }
-    throw new Error(`Missing body ${name}`);
-}
+const { createFileModel } = require('../features/file-model.js');
+
+
 function element() {
     return { disabled: false, title: '', accept: '', textContent: '', style: {}, removeAttribute() {},
         classList: { set: new Set(), add(...v) { v.forEach(x => this.set.add(x)); }, remove(...v) { v.forEach(x => this.set.delete(x)); },
@@ -40,7 +32,7 @@ function context(extra = {}) {
     vm.createContext(c);
     for (const name of ['serialPortToDevice', 'sharpSerialDevice', 'getAuthorizedSharpSerialDevices', 'requestSharpSerialDevice',
         'connectSharp', 'connect', 'getWebUsbDeviceFamily', 'isTransportEventForActiveDevice', 'runSharpOperation',
-        'buildEntryFromCheckbox', 'sendSharpFiles', 'saveSharpDownload']) vm.runInContext(extract(name), c);
+        'sendSharpFiles', 'saveSharpDownload']) installFrontendFunctions(c, [name]);
     return c;
 }
 async function main() {
@@ -92,10 +84,13 @@ async function main() {
     const stale = context(); stale.navigator.serial = { requestPort: () => new Promise(r => { resolve = r; }) };
     const grant = stale.requestSharpSerialDevice(); stale.state.sharpConnectionGeneration++; resolve(port);
     await assert.rejects(grant, error => error.sharpConnectionCancelled);
-    // Opaque selectors survive table checkbox serialization.
+    // Opaque selectors live in the model rather than checkbox metadata.
     const entry = { kind: 'sharp', name: 'HERON', type: 112, selector: new Uint8Array(11), category: sharp.CATEGORIES[0] };
-    c.state.dirlist = [entry];
-    assert.equal(c.buildEntryFromCheckbox({ dataset: { kind: 'sharp', name: 'HERON', type: '112' } }), entry);
+    const fileModel = createFileModel();
+    const id = fileModel.register(entry, 'sharp');
+    fileModel.select(id, true);
+    assert.equal(fileModel.selectedEntries()[0].selector, entry.selector);
+    assert.equal(fileModel.selectedEntries()[0].category, entry.category);
     // Invalid files cause zero writes; backup restore asks separately for memory replacement.
     let sent = 0, confirms = 0;
     c.confirm = () => { confirms++; return true; };
@@ -137,13 +132,13 @@ async function main() {
     ui.resetFamilySpecificUiText = () => {}; ui.updateKeyControlsState = () => {}; ui.clearKeyMapDataList = () => {};
     ui.updateFileInputAccept = () => {}; ui.setTextContent = (e, t) => { e.textContent = t; };
     ui.document = { getElementById: () => element() }; ui.updateSendFilesButtonState = () => {}; ui.updateSelectionActionButtons = () => {};
-    vm.runInContext(extract('setSharpUiState'), ui); ui.setSharpUiState();
+    installFrontendFunctions(ui, ['setSharpUiState']); ui.setSharpUiState();
     assert.equal(ui.els.btnDeleteSelected.disabled, true); assert.equal(ui.els.btnScreenshot.disabled, false);
     assert.equal(ui.els.btnDumpRom.classList.set.has('hidden'), false);
     const calls = [];
     ui.state.settings = { calcModel: 'sharp-el9950', cableModel: 'auto', cableTimeout: 10, cableDelay: 10 };
     ui.state.module = new Proxy({}, { get: (_, name) => value => calls.push([name, value]) });
-    vm.runInContext(extract('applySettingsToModule'), ui); ui.applySettingsToModule();
+    installFrontendFunctions(ui, ['applySettingsToModule']); ui.applySettingsToModule();
     assert.ok(calls.some(([name, value]) => name === '_set_calc_model' && value === 0));
     assert.ok(!calls.some(([, value]) => Number.isNaN(value)));
     console.log('Sharp frontend routing, chooser retry/cancel, ambiguity, stale grants, isolation, selectors, file validation and capability tests passed');

@@ -5,7 +5,7 @@ import re
 # Get the directory where the script is located
 script_dir = os.path.dirname(os.path.abspath(__file__))
 
-en_messages = json.loads(open(os.path.join(script_dir, '../app.js')).read().split('const I18N_EN = ')[1].split(';\n')[0])
+en_messages = json.loads(open(os.path.join(script_dir, '../catalog/locales.js')).read().split('const I18N_EN = ')[1].split(';\n')[0])
 en_keys = set(en_messages.keys())
 print(f'English keys: {len(en_keys)}')
 all_ok = True

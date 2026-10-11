@@ -1,3 +1,4 @@
+const { installFrontendFunctions } = require('./frontend_context');
 'use strict';
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -5,16 +6,9 @@ const vm = require('node:vm');
 const path = require('node:path');
 const {pathToFileURL} = require('node:url');
 const zlib = require('node:zlib');
-const app = fs.readFileSync(require.resolve('../app.js'), 'utf8');
-const section = (start, end) => app.slice(app.indexOf(start), app.indexOf(end, app.indexOf(start)));
-const source = [
-    section('const CE_PYTHON_CALC_MODELS =', 'const PID_SILVERLINK ='),
-    section('function getPythonConversionKind(', 'function getSelectedConversionModelId('),
-    section('function validatePythonBytecode(', 'function isLegacyTivarsConversionCandidate('),
-    section('async function buildTransferPlan(', 'async function buildTransferPlanFromFsEntries('),
-    section('async function sendDroppedFiles(', 'function getDirlistFolders('),
-    section('function formatTivarsException(', 'function unwrapReadablePreview(')
-].join('\n');
+
+
+const source = [["getPythonConversionKind"], ["validatePythonBytecode","packagePythonBytecode"], ["buildTransferPlan"], ["sendDroppedFiles","sendHPLegacyFiles"], ["formatTivarsException"]].flat();
 // Project Builder's pinned compiler output for module.py: "value = 42\n".
 // MicroPython 1.9.3 / 1.13 / 1.11, 31-bit integers; Evo/Nspire use lookup caching.
 const fixtures = {
@@ -36,6 +30,7 @@ async function run(model, inputs, {enabled = true, failure = '', realLibraries, 
     const lunaFS = memoryFS(), tivarsFS = memoryFS(), calls = [];
     let deleted = 0, metadataCalls = 0, droppedPlan;
     const context = vm.createContext({
+        ...require('../catalog/file-types'),
         TextEncoder, Uint8Array, console,
         state: {settings: {convertScriptFiles: enabled}},
         getActiveCalcModelId: () => model,
@@ -83,7 +78,7 @@ async function run(model, inputs, {enabled = true, failure = '', realLibraries, 
             droppedPlan = await context.buildTransferPlan(files, module);
         }
     });
-    vm.runInContext(source, context);
+    installFrontendFunctions(context, source);
     for (const [name] of inputs) lunaFS.writeFile('/' + name.replace(/\.mpy$/i, '.tns'), outputBytes);
     const files = inputs.map(([name, bytes]) => ({name, arrayBuffer: async () => Uint8Array.from(bytes).buffer}));
     const plan = dropped ? (await context.sendDroppedFiles(files, 'library'), droppedPlan) : await context.buildTransferPlan(files, module);

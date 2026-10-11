@@ -1,22 +1,9 @@
+const { installFrontendFunctions } = require('./frontend_context');
 'use strict';
 
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
-const app = fs.readFileSync(require.resolve('../app.js'), 'utf8');
-
-function extractFunction(name) {
-    const start = app.indexOf(`function ${name}(`);
-    assert.notEqual(start, -1, `${name} exists`);
-    const bodyStart = app.indexOf(') {', start) + 2;
-    let depth = 0;
-    for (let i = bodyStart; i < app.length; i++) {
-        if (app[i] === '{') depth++;
-        if (app[i] === '}') depth--;
-        if (!depth) return app.slice(start, i + 1);
-    }
-    throw new Error(`Unterminated function ${name}`);
-}
 
 function decode(text) {
     return text.replace(/&(?:amp|lt|gt|quot|#39);/g, entity => ({
@@ -72,6 +59,7 @@ const body = new Element();
 const storage = new Map();
 const themeButton = body.appendChild(new Element('btn'));
 const context = vm.createContext({
+    ...require('../catalog/themes'),
     document: { body, querySelectorAll: selector => body.querySelectorAll(selector) },
     localStorage: { setItem: (key, value) => storage.set(key, value) },
     els: { btnThemeToggle: themeButton },
@@ -80,12 +68,10 @@ const context = vm.createContext({
     applyTranslations() { assert.fail('changing theme must not reset device capabilities or loading controls'); },
     renderDirlist() { assert.fail('changing theme must not rebuild selected rows'); }
 });
-vm.runInContext(app.slice(app.indexOf('const THEME_STORAGE_KEY ='),
-    app.indexOf('function getCalcModelLabel(')), context);
 for (const name of ['escapeHtml', 'isMinimalTheme', 'iconMarkup', 'themeIconMarkup',
     'setIconLabel', 'updateThemeIcons', 'applyTheme', 'updateThemeButton',
     'cycleTheme', 'setButtonLoading']) {
-    vm.runInContext(extractFunction(name), context);
+    installFrontendFunctions(context, [name]);
 }
 
 context.applyTheme('dark-modern');

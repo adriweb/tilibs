@@ -1,24 +1,11 @@
+const { installFrontendFunctions } = require('./frontend_context');
 'use strict';
 
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
-const app = fs.readFileSync(require.resolve('../app.js'), 'utf8');
-const native = fs.readFileSync(require.resolve('../../libticalcs/trunk/src/calc_8x.cc'), 'utf8');
 
-function extractFunction(name) {
-    let start = app.indexOf(`async function ${name}(`);
-    if (start < 0) start = app.indexOf(`function ${name}(`);
-    assert.notEqual(start, -1);
-    const bodyStart = app.indexOf(') {', start) + 2;
-    let depth = 0;
-    for (let i = bodyStart; i < app.length; i++) {
-        if (app[i] === '{') depth++;
-        if (app[i] === '}') depth--;
-        if (!depth) return app.slice(start, i + 1);
-    }
-    throw new Error(`Unterminated function ${name}`);
-}
+const native = fs.readFileSync(require.resolve('../../libticalcs/trunk/src/calc_8x.cc'), 'utf8');
 
 function element() {
     const classes = new Set();
@@ -57,7 +44,9 @@ const state = {
     operationEpoch: 0, backupDirlistLoaded: false,
     module: { FS: { readFile: path => path === '/last_recv_path.txt' ? '/dirlist-backup.bin' : '{"vars":[],"apps":[]}', unlink(path) {unlinked.push(path);} } }
 };
+const { FEATURE_FLAGS } = require('../catalog/devices');
 const context = vm.createContext({
+    FEATURE_FLAGS, flags: FEATURE_FLAGS,
     state, els,
     document: { getElementById: () => null },
     isHPPrimeActive: () => false, isHPLegacyActive: () => false,
@@ -90,11 +79,9 @@ const context = vm.createContext({
     async performTransfers() { sends++; return { successCount: 1 }; },
     setSelectedFiles() {}
 });
-vm.runInContext(app.slice(app.indexOf('const FEATURE_FLAGS ='), app.indexOf('const TIG_MODE ='))
-    + '\nglobalThis.flags = FEATURE_FLAGS;', context);
 for (const name of ['setButtonLoading', 'applyActiveFamilyUiState', 'updateCapabilities',
     'formatVariableDisplayName', 'refreshBackupDirlist', 'refreshDirlist', 'ensureDirlistLoadedWithPrompt', 'processIncomingTransfers']) {
-    vm.runInContext(extractFunction(name), context);
+    installFrontendFunctions(context, [name]);
 }
 
 async function main() {

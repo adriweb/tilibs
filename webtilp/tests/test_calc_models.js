@@ -1,10 +1,11 @@
+const { installFrontendFunctions } = require('./frontend_context');
 'use strict';
 
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
-const appSource = fs.readFileSync(path.join(__dirname, '../app.js'), 'utf8');
+
 const header = fs.readFileSync(path.join(__dirname, '../../libticonv/trunk/src/ticonv.h'), 'utf8');
 const enumBody = header.match(/\{\s*(CALC_NONE\s*=\s*0,[\s\S]*?)\}\s*CalcModel;/)[1];
 const models = {};
@@ -16,22 +17,10 @@ for (const declaration of enumBody.replace(/\/\/[^\n]*/g, '').split(',')) {
     nextValue = models[match[1]] + 1;
 }
 
-function extractFunction(name) {
-    let start = appSource.indexOf(`async function ${name}(`);
-    if (start < 0) start = appSource.indexOf(`function ${name}(`);
-    assert.notEqual(start, -1, `function ${name} exists`);
-    const bodyStart = appSource.indexOf(') {', start) + 2;
-    let depth = 0;
-    for (let index = bodyStart; index < appSource.length; index++) {
-        if (appSource[index] === '{') depth++;
-        if (appSource[index] === '}') depth--;
-        if (!depth) return appSource.slice(start, index + 1);
-    }
-    throw new Error(`unterminated function ${name}`);
-}
-
 let stored = null;
 const context = {
+    ...require('../catalog/models'),
+    ...require('../catalog/file-types'),
     console,
     CABLE_DIRECTLINK: '6', CABLE_SILVERLINK: '5', CABLE_GRAYLINK: '1',
     state: {},
@@ -48,12 +37,10 @@ const context = {
     deviceMatches: (left, right) => left === right
 };
 vm.createContext(context);
-vm.runInContext(appSource.slice(appSource.indexOf('const SETTINGS_DEFAULTS ='),
-    appSource.indexOf('const TIVARS_LEGACY_PREVIEW_TYPES =')), context);
 vm.runInContext('globalThis.config = { CALC_MODEL_OPTIONS, DIRECTLINK_CALC_VALUES, EVO_PYTHON_CALC_MODELS, TIVARS_PREVIEW_CALC_MODELS };', context);
 for (const name of ['loadSettings', 'saveSettings', 'getEvoCalcModelForDevice',
     'applyWebUsbDeviceCableHint', 'authorizeDevice']) {
-    vm.runInContext(extractFunction(name), context);
+    installFrontendFunctions(context, [name]);
 }
 
 async function main() {

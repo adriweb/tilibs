@@ -1,3 +1,4 @@
+const { installFrontendFunctions } = require('./frontend_context');
 'use strict';
 
 const assert = require('node:assert/strict');
@@ -11,24 +12,6 @@ function createContext(context) {
         getAuthorizedSharpSerialDevices: async () => []
     }, context));
     vm.createContext(context);
-}
-
-const appSource = fs.readFileSync(require.resolve('../app.js'), 'utf8');
-
-function extractFunction(name) {
-    const asyncMarker = `async function ${name}(`;
-    const plainMarker = `function ${name}(`;
-    let start = appSource.indexOf(asyncMarker);
-    if (start < 0) start = appSource.indexOf(plainMarker);
-    assert.notEqual(start, -1, `function ${name} exists`);
-    const bodyStart = appSource.indexOf(') {', start) + 2;
-    let depth = 0;
-    for (let index = bodyStart; index < appSource.length; index++) {
-        if (appSource[index] === '{') depth += 1;
-        if (appSource[index] === '}') depth -= 1;
-        if (depth === 0) return appSource.slice(start, index + 1);
-    }
-    throw new Error(`unterminated function ${name}`);
 }
 
 function element() {
@@ -75,7 +58,7 @@ function testCapabilityGateRequiresKermitServerMode() {
         }
     };
     createContext(context);
-    vm.runInContext(extractFunction('setHPLegacyUiState'), context);
+    installFrontendFunctions(context, ['setHPLegacyUiState']);
 
     context.setHPLegacyUiState();
     assert.equal(els.fileInput.disabled, true);
@@ -106,7 +89,7 @@ function testDisconnectIsolationForRawUsbAndSerial() {
         isCasioActive() { return false; }
     };
     createContext(context);
-    vm.runInContext(extractFunction('isTransportEventForActiveDevice'), context);
+    installFrontendFunctions(context, ['isTransportEventForActiveDevice']);
     assert.equal(context.isTransportEventForActiveDevice({ device: usb }), true);
     assert.equal(context.isTransportEventForActiveDevice({ device: unrelated }), false);
 
@@ -135,7 +118,7 @@ function testDetectedModelReplacesAmbiguousUsbLabel() {
         updateDeviceModelDisplay(model) { displayed = model; }
     };
     createContext(context);
-    vm.runInContext(extractFunction('readHPLegacyInfo'), context);
+    installFrontendFunctions(context, ['readHPLegacyInfo']);
     context.readHPLegacyInfo();
     assert.equal(state.deviceModelName, 'HP 50g');
     assert.equal(displayed, 'HP 50g');
@@ -170,7 +153,7 @@ function testUnknownModelIsReportedWithoutClaimingExactDetection() {
         updateDeviceModelDisplay() {}
     };
     createContext(context);
-    vm.runInContext(extractFunction('readHPLegacyInfo'), context);
+    installFrontendFunctions(context, ['readHPLegacyInfo']);
     context.readHPLegacyInfo();
     assert.equal(state.deviceModelName,
         'Legacy HP Kermit calculator (model unrecognized)');
@@ -244,7 +227,7 @@ async function testConnectionReadsSerialNumberForDeviceInfo() {
         setStatus() {}
     };
     createContext(context);
-    vm.runInContext(extractFunction('connectHPLegacy'), context);
+    installFrontendFunctions(context, ['connectHPLegacy']);
     const device = { vendorId: 0x03F0, productId: 0x0121 };
     await context.connectHPLegacy(false, device);
     assert.deepEqual(events, [
@@ -296,7 +279,7 @@ async function testSerialFailureDoesNotFailConnection() {
         setStatus() {}
     };
     createContext(context);
-    vm.runInContext(extractFunction('connectHPLegacy'), context);
+    installFrontendFunctions(context, ['connectHPLegacy']);
     await context.connectHPLegacy(false,
         { vendorId: 0x03F0, productId: 0x0121 });
     assert.equal(state.connected, true);
@@ -354,7 +337,7 @@ async function testStaleModelProbeCannotCommitConnection() {
         setStatus() {}
     };
     createContext(context);
-    vm.runInContext(extractFunction('connectHPLegacy'), context);
+    installFrontendFunctions(context, ['connectHPLegacy']);
     const device = { vendorId: 0x03F0, productId: 0x0121 };
     const pending = context.connectHPLegacy(false, device);
     await detectionStarted.promise;
@@ -418,7 +401,7 @@ async function testHPLegacyScreenshotRendersIntoCanvas() {
     const scaled = { count: 0 };
     const context = makeScreenshotContext(state, canvas, logs, scaled);
     createContext(context);
-    vm.runInContext(extractFunction('takeScreenshot'), context);
+    installFrontendFunctions(context, ['takeScreenshot']);
     await context.takeScreenshot();
     assert.equal(canvas.width, 2);
     assert.equal(canvas.height, 1);
@@ -443,7 +426,7 @@ async function testStaleHPLegacyScreenshotCannotRepaintCanvas() {
     const scaled = { count: 0 };
     const context = makeScreenshotContext(state, canvas, logs, scaled);
     createContext(context);
-    vm.runInContext(extractFunction('takeScreenshot'), context);
+    installFrontendFunctions(context, ['takeScreenshot']);
     const pending = context.takeScreenshot();
     state.hpLegacyBackend = null;
     state.hpLegacyConnectionGeneration += 1;
@@ -528,7 +511,7 @@ function setupSerialPermission({ activation = true, serialError = null, authoriz
         'isHPLegacySerialPortInfo', 'getAuthorizedHPLegacySerialDevices',
         'requestHPLegacySerialDevice', 'connectHPLegacy', 'connect',
         'isTransportEventForActiveDevice', 'handleTransportDisconnect']) {
-        vm.runInContext(extractFunction(name), context);
+        installFrontendFunctions(context, [name]);
     }
     return { context, state, calls, errors, device, port };
 }
@@ -721,7 +704,7 @@ async function testUploadPromptPreservesNativeNameBytes() {
         setSelectedFiles() {}, async refreshDirlist() {}
     };
     createContext(context);
-    vm.runInContext(extractFunction('sendHPLegacyFiles'), context);
+    installFrontendFunctions(context, ['sendHPLegacyFiles']);
     await context.sendHPLegacyFiles([{
         name: `${nativeName}.49g`,
         async arrayBuffer() { return Uint8Array.of(1, 2).buffer; }

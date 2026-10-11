@@ -1,32 +1,12 @@
+const { installFrontendFunctions } = require('./frontend_context');
 'use strict';
 
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
 const zlib = require('node:zlib');
-
-const appSource = fs.readFileSync(require.resolve('../app.js'), 'utf8');
-
-function extractFunction(name) {
-    const plainMarker = `function ${name}(`;
-    const asyncMarker = `async function ${name}(`;
-    let start = appSource.indexOf(asyncMarker);
-    if (start < 0) {
-        start = appSource.indexOf(plainMarker);
-    }
-    assert.notEqual(start, -1, `function ${name} exists`);
-    const bodyStart = appSource.indexOf(') {', start) + 2;
-    assert.ok(bodyStart > 1, `function ${name} body exists`);
-    let depth = 0;
-    for (let index = bodyStart; index < appSource.length; index++) {
-        if (appSource[index] === '{') depth += 1;
-        if (appSource[index] === '}') depth -= 1;
-        if (depth === 0) {
-            return appSource.slice(start, index + 1);
-        }
-    }
-    throw new Error(`unterminated function ${name}`);
-}
+const { createHpPrimeFileBackend } = require('../backends/hp-prime.js');
+const { createFileActions } = require('../features/file-actions.js');
 
 class ClassList {
     constructor() {
@@ -118,7 +98,7 @@ async function testFamilyUiState() {
         'setTiUiState', 'setHPPrimeUiState', 'setNumWorksUiState',
         'applyActiveFamilyUiState'
     ]) {
-        vm.runInContext(extractFunction(name), context);
+        installFrontendFunctions(context, [name]);
     }
 
     context.applyActiveFamilyUiState();
@@ -182,7 +162,8 @@ async function testFamilyUiState() {
     assert.equal(els.keysPanel.classList.contains('hidden'), true,
         'an unknown TI calculator starts without key controls');
 
-    // Model what updateCapabilities() does for a connected key-capable TI.
+    // Model the native feature snapshot of a connected key-capable TI.
+    state.features = context.FEATURE_FLAGS.OPS_CLOCK | context.FEATURE_FLAGS.OPS_KEYS;
     context.updateKeyControlsState(true);
     els.keyCodeInput.setAttribute('list', 'keyMap834');
     const keyMapClearsBeforeRefresh = keyMapClears;
@@ -236,7 +217,7 @@ async function testTableDropUsesPrimeTransferPath() {
         t(key) { return key; }
     };
     vm.createContext(context);
-    vm.runInContext(extractFunction('sendDroppedFiles'), context);
+    installFrontendFunctions(context, ['sendDroppedFiles']);
 
     await context.sendDroppedFiles(files, 'ignored-for-prime');
     assert.equal(selectedFiles, files,
@@ -261,9 +242,9 @@ async function testApplicationMappingAndDropDispatch() {
         'mapHPPrimeFileEntry', 'hpPrimeAppPartTypeName',
         'mapHPPrimeFileEntries'
     ]) {
-        vm.runInContext(extractFunction(name), context);
+        installFrontendFunctions(context, [name]);
     }
-    vm.runInContext(extractFunction('encodeHPPrimeAppResourceManifest'), context);
+    installFrontendFunctions(context, ['encodeHPPrimeAppResourceManifest']);
     const manifest = context.encodeHPPrimeAppResourceManifest([{
         name: 'a', data: Uint8Array.of(1, 2)
     }]);
@@ -324,7 +305,7 @@ async function testApplicationMappingAndDropDispatch() {
         t(key) { return key; }
     };
     vm.createContext(dropContext);
-    vm.runInContext(extractFunction('sendDroppedFiles'), dropContext);
+    installFrontendFunctions(dropContext, ['sendDroppedFiles']);
     await dropContext.sendDroppedFiles(files, 'synthese');
     assert.equal(appDrop.selected, files);
     assert.equal(appDrop.root, appRoot);
@@ -337,7 +318,6 @@ async function testApplicationMappingAndDropDispatch() {
 
 async function testApplicationDownloadDispatch() {
     const calls = [];
-    const downloads = [];
     const files = new Map();
     const module = {
         FS: {
@@ -356,18 +336,18 @@ async function testApplicationDownloadDispatch() {
             files.set(args.at(-1), Uint8Array.of(1, 2, 3));
             return 0;
         },
-        triggerDownload(name) { downloads.push(name); },
         log() {},
         t(key) { return key; },
         tFormat(key) { return key; },
         formatHPPrimeError() { return 'mock'; }
     };
-    vm.createContext(context);
-    vm.runInContext(extractFunction('downloadHPPrimeEntry'), context);
-    await context.downloadHPPrimeEntry({
+    const backend = createHpPrimeFileBackend({ ...context, state: {},
+        runOperation: async (module, callback) => callback(
+            (...args) => context.ccallAsync(module, ...args), { assertCurrent() {} }) });
+    const app = await backend.receiveEntry({
         name: 'synthese', hpIndex: 4, extension: 'hpapp', invalid: false
     });
-    await context.downloadHPPrimeEntry({
+    const resource = await backend.receiveEntry({
         name: 'icon.png', hpIndex: 4, hpAppChildIndex: 3,
         extension: 'png', invalid: false
     });
@@ -375,13 +355,13 @@ async function testApplicationDownloadDispatch() {
         'hp_prime_download_cached_file',
         'hp_prime_download_cached_app_child'
     ]);
-    assert.deepEqual(downloads, ['synthese.hpapp', 'icon.png'],
+    assert.deepEqual([app.filename, resource.filename], ['synthese.hpapp', 'icon.png'],
         'child downloads do not duplicate their extension');
 }
 
 async function testApplicationMutationDispatch() {
     const calls = [];
-    const state = { expandedFolders: new Set(), hpFileSnapshotLoaded: true };
+    const state = { activeFamily: 'hp-prime', expandedFolders: new Set(), hpFileSnapshotLoaded: true };
     const context = {
         console,
         state,
@@ -407,8 +387,9 @@ async function testApplicationMutationDispatch() {
         tFormat(key) { return key; }
     };
     vm.createContext(context);
-    vm.runInContext(extractFunction('renameEntry'), context);
-    vm.runInContext(extractFunction('deleteEntry'), context);
+    installFrontendFunctions(context, ['renameEntry']);
+    const actions = createFileActions({ ...context, backends: {
+        'hp-prime': createHpPrimeFileBackend(context) } });
     const entry = {
         name: 'icon.png',
         folder: 'synthese',
@@ -418,7 +399,7 @@ async function testApplicationMutationDispatch() {
         hpAppChildEditable: true
     };
     await context.renameEntry(entry);
-    await context.deleteEntry(entry);
+    await actions.removeEntries([entry], { single: true });
     assert.deepEqual(calls, [
         ['hp_prime_rename_cached_app_resource', [4, 3, 'renamed.png']],
         ['hp_prime_delete_cached_app_resource', [4, 3]]
@@ -466,8 +447,8 @@ async function testWebHidRebinding() {
         HP_PRIME_PRODUCT_IDS: new Set([0x0441, 0x1541, 0x2441])
     };
     vm.createContext(context);
-    vm.runInContext(extractFunction('isHPPrimeDevice'), context);
-    vm.runInContext(extractFunction('bindHPPrimeDeviceToModule'), context);
+    installFrontendFunctions(context, ['isHPPrimeDevice']);
+    installFrontendFunctions(context, ['bindHPPrimeDeviceToModule']);
     await context.bindHPPrimeDeviceToModule(module, newDevice);
 
     assert.equal(module.__hplpWebHID, hidState, 'state object is preserved');
@@ -490,21 +471,23 @@ async function testWebHidRebinding() {
 async function testBatchDownloadContinues() {
     const attempted = [];
     const errors = [];
-    const context = {
-        async downloadHPPrimeEntry(entry) {
+    const state = { activeFamily: 'hp-prime', dirlist: [] };
+    const actions = createFileActions({
+        state,
+        backends: { 'hp-prime': { family: 'hp-prime', async receiveEntry(entry) {
             attempted.push(entry.name);
             if (entry.name === 'bad') throw new Error('mock failure');
-        },
+            return { filename: entry.name, data: Uint8Array.of(1) };
+        } } },
         logError(error, message) { errors.push([error.message, message]); },
-        tFormat(_key, values) { return `failed:${values.name}`; }
-    };
-    vm.createContext(context);
-    vm.runInContext(extractFunction('downloadHPPrimeEntries'), context);
-    await context.downloadHPPrimeEntries([
+        t: key => key, tFormat: key => key, log() {}, triggerDownload() {},
+        setButtonLoading() {}, els: { btnRecvSelected: {} }
+    });
+    assert.equal(await actions.receiveEntries([
         { name: 'first' }, { name: 'bad' }, { name: 'last' }
-    ]);
+    ]), true);
     assert.deepEqual(attempted, ['first', 'bad', 'last']);
-    assert.deepEqual(errors, [['mock failure', 'failed:bad']]);
+    assert.deepEqual(errors, [['mock failure', 'Download bad failed']]);
 }
 
 async function testProgressivePrimeFileSnapshot() {
@@ -549,7 +532,7 @@ async function testProgressivePrimeFileSnapshot() {
         'scheduleHPPrimeProgressRender', 'appendHPPrimeFileArrival',
         'beginHPPrimeFileSnapshot', 'finishHPPrimeFileSnapshot'
     ]) {
-        vm.runInContext(extractFunction(name), context);
+        installFrontendFunctions(context, [name]);
     }
 
     const refresh = context.beginHPPrimeFileSnapshot(module);
@@ -660,8 +643,8 @@ async function testWebUsbDiscoveryNarrowsWebHidRequest() {
         t(key) { return key; }
     };
     vm.createContext(context);
-    vm.runInContext(extractFunction('isHPPrimeDevice'), context);
-    vm.runInContext(extractFunction('requestHPPrimeDevice'), context);
+    installFrontendFunctions(context, ['isHPPrimeDevice']);
+    installFrontendFunctions(context, ['requestHPPrimeDevice']);
 
     const selected = await context.requestHPPrimeDevice(discoveryDevice);
     assert.equal(selected, hidDevice,
@@ -703,7 +686,7 @@ async function testPrimeFilePreviews() {
         'decodeHPPrimeTextPreview', 'createHPPrimePreview',
         'unwrapReadablePreview'
     ]) {
-        vm.runInContext(extractFunction(name), context);
+        installFrontendFunctions(context, [name]);
     }
 
     const textEntries = [
@@ -787,8 +770,8 @@ async function testPrimePreviewUsesCachedAppChild() {
         logError(error) { throw error; }
     };
     vm.createContext(context);
-    vm.runInContext('let previewSession = null;', context);
-    vm.runInContext(extractFunction('previewEntry'), context);
+    context.previewSession = null;
+    installFrontendFunctions(context, ['previewEntry']);
     await context.previewEntry({
         name: 'icon.png', typeName: 'Application resource', size: 3,
         kind: 'hp-app-child', isFolder: false, invalid: false,
@@ -801,7 +784,7 @@ async function testPrimePreviewUsesCachedAppChild() {
     ]], 'Prime previews read the already-cached application child');
     assert.equal(opened.length, 1);
     assert.equal(opened[0][0], 'icon.png');
-    const session = vm.runInContext('previewSession', context);
+    const session = context.previewSession;
     assert.equal(session.downloadName, 'icon.png');
     assert.equal(session.receivedPath, '/previews/hp-prime-4-child-7.bin');
 }
@@ -887,9 +870,9 @@ async function testPrimeRgb555ScreenshotDecoding() {
         'hpPrimePngPaethPredictor', 'parseHPPrimeRgb555Png',
         'decodeHPPrimeRgb555Png'
     ]) {
-        vm.runInContext(extractFunction(name), context);
+        installFrontendFunctions(context, [name]);
     }
-    const ContextUint8Array = vm.runInContext('Uint8Array', context);
+    const ContextUint8Array = Uint8Array;
     const decoded = await context.decodeHPPrimeRgb555Png(new ContextUint8Array(png));
     assert.equal(decoded.width, 2);
     assert.equal(decoded.height, 5);
@@ -922,7 +905,7 @@ async function testAppDirectoryImport() {
     });
     for (const name of ['getDroppedFiles', 'packHPPrimeAppDirectory',
         'readHPPrimeAppDirectory', 'getDroppedTransferFiles', 'getHPPrimePickedDirectory']) {
-        vm.runInContext(extractFunction(name), context);
+        installFrontendFunctions(context, [name]);
     }
     const descriptor = new File([Uint8Array.of(0x7c, 0x61, 0x8a, 0xb2)], 'Gallery.hpapp');
     const note = new File(['notes'], 'Gallery.hpappnote');
@@ -1024,7 +1007,7 @@ async function testAppProgramUploadTargeting() {
     };
     vm.createContext(context);
     for (const name of ['chooseHPPrimeAppForFile', 'sendHPPrimeAppResources', 'sendSelectedFiles']) {
-        vm.runInContext(extractFunction(name), context);
+        installFrontendFunctions(context, [name]);
     }
     const file = { name: 'Gallery.hpappprgm', arrayBuffer: async () => Uint8Array.of(1, 2, 3, 4).buffer };
     assert.equal(context.chooseHPPrimeAppForFile(file), apps[1]);

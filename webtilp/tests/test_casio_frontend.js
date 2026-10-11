@@ -1,6 +1,9 @@
+const { installFrontendFunctions } = require('./frontend_context');
 'use strict';
 
 const assert = require('node:assert/strict');
+const { createFileActions } = require('../features/file-actions.js');
+const { createWasmClient } = require('../runtime/wasm-client.js');
 const fs = require('node:fs');
 const vm = require('node:vm');
 
@@ -11,24 +14,6 @@ function createContext(context) {
         getAuthorizedSharpSerialDevices: async () => []
     }, context));
     vm.createContext(context);
-}
-
-const appSource = fs.readFileSync(require.resolve('../app.js'), 'utf8');
-
-function extractFunction(name) {
-    const asyncMarker = `async function ${name}(`;
-    const plainMarker = `function ${name}(`;
-    let start = appSource.indexOf(asyncMarker);
-    if (start < 0) start = appSource.indexOf(plainMarker);
-    assert.notEqual(start, -1, `function ${name} exists`);
-    const bodyStart = appSource.indexOf(') {', start) + 2;
-    let depth = 0;
-    for (let index = bodyStart; index < appSource.length; index++) {
-        if (appSource[index] === '{') depth += 1;
-        if (appSource[index] === '}') depth -= 1;
-        if (depth === 0) return appSource.slice(start, index + 1);
-    }
-    throw new Error(`unterminated function ${name}`);
 }
 
 function makeElement() {
@@ -81,7 +66,7 @@ function testCas300UiDisablesStorageActions() {
         }
     };
     createContext(context);
-    vm.runInContext(extractFunction('setCasioUiState'), context);
+    installFrontendFunctions(context, ['setCasioUiState']);
 
     context.setCasioUiState();
     assert.equal(els.fileInput.disabled, true);
@@ -101,7 +86,7 @@ function testCas300UiDisablesStorageActions() {
 function testStorageNameLimitMatchesCahuteListingLimit() {
     const context = {};
     createContext(context);
-    vm.runInContext(extractFunction('isValidCasioStorageName'), context);
+    installFrontendFunctions(context, ['isValidCasioStorageName']);
 
     assert.equal(context.isValidCasioStorageName('A'.repeat(22)), true);
     assert.equal(context.isValidCasioStorageName('A'.repeat(23)), false,
@@ -120,7 +105,7 @@ function testTransportEventsAreScopedToActiveCasio() {
         isCasioActive() { return true; }
     };
     createContext(context);
-    vm.runInContext(extractFunction('isTransportEventForActiveDevice'), context);
+    installFrontendFunctions(context, ['isTransportEventForActiveDevice']);
 
     assert.equal(context.isTransportEventForActiveDevice({ device: casio }), true);
     assert.equal(context.isTransportEventForActiveDevice({ device: unrelated }), false,
@@ -133,7 +118,13 @@ function deferred() {
     return { promise, resolve, reject };
 }
 
+async function flushRuntime() {
+    for (let i = 0; i < 30; i += 1) await Promise.resolve();
+}
+
 function connectionContext(module, selected) {
+    let time = 0, nextTimer = 0;
+    const timers = new Map();
     const context = {
         state: { operationEpoch: 0, casioStorageSupported: false, deviceModelName: 'Casio' },
         DEVICE_FAMILY_CASIO: 'casio', CCALL_MIN_GAP_MS: 0, CCALL_TIMEOUT_MS: null,
@@ -143,23 +134,45 @@ function connectionContext(module, selected) {
             return device;
         },
         async initModule() { return module; },
-        withTimeout: promise => promise,
-        withProgressTimeout: promise => promise,
-        isFatalWasmRuntimeError: () => false,
-        handleFatalWasmRuntimeError() { assert.fail('unexpected fatal WASM error'); },
-        watchAbandonedCcall() {},
+        abandonedCalls: 0,
         startProgress() {}, stopProgress() {},
         readCasioInfo() { return { protocol: 'CAS300' }; },
         formatCasioError() { return 'mock'; },
         renderDirlist() {},
         setConnected(value) { context.state.connected = value; },
         setStatus() {}, log() {},
-        t: key => key, tFormat: key => key
+        t: key => key, tFormat: key => key,
+        async advanceTime(ms) {
+            const end = time + ms;
+            for (;;) {
+                const next = [...timers.entries()].filter(([, timer]) => timer.at <= end)
+                    .sort((a, b) => a[1].at - b[1].at)[0];
+                if (!next) break;
+                time = next[1].at;
+                timers.delete(next[0]);
+                next[1].callback();
+                await flushRuntime();
+            }
+            time = end;
+            await flushRuntime();
+        }
     };
+    context.wasmRuntime = createWasmClient({
+        getGeneration: () => context.state.operationEpoch,
+        minGapMs: 0, timeoutMs: null,
+        now: () => time,
+        setTimer(callback, ms) {
+            const id = ++nextTimer;
+            timers.set(id, { at: time + ms, callback });
+            return id;
+        },
+        clearTimer(id) { timers.delete(id); },
+        onFatal() { assert.fail('unexpected fatal WASM error'); },
+        onAbandoned() { context.abandonedCalls += 1; },
+        warn() {}
+    });
     createContext(context);
-    for (const name of ['getModuleCallState', 'makeModuleDeadError', 'ccallAsync', 'connectCasio']) {
-        vm.runInContext(extractFunction(name), context);
-    }
+    installFrontendFunctions(context, ['getModuleCallState', 'ccallAsync', 'connectCasio']);
     return context;
 }
 
@@ -200,7 +213,7 @@ async function testFilterFollowsNativeQueueAndTimeoutLifetime() {
         for (const retireWhilePending of [false, true]) {
             const first = {}, selected = {};
             const originalFilter = () => true;
-            const previous = deferred(), native = deferred(), started = deferred(), timeout = deferred();
+            const previous = deferred(), native = deferred(), started = deferred();
             const nativeCalls = [];
             const module = { webusbDeviceFilter: originalFilter };
             module.ccall = name => {
@@ -220,9 +233,7 @@ async function testFilterFollowsNativeQueueAndTimeoutLifetime() {
                 return 0;
             };
             const context = connectionContext(module, selected);
-            let abandoned = 0;
-            context.watchAbandonedCcall = () => { abandoned += 1; };
-            context.withProgressTimeout = promise => Promise.race([promise, timeout.promise]);
+
             const before = context.ccallAsync(module, 'ti_before', 'number', [], []);
             const connection = context.connectCasio(false, selected);
             await new Promise(setImmediate);
@@ -233,10 +244,10 @@ async function testFilterFollowsNativeQueueAndTimeoutLifetime() {
             await before;
             await started.promise;
             context.state.authorizedDevice = first;
-            const timeoutError = Object.assign(new Error('mock timeout'), { ccallTimeout: true });
-            timeout.reject(timeoutError);
-            await assert.rejects(connection, timeoutError);
-            assert.equal(abandoned, 1);
+            const timedOut = assert.rejects(connection, error => error.ccallTimeout === true);
+            await context.advanceTime(30100);
+            await timedOut;
+            assert.equal(context.abandonedCalls, 1);
             assert.deepEqual([first, selected].filter(module.webusbDeviceFilter), [selected],
                 'wrapper timeout must retain the exact selection while native execution is suspended');
 
@@ -323,8 +334,8 @@ async function testUploadConfirmsOverwriteBeforeNativeCall() {
         log(message) { logs.push(message); }
     };
     createContext(context);
-    vm.runInContext(extractFunction('isValidCasioStorageName'), context);
-    vm.runInContext(extractFunction('sendCasioFiles'), context);
+    installFrontendFunctions(context, ['isValidCasioStorageName']);
+    installFrontendFunctions(context, ['sendCasioFiles']);
     const file = {
         name: 'TEST.g3a',
         async arrayBuffer() { return Uint8Array.of(1, 2, 3).buffer; }
@@ -375,8 +386,8 @@ async function testBatchUploadConfirmsEachExistingFile() {
             log() {}
         };
         createContext(context);
-        vm.runInContext(extractFunction('isValidCasioStorageName'), context);
-        vm.runInContext(extractFunction('sendCasioFiles'), context);
+        installFrontendFunctions(context, ['isValidCasioStorageName']);
+        installFrontendFunctions(context, ['sendCasioFiles']);
         const files = ['A.txt', 'b.TXT'].map(name => ({
             name, async arrayBuffer() { return Uint8Array.of(1).buffer; }
         }));
@@ -392,6 +403,7 @@ async function testBatchUploadConfirmsEachExistingFile() {
 async function testFolderDownloadExpandsToFiles() {
     const downloaded = [];
     const state = {
+        activeFamily: 'casio',
         dirlist: [
             { kind: 'casio', name: 'A.g3a', folder: 'main', is_folder: 0 },
             { kind: 'casio', name: 'B.txt', folder: 'main', is_folder: 0 },
@@ -403,12 +415,16 @@ async function testFolderDownloadExpandsToFiles() {
         normalizeFolderPath(value) { return value; },
         confirm() { return true; },
         tFormat(key) { return key; },
-        async downloadCasioEntry(entry) { downloaded.push(entry.name); },
+        backends: { casio: { family: 'casio', async receiveEntry(entry) {
+            return { filename: entry.name, data: Uint8Array.of(1) };
+        } } },
+        triggerDownload(name) { downloaded.push(name); },
+        setButtonLoading() {}, els: { btnRecvSelected: {} },
+        logError(error) { throw error; }, t: key => key,
         log() {}
     };
-    createContext(context);
-    vm.runInContext(extractFunction('downloadCasioEntries'), context);
-    await context.downloadCasioEntries([{
+    const actions = createFileActions(context);
+    await actions.receiveEntries([{
         name: 'main', folderPath: 'main', isFolder: true, kind: 'folder'
     }]);
     assert.deepEqual(downloaded, ['A.g3a', 'B.txt']);
