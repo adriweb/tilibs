@@ -81,7 +81,9 @@ EMCCFLAGS = \
 
 # Targets
 TARGET = webtilp.js
-SRC = webtilp.cpp hp_prime_bridge.cpp hp_prime_app.cpp casio_bridge.cpp
+SRC = webtilp.cpp ti_session.cpp ti_operations.cpp ti_file_catalog.cpp ti_file_io.cpp \
+	ti_transfers.cpp ti_backup_vat.cpp webtilp_json.cpp hp_prime_bridge.cpp hp_prime_app.cpp casio_bridge.cpp
+HEADERS = $(wildcard *.h)
 PREJS = webtilp_prejs.js
 PREJS_DEV = webtilp_prejs_dev.js
 PREJS_PROD = webtilp_prejs_prod.js
@@ -138,9 +140,12 @@ test:
 	$(CXX) -std=c++17 -Wall -Wextra -Werror hp_prime_app.cpp tests/test_hp_prime_app.cpp -o tests/test_hp_prime_app
 	./tests/test_hp_prime_app
 	rm -f tests/test_hp_prime_app
-	$(CXX) -std=c++17 -Wall -Wextra -Werror tests/test_ti_backup_vat.cpp -o tests/test_ti_backup_vat
+	$(CXX) -std=c++17 -Wall -Wextra -Werror ti_backup_vat.cpp tests/test_ti_backup_vat.cpp -o tests/test_ti_backup_vat
 	./tests/test_ti_backup_vat
 	rm -f tests/test_ti_backup_vat
+	$(CXX) -std=c++17 -Wall -Wextra -Werror webtilp_json.cpp tests/test_webtilp_json.cpp -o tests/test_webtilp_json
+	./tests/test_webtilp_json
+	rm -f tests/test_webtilp_json
 	node --check < sw.js.in
 	node tests/test_service_worker.js
 	node --check $(APP_JS_SRC)
@@ -170,18 +175,27 @@ test:
 	node tests/test_hp_legacy_frontend.js
 	python3 i18n/check.py
 
-$(TARGET): $(SRC) $(LIBS) $(PREJS)
+$(TARGET): $(SRC) $(HEADERS) $(LIBS) $(PREJS)
 	$(EMCC) $(CXXFLAGS) $(SRC) $(INCLUDES) $(LIBS) -o $(TARGET) $(EMCCFLAGS)
 
 test-python-bytecode-wasm:
 	node tests/test_python_bytecode.cjs --wasm
 
+test-wasm: $(TARGET) test-var-send-wasm test-ti-catalog-wasm
+	node tests/test_wasm_startup.cjs
+	node tests/test_backup_vat_wasm.cjs
+
 test-var-send-wasm:
 	@set -e; test_dir=$$(mktemp -d); trap 'rm -rf "$$test_dir"' EXIT; \
-	$(EMCC) $(CXXFLAGS) tests/test_var_send_wasm.cpp hp_prime_bridge.cpp hp_prime_app.cpp $(INCLUDES) $(LIBS) -o "$$test_dir/var_send.js" $(EMCCFLAGS); \
+	$(EMCC) $(CXXFLAGS) -DWEBTILP_NO_MAIN tests/wasm_test_main.cpp tests/test_var_send_wasm.cpp tests/test_ti_reader_failures_wasm.cpp $(SRC) $(INCLUDES) $(LIBS) -o "$$test_dir/var_send.js" $(EMCCFLAGS) -Wl,--wrap=g_free -Wl,--wrap=tifiles_content_create_regular -Wl,--wrap=tifiles_content_create_flash; \
 	node tests/test_var_send_wasm.cjs "$$test_dir/var_send.js"
+
+test-ti-catalog-wasm:
+	@set -e; test_dir=$$(mktemp -d); trap 'rm -rf "$$test_dir"' EXIT; \
+	$(EMCC) $(CXXFLAGS) -DWEBTILP_NO_MAIN tests/wasm_test_main.cpp tests/test_ti_file_catalog_wasm.cpp $(SRC) $(INCLUDES) $(LIBS) -o "$$test_dir/catalog.js" $(EMCCFLAGS); \
+	node tests/test_ti_file_catalog_wasm.cjs "$$test_dir/catalog.js"
 
 clean:
 	rm -f $(TARGET) webtilp.wasm webtilp.worker.js sw.js version.json $(APP_JS_BUNDLE) $(NUMWORKS_JS_BUNDLE) $(BUILD_PROFILE_CSS) $(PYTHON_CONVERTER_ASSETS)
 
-.PHONY: all dev prod prepare_dev prepare_prod prepare_python_converters test test-python-bytecode-wasm test-var-send-wasm clean stamp
+.PHONY: all dev prod prepare_dev prepare_prod prepare_python_converters test test-python-bytecode-wasm test-var-send-wasm clean stamp test-ti-catalog-wasm test-wasm

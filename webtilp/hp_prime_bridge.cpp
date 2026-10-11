@@ -13,6 +13,7 @@
 #include <vector>
 
 #include "hp_prime_app.h"
+#include "webtilp_json.h"
 
 extern "C" {
 #include <hpcables.h>
@@ -194,27 +195,7 @@ static std::string safe_archive_component(const std::string& input)
 
 static std::string json_escape(const std::string& input)
 {
-    std::string result;
-    for (unsigned char c : input) {
-        switch (c) {
-            case '"': result += "\\\""; break;
-            case '\\': result += "\\\\"; break;
-            case '\b': result += "\\b"; break;
-            case '\f': result += "\\f"; break;
-            case '\n': result += "\\n"; break;
-            case '\r': result += "\\r"; break;
-            case '\t': result += "\\t"; break;
-            default:
-                if (c < 0x20) {
-                    char encoded[7];
-                    snprintf(encoded, sizeof(encoded), "\\u%04x", c);
-                    result += encoded;
-                } else {
-                    result.push_back((char)c);
-                }
-        }
-    }
-    return result;
+    return webtilp_json::escape(input, webtilp_json::ControlEscapes::Short);
 }
 
 static std::string filename_extension(const std::string& name)

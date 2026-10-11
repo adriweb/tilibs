@@ -6,6 +6,7 @@ const timeout = setTimeout(() => { console.error('Variable send WASM test timed 
     const module = await createModule();
     await module.ccall('init', 'number', [], [], {async: true});
     assert.equal(await module.ccall('test_var_send_protocol', 'number', [], [], {async: true}), 0);
+    assert.equal(await module.ccall('test_ti_reader_failures', 'number', [], [], {async: true}), 0);
     clearTimeout(timeout);
     process.exit(0);
 })().catch(error => {console.error(error); process.exit(1);});

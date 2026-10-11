@@ -1,4 +1,5 @@
 #include <cahute.h>
+#include "webtilp_json.h"
 #include <emscripten/emscripten.h>
 
 #include <cctype>
@@ -34,29 +35,7 @@ unsigned long g_storage_free = 0;
 
 std::string json_escape(const char *value)
 {
-    std::ostringstream out;
-    const unsigned char *cursor =
-        reinterpret_cast<const unsigned char *>(value ? value : "");
-    for (; *cursor; ++cursor) {
-        switch (*cursor) {
-        case '\"': out << "\\\""; break;
-        case '\\': out << "\\\\"; break;
-        case '\b': out << "\\b"; break;
-        case '\f': out << "\\f"; break;
-        case '\n': out << "\\n"; break;
-        case '\r': out << "\\r"; break;
-        case '\t': out << "\\t"; break;
-        default:
-            if (*cursor < 0x20) {
-                char escaped[7];
-                std::snprintf(escaped, sizeof(escaped), "\\u%04x", *cursor);
-                out << escaped;
-            } else {
-                out << static_cast<char>(*cursor);
-            }
-        }
-    }
-    return out.str();
+    return webtilp_json::escape(value ? value : "", webtilp_json::ControlEscapes::Short);
 }
 
 bool valid_remote_component(const char *value, bool allow_empty)

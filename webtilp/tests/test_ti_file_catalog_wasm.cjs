@@ -1,0 +1,35 @@
+'use strict';
+const assert = require('node:assert/strict');
+const createModule = require(require('node:path').resolve(process.argv[2]));
+const timeout = setTimeout(() => { console.error('TI catalog WASM test timed out'); process.exit(1); }, 30000);
+(async () => {
+    const module = await createModule();
+    await module.ccall('init', 'number', [], [], {async: true});
+    assert.equal(await module.ccall('test_ti_catalog', 'number', [], [], {async: true}), 0);
+    const call = (name, args) => module.ccall(name, 'string', args.map(() => 'string'), args);
+    const single = JSON.parse(call('file_get_entries_json', ['/catalog.82g']));
+    assert.equal(single.entries.length, 2);
+    const batch = JSON.parse(call('files_get_entries_json', ['/catalog.82g\n/catalog.82p\n']));
+    assert.equal(batch.files.length, 2);
+    assert.deepEqual(batch.files[0].entries, single.entries);
+    assert.equal(batch.files[0].path, '/catalog.82g');
+    assert.equal(batch.files[0].name, 'catalog.82g');
+    const bundle = JSON.parse(call('bundle_extract_json', ['/catalog.tig', '/extracted']));
+    assert.equal(bundle.files.length, 1);
+    assert.deepEqual(bundle.files[0].entries, batch.files[1].entries);
+    const directory = JSON.parse(module.FS.readFile('/catalog-dir.json', {encoding: 'utf8'}));
+    for (const field of ['name', 'folder', 'type', 'type_name', 'attr', 'size'])
+        assert.equal(directory[field], single.entries[0][field]);
+    assert.equal(directory.kind, 'var');
+    assert.equal(directory.is_folder, 0);
+    const progress = JSON.parse(module.FS.readFile('/catalog-progress.json', {encoding: 'utf8'}));
+    assert.equal(progress.cnt, 7);
+    assert.equal(progress.max, 100);
+    assert.equal(progress.rate, 1.25);
+    assert.equal(progress.text, '\x01'.repeat(256));
+    assert.equal(call('file_get_entries_json', ['']), '[]');
+    assert.deepEqual(JSON.parse(call('files_get_entries_json', [''])), {files: []});
+    console.log('TI ABI metadata envelope and directory JSON checks passed');
+    clearTimeout(timeout);
+    process.exit(0);
+})().catch(error => { console.error(error); process.exit(1); });

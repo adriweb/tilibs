@@ -1,5 +1,4 @@
-#define WEBTILP_BACKUP_VAT_TEST
-#include "../webtilp.cpp"
+#include "../ti_backup_vat.h"
 #include <algorithm>
 #include <cassert>
 #include <fstream>
