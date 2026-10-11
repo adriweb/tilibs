@@ -172,7 +172,9 @@
 
         async controlTransferOut(setup, data) {
             const bytes = data
-                ? new Uint8Array(data.buffer, data.byteOffset, data.byteLength)
+                ? ArrayBuffer.isView(data)
+                    ? new Uint8Array(data.buffer, data.byteOffset, data.byteLength)
+                    : new Uint8Array(data)
                 : new Uint8Array();
             if (setup.request === 0x06 || setup.request === 0x04) {
                 this.state = 2;

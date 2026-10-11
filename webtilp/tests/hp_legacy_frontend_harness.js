@@ -1,5 +1,8 @@
 (() => {
     'use strict';
+    const { state, DEVICE_FAMILY_HP_LEGACY, HP_VENDOR_ID, HP_LEGACY_PRODUCT_ID,
+        FEATURE_FLAGS, setConnected, applyActiveFamilyUiState, readHPLegacyInfo,
+        renderDirlist, setStatus, handleTransportDisconnect } = globalThis.__webtilpTest;
 
     const controls = document.createElement('div');
     controls.id = 'hpLegacyTestControls';

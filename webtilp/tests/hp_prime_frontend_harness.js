@@ -1,5 +1,8 @@
 (() => {
     'use strict';
+    const { state, DEVICE_FAMILY_HP_PRIME, HP_VENDOR_ID, setConnected,
+        applyActiveFamilyUiState, updateDeviceModelDisplay, setStatus,
+        applyTranslations, handleTransportDisconnect } = globalThis.__webtilpTest;
 
     const controls = document.createElement('div');
     controls.id = 'hpPrimeTestControls';

@@ -23,7 +23,7 @@
             const withBase = html
                 .replace('<head>', '<head><base href="../">')
                 .replace(`<script src="app.bundle.js">${closingScript}`,
-                    `<script src="app.js">${closingScript}<script src="tests/hp_legacy_frontend_harness.js">${closingScript}`);
+                    `<script src="app.test.bundle.js">${closingScript}<script src="tests/hp_legacy_frontend_harness.js">${closingScript}`);
             document.open();
             document.write(withBase);
             document.close();

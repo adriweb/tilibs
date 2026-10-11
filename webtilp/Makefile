@@ -198,6 +198,20 @@ test-wasm: $(TARGET) test-var-send-wasm test-ti-catalog-wasm
 	node tests/test_wasm_startup.cjs
 	node tests/test_backup_vat_wasm.cjs
 
+# Test-only exports are appended in a temporary entry before bundling. Keep
+# browser fixtures on the same import/bundle path as the production frontend.
+bundle-test:
+	node tests/build_frontend_test_bundle.cjs "$(BUN)"
+
+bundle-test-prod:
+	node tests/build_frontend_test_bundle.cjs "$(BUN)" --minify
+
+test-browser: bundle-dev bundle-test
+	node tests/test_browser_frontend.cjs
+
+test-browser-prod: bundle-prod bundle-test-prod
+	node tests/test_browser_frontend.cjs
+
 test-var-send-wasm:
 	@set -e; test_dir=$$(mktemp -d); trap 'rm -rf "$$test_dir"' EXIT; \
 	$(EMCC) $(CXXFLAGS) -DWEBTILP_NO_MAIN tests/wasm_test_main.cpp tests/test_var_send_wasm.cpp tests/test_ti_reader_failures_wasm.cpp $(SRC) $(INCLUDES) $(LIBS) -o "$$test_dir/var_send.js" $(EMCCFLAGS) -Wl,--wrap=g_free -Wl,--wrap=tifiles_content_create_regular -Wl,--wrap=tifiles_content_create_flash; \
@@ -211,4 +225,4 @@ test-ti-catalog-wasm:
 clean:
 	rm -f $(TARGET) webtilp.wasm webtilp.worker.js sw.js version.json $(APP_JS_BUNDLE) $(APP_JS_BUNDLE).map $(NUMWORKS_JS_BUNDLE) $(NUMWORKS_JS_BUNDLE).map $(BUILD_PROFILE_CSS) $(PYTHON_CONVERTER_ASSETS) app.test.bundle.js app.test.bundle.js.map
 
-.PHONY: all dev prod bundle-dev bundle-prod prepare_dev prepare_prod prepare_python_converters test test-python-bytecode-wasm test-var-send-wasm test-ti-catalog-wasm test-wasm clean stamp
+.PHONY: all dev prod bundle-dev bundle-prod bundle-test bundle-test-prod prepare_dev prepare_prod prepare_python_converters test test-python-bytecode-wasm test-var-send-wasm test-ti-catalog-wasm test-wasm test-browser test-browser-prod clean stamp

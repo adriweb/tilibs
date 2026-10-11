@@ -87,6 +87,12 @@ jobs:
         with:
           bun-version: ${{ env.BUN_VERSION }}
 
+      - name: Install frontend browser test tools
+        run: |
+          cd webtilp
+          bun install --frozen-lockfile
+          bunx playwright install --with-deps chromium
+
       - name: Restore WASM dependencies
         id: deps
         uses: actions/cache/restore@v6
@@ -157,7 +163,11 @@ jobs:
           make -C webtilp -j"$(nproc)" -o prepare_python_converters dev
           make -C webtilp test
           make -C webtilp test-python-bytecode-wasm
-          node webtilp/tests/test_wasm_startup.cjs
+          make -C webtilp test-wasm
+          make -C webtilp test-browser
+          make -C webtilp test-browser-prod
+          # Package the development profile after verifying both bundle profiles.
+          make -C webtilp bundle-dev stamp
           node webtilp/tests/test_evo_webusb_serial.js webtilp/webtilp.js
           node --input-type=module - <<'JS'
           import assert from 'node:assert/strict';
@@ -189,7 +199,7 @@ jobs:
           assets = set(ast.literal_eval(precache.group(1)))
           assets.update(['sw.js', 'version.json'])
           assets.update(str(p.relative_to(source)) for p in source.glob('i18n/*.json'))
-          assets.update(str(p.relative_to(source)) for p in source.glob('*.map'))
+          assets.update(str(p.relative_to(source)) for p in source.glob('*.map') if not p.name.startswith('app.test.'))
           assets.update(str(p.relative_to(source)) for p in source.glob('third_party/**/LICENSE'))
           assets.add('third_party/NUMWORKS-PROVENANCE.md')
           for name in sorted(assets):

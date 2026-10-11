@@ -1,6 +1,7 @@
 /* Browser QA only: this page exposes a clearly marked simulated serial cable. */
 (() => {
 'use strict';
+const { triggerDownload, updateTransportSplashState } = globalThis.__webtilpTest;
 const api = WebTILPSharp;
 const identity = '9:';
 const category = api.CATEGORIES.find(c => c.ext === 'p');

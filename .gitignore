@@ -107,3 +107,7 @@ webtilp/WebLuna.js
 webtilp/WebLuna.wasm
 webtilp/version.json
 webtilp/sw.js
+
+webtilp/app.test.bundle.js*
+webtilp/.frontend-test-entry-*.js
+webtilp/node_modules/

@@ -5,7 +5,7 @@
     fetch('../webtilp.html').then(response => response.text()).then(html => {
         const end = '</scr' + 'ipt>';
         const testPage = html.replace('<head>', '<head><base href="../">')
-            .replace(`<script src="app.bundle.js">${end}`, `<script src="app.js">${end}<script src="tests/sharp_frontend_harness.js">${end}`);
+            .replace(`<script src="app.bundle.js">${end}`, `<script src="app.test.bundle.js">${end}<script src="tests/sharp_frontend_harness.js">${end}`);
         document.open(); document.write(testPage); document.close();
     }).catch(error => { document.getElementById('loading').textContent = error.message; });
 </script></body></html>
