@@ -2,6 +2,7 @@
 (() => {
 'use strict';
 const api = WebTILPSharp;
+const serialInfoMode = new URLSearchParams(location.search).get('serialInfo');
 const identity = '9:';
 const category = api.CATEGORIES.find(c => c.ext === 'p');
 const ascii = value => Uint8Array.from(value, c => c.charCodeAt(0));
@@ -19,7 +20,11 @@ for (let x = 0; x < 132; x++) {
 }
 for (let y = 0; y < 64; y++) { bitmap[(y >> 3) * 132] |= 0x80 >> (y & 7); bitmap[(y >> 3) * 132 + 131] |= 0x80 >> (y & 7); }
 class SimulatedPort {
-    getInfo() { return { usbVendorId: 0x04FC, usbProductId: 0x0201 }; }
+    getInfo() {
+        if (serialInfoMode === 'missing') return {};
+        if (serialInfoMode === 'alternate') return { usbVendorId: 0x1234, usbProductId: 0x5678 };
+        return { usbVendorId: 0x04FC, usbProductId: 0x0201 };
+    }
     async open(options) {
         if (options.stopBits !== 2 || options.baudRate !== 38400) throw new Error('This browser peer simulates PC-Link only.');
         this.phase = 'command';
@@ -77,14 +82,22 @@ class SimulatedPort {
     }
     async close() { this.readable = null; this.writable = null; }
 }
-const serial = { async getPorts() { return []; }, async requestPort() { return new SimulatedPort(); }, addEventListener() {} };
+const port = new SimulatedPort();
+let granted = false;
+const serial = { async getPorts() { return granted ? [port] : []; }, async requestPort(options) {
+    if (options?.filters?.length && !options.filters.some(filter =>
+        filter.usbVendorId === port.getInfo().usbVendorId && (!filter.usbProductId || filter.usbProductId === port.getInfo().usbProductId))) {
+        throw new DOMException('No compatible simulated port', 'NotFoundError');
+    }
+    granted = true; return port;
+}, addEventListener() {} };
 Object.defineProperty(navigator, 'serial', { configurable: true, value: serial });
 // Avoid opening any actual hardware chooser in this QA harness.
 Object.defineProperty(navigator, 'usb', { configurable: true, value: undefined });
 const controls = document.createElement('div');
 controls.id = 'sharpTestControls';
 controls.style.cssText = 'position:fixed;bottom:8px;right:8px;z-index:10000;background:#111827;color:white;border:1px solid #586178;padding:8px;border-radius:8px;display:flex;gap:8px';
-const label = document.createElement('span'); label.textContent = 'Simulated Sharp serial peer (no hardware)'; controls.appendChild(label);
+const label = document.createElement('span'); label.textContent = `Simulated Sharp serial peer (no hardware; USB IDs: ${serialInfoMode || 'Sunplus'})`; controls.appendChild(label);
 const button = document.createElement('button'); button.id = 'sharpTestFile'; button.textContent = 'Get simulated g4p';
 button.onclick = () => triggerDownload('HELLO.g4p', api.encodeNative(category, object, selector)); controls.appendChild(button);
 document.body.appendChild(controls);

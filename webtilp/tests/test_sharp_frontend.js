@@ -29,7 +29,7 @@ function context(extra = {}) {
         WebTILPSharp: sharp, navigator: { serial: null }, self: { isSecureContext: true },
         console, Blob, Uint8Array, DOMException,
         t: key => key, tFormat: (key, data) => key + JSON.stringify(data),
-        log() {}, logError(error) { throw error; }, alert() {}, confirm: () => true,
+        logs: [], log(message) { c.logs.push(message); }, logError(error) { throw error; }, alert() {}, confirm: () => true,
         setButtonLoading() {}, setStatus() {}, setConnected(value) { c.state.connected = value; },
         applyActiveFamilyUiState() {}, hasWebUsbTransport: () => true,
         isHPPrimeActive: () => false, isHPLegacyActive: () => false, isNumWorksActive: () => false, isCasioActive: () => false,
@@ -38,7 +38,7 @@ function context(extra = {}) {
         FEATURE_FLAGS: { OPS_SCREEN: 4, OPS_DIRLIST: 8, OPS_VARS: 32, OPS_BACKUP: 16, OPS_ROMDUMP: 512, OPS_OS: 8192 },
         els: { btnConnect: element() }, ...extra };
     vm.createContext(c);
-    for (const name of ['serialPortToDevice', 'sharpSerialDevice', 'getAuthorizedSharpSerialDevices', 'requestSharpSerialDevice',
+    for (const name of ['serialPortToDevice', 'sharpSerialDevice', 'logSharpSerialDiagnostics', 'getAuthorizedSharpSerialDevices', 'requestSharpSerialDevice',
         'connectSharp', 'connect', 'getWebUsbDeviceFamily', 'isTransportEventForActiveDevice', 'runSharpOperation',
         'buildEntryFromCheckbox', 'sendSharpFiles', 'saveSharpDownload']) vm.runInContext(extract(name), c);
     return c;
@@ -56,7 +56,7 @@ async function main() {
     }
     c.WebTILPSharp = { ...sharp, SharpBackend: Backend };
     c.navigator.serial = { getPorts: async () => [], requestPort: async options => {
-        requests++; assert.equal(options.filters[0].usbVendorId, 0x04FC); return port;
+        requests++; assert.equal(options, undefined, 'explicit Sharp chooser must be unfiltered'); return port;
     } };
     c.state.settings.calcModel = 'sharp-el9950';
     c.requestSupportedWebUsbDevice = () => { throw new Error('Sharp model must bypass the USB chooser'); };
@@ -78,6 +78,7 @@ async function main() {
     c.navigator.serial.requestPort = async () => port;
     c.requestSupportedWebUsbDevice = () => { throw new Error('retry must not repeat USB chooser'); };
     await c.connect(); assert.equal(c.state.pendingSharpUsbDevice, null);
+    assert.equal(c.state.authorizedDevice.usbDevice, usb, 'fresh-click retry preserves USB discovery');
     assert.equal(backend.closed, true, 'replacing a Sharp session closes the previous port');
     // Cancel chooser clears pending state without publishing a new backend.
     c.state.pendingSharpUsbDevice = usb;
@@ -87,11 +88,62 @@ async function main() {
     const ambiguous = context(); ambiguous.WebTILPSharp = { ...sharp, SharpBackend: Backend };
     ambiguous.navigator.serial = { getPorts: async () => [port, { ...port }], requestPort: async () => { requests++; return port; } };
     await ambiguous.connectSharp(usb); assert.equal(requests, 2);
+    // Unknown and alternate serial metadata remain available for manual Sharp
+    // selection, but are never automatically identified as authorized Sharps.
+    for (const info of [{}, { usbVendorId: 0x1234, usbProductId: 0x5678 }]) {
+        const manual = context(); manual.WebTILPSharp = { ...sharp, SharpBackend: Backend };
+        const unknownPort = { getInfo: () => info };
+        let chooserCalls = 0;
+        manual.navigator.serial = { getPorts: async () => [unknownPort], requestPort: async options => {
+            assert.equal(options, undefined); chooserCalls++; return unknownPort;
+        } };
+        assert.equal((await manual.getAuthorizedSharpSerialDevices()).length, 0);
+        await manual.connectSharp(usb);
+        assert.equal(chooserCalls, 1, 'unknown granted port still requires explicit selection');
+        assert.equal(manual.state.authorizedDevice.serialPort, unknownPort);
+        assert.equal(manual.state.authorizedDevice.usbDevice, usb);
+        assert.deepEqual(manual.state.authorizedDevice.serialInfo, info);
+        const message = manual.logs.find(s => s.startsWith('sharp_serial_diagnostics'));
+        const details = JSON.parse(JSON.parse(message.slice('sharp_serial_diagnostics'.length)).details);
+        assert.deepEqual(details, { selected: info, authorized: [info], usbDiscovery: { vendorId: 0x04FC, productId: 0x0201 } });
+        let entries;
+        manual.renderDeviceInfo = value => { entries = value; };
+        manual.updateDeviceModelDisplay = () => {};
+        vm.runInContext(extract('readSharpInfo'), manual); manual.readSharpInfo();
+        assert.equal(entries[1].value, info.usbVendorId ? '1234:5678 / WebSerial' : 'sharp_serial_unknown_ids / WebSerial');
+    }
+    const reuse = context(); reuse.WebTILPSharp = { ...sharp, SharpBackend: Backend };
+    reuse.navigator.serial = { getPorts: async () => [port], requestPort: () => { throw new Error('Known Sharp port should be reused'); } };
+    await reuse.connectSharp(usb);
+    assert.equal(reuse.state.authorizedDevice.serialPort, port);
     // A late grant after disconnect cannot publish a connection.
     let resolve;
-    const stale = context(); stale.navigator.serial = { requestPort: () => new Promise(r => { resolve = r; }) };
+    const stale = context(); stale.navigator.serial = { getPorts: async () => [], requestPort: () => new Promise(r => { resolve = r; }) };
     const grant = stale.requestSharpSerialDevice(); stale.state.sharpConnectionGeneration++; resolve(port);
     await assert.rejects(grant, error => error.sharpConnectionCancelled);
+    // Disconnecting while metadata is being enumerated also retires the grant.
+    let metadataStarted, resolveMetadata;
+    const metadataReady = new Promise(r => { metadataStarted = r; });
+    const staleMetadata = context();
+    staleMetadata.navigator.serial = { requestPort: async () => port, getPorts: () => new Promise(r => {
+        resolveMetadata = r; metadataStarted();
+    }) };
+    const metadataGrant = staleMetadata.requestSharpSerialDevice();
+    await metadataReady; staleMetadata.state.sharpConnectionGeneration++; resolveMetadata([port]);
+    await assert.rejects(metadataGrant, error => error.sharpConnectionCancelled);
+    const cancelled = context();
+    cancelled.navigator.serial = { getPorts: async () => [port], requestPort: async () => {
+        throw new DOMException('Cancelled', 'NotFoundError');
+    } };
+    assert.equal(await cancelled.requestSharpSerialDevice(usb), null);
+    const cancelledLog = cancelled.logs.find(s => s.startsWith('sharp_serial_diagnostics'));
+    const cancelledDetails = JSON.parse(JSON.parse(cancelledLog.slice('sharp_serial_diagnostics'.length)).details);
+    assert.equal(cancelledDetails.selected, null);
+    assert.deepEqual(cancelledDetails.authorized, [port.getInfo()]);
+    // Diagnostic enumeration failures do not invalidate a selected port.
+    const noEnumeration = context({ console: { warn() {} } });
+    noEnumeration.navigator.serial = { getPorts: async () => { throw new Error('Enumeration unavailable'); }, requestPort: async () => port };
+    assert.equal((await noEnumeration.requestSharpSerialDevice()).serialPort, port);
     // Opaque selectors survive table checkbox serialization.
     const entry = { kind: 'sharp', name: 'HERON', type: 112, selector: new Uint8Array(11), category: sharp.CATEGORIES[0] };
     c.state.dirlist = [entry];
