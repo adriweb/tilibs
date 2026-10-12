@@ -256,7 +256,7 @@ static int		recv_screen	(CalcHandle* handle, CalcScreenCoord* sc, uint8_t** bitm
 		{
 			uint16_t max_cnt;
 			ret = RECV_XDP(handle, &max_cnt, *bitmap);
-			if (!ret || ret == ERR_CHECKSUM) // problem with checksum
+			if (!ret)
 			{
 				*bitmap = (uint8_t *)ticalcs_realloc_screen(*bitmap, (handle->model < CALC_TI85) ? TI82_COLS * TI82_ROWS / 8 : TI85_COLS * TI85_ROWS / 8);
 				ret = SEND_ACK(handle);

@@ -236,7 +236,7 @@ static int		recv_screen	(CalcHandle* handle, CalcScreenCoord* sc, uint8_t** bitm
 		{
 			uint16_t max_cnt;
 			ret = RECV_XDP(handle, &max_cnt, *bitmap);
-			if (!ret || ret == ERR_CHECKSUM) // problem with checksum
+			if (!ret)
 			{
 				// Clip the unused part of the screen (nevertheless usable with asm programs)
 				if (   ((handle->model == CALC_TI89) || (handle->model == CALC_TI89T))

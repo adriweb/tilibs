@@ -177,7 +177,7 @@ static int		recv_screen	(CalcHandle* handle, CalcScreenCoord* sc, uint8_t** bitm
 		{
 			uint16_t pktsize;
 			ret = RECV_XDP(handle, &pktsize, data);
-			if (!ret || ret == ERR_CHECKSUM) // problem with checksum
+			if (!ret)
 			{
 				ret = SEND_ACK(handle);
 				if (!ret)
@@ -211,6 +211,10 @@ static int		recv_screen	(CalcHandle* handle, CalcScreenCoord* sc, uint8_t** bitm
 								ret = SEND_ACK(handle);
 								break;
 							}
+							if (ret)
+							{
+								break;
+							}
 
 							*bitmap = (uint8_t *)ticalcs_realloc_screen(data, size + pktsize);
 							if (*bitmap != nullptr)
@@ -231,7 +235,6 @@ static int		recv_screen	(CalcHandle* handle, CalcScreenCoord* sc, uint8_t** bitm
 							}
 							else
 							{
-								ticalcs_free_screen(data);
 								ret = ERR_MALLOC;
 								break;
 							}

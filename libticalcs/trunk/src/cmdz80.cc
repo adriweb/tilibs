@@ -1303,8 +1303,10 @@ int TICALL ti82_recv_ERR(CalcHandle* handle, uint16_t * status)
 
 	VALIDATE_HANDLE(handle);
 
-	const int ret = dbus_recv(handle, &host, &cmd, &sts, nullptr);
-	if (ret && ret != ERR_CHECKSUM)
+	// The ASM bootstrap deliberately sends CHK as its completion marker.
+	// Its caller sends ACK, so bypass the generic checksum-error recovery.
+	const int ret = dbus_recv_header(handle, &host, &cmd, &sts);
+	if (ret)
 	{
 		return ret;
 	}
