@@ -21,6 +21,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <vector>
 
 #include "ticables.h"
 #include "internal.h"
@@ -28,7 +29,9 @@
 static const unsigned char machine_id[] =
 {
 	0x00, 0x02, 0x03, 0x05, 0x06, 0x07, 0x08, 0x08, 0x09, 0x23,
-	0x00, 0x82, 0x83, 0x85, 0x86, 0x74, 0x98, 0x88, 0x89, 0x73,
+	0x80, 0x82, 0x83, 0x85, 0x86, 0x74, 0x98, 0x88, 0x89, 0x73,
+	0x42, 0x43,
+	0x12, 0x15, 0x19, 0x95,
 	0xff
 };
 
@@ -36,30 +39,51 @@ static const char* machine_way[] =
 {
 	"PC>TI", "PC>TI", "PC>TI", "PC>TI", "PC>TI", "PC>TI", "PC>TI", "PC>TI", "PC>TI", "PC>TI",
 	"TI>PC", "TI>PC", "TI>PC", "TI>PC", "TI>PC", "TI>PC", "TI>PC", "TI>PC", "TI>PC", "TI>PC",
+	"CBL2>PC", "TIPR>PC",
+	"CBL>TI", "CBL>TI", "CBL>TI", "TI>CBL",
 	"",
 };
 
-static const unsigned char command_id[] =
+// The legacy names are kept for existing log readers. TI's names come from
+// DBUSCommand in ActivityGrapher; the extra commands remain tilibs-only names.
+struct DBUSCommandInfo
 {
-	0x06, 0x09, 0x15, 0x2d, 0x36, 0x47, 0x56, 0x5A, 
-	0x68, 0x6D, 0x74, 0x78, 0x87, 0x88, 0x92, 0xA2, 
-	0xB7, 0xC9, 
-	0xff
+	unsigned char id;
+	const char *name;
+	const char *official_name;
+	bool has_data;
 };
 
-static const char command_name[][8] =
+static const DBUSCommandInfo commands[] =
 {
-	"VAR", "CTS", "XDP", "VER", "SKP", "SID", "ACK", "ERR", 
-	"RDY", "SCR", "RID", "CNT", "KEY", "DEL", "EOT", "REQ", 
-	"IND", "RTS", 
-	""
-};
-
-static const int cmd_with_data[] =
-{
-	!0, 0, !0, 0, !0, !0, 0, !0, 
-	0, 0, 0, 0, 0, !0, 0, !0,
-	!0, !0, -1
+	{0x06, "VAR", "RTS", true},
+	{0x09, "CTS", "RDY", false},
+	{0x15, "XDP", "XDP", true},
+	{0x29, "ELD", "EBL", false},
+	{0x2A, "DLD", "DBL", false},
+	{0x2B, "EKE", "EKE", false},
+	{0x2C, "DKE", "DKE", false},
+	{0x2D, "VER", "RDI", false},
+	{0x36, "SKP", "EOR", true},
+	{0x47, "SID", "SIOA", true},
+	{0x56, "ACK", "ACK", false},
+	{0x5A, "ERR", "CHK", false},
+	{0x68, "RDY", "RDC", false},
+	{0x6D, "SCR", "REQ", false},
+	{0x6E, "GID", "???", false},
+	{0x6F, "DMP", "???", true},
+	{0x70, "TG2", "???", true},
+	{0x74, "RID", "RIOA", false},
+	{0x78, "CNT", "RTC", false},
+	{0x87, "KEY", "SKY", false},
+	{0x88, "DEL", "DVL", true},
+	{0x89, "RUN", "EPL", true},
+	{0x92, "EOT", "DONE", false},
+	{0xA2, "REQ", "GET", true},
+	{0xB4, "ERR2", "???", false},
+	{0xB7, "IND", "GTE", true},
+	{0xC9, "RTS", "SEND", true},
+	{0xCA, "RSE", "SETP", true},
 };
 
 static int is_a_machine_id(unsigned char id)
@@ -74,31 +98,33 @@ static int is_a_machine_id(unsigned char id)
 		}
 	}
 
-	return i;
+	return machine_id[i] != 0xff ? i : -1;
 }
 
 static int is_a_command_id(unsigned char id)
 {
-	int i;
-
-	for (i=0; command_id[i] != 0xff; i++)
+	for (unsigned int i = 0; i < sizeof(commands) / sizeof(commands[0]); i++)
 	{
-		if (id == command_id[i])
+		if (id == commands[i].id)
 		{
-			break;
+			return (int)i;
 		}
 	}
-
-	return i;
+	return -1;
 }
 
 #define WIDTH	12
 
-static int fill_buf(FILE *f, unsigned char data, int flush)
+static int fill_buf(FILE *f, unsigned char data, int flush, bool reset = false)
 {
 	static unsigned char buf[WIDTH];
 	static unsigned int cnt = 0;
 	unsigned int i;
+	if (reset)
+	{
+		cnt = 0;
+		return 0;
+	}
 
 	if (!flush)
 	{
@@ -136,179 +162,183 @@ static int fill_buf(FILE *f, unsigned char data, int flush)
 }
 
 /*
-  Format of data: 8 hexadecimal numbers with spaces
+  Input is log_hex.cc's three-line preamble followed by up to 16 HH bytes
+  per line and an optional "| " ASCII column. The final line may be partial.
 */
 int dbus_decomp(const char *filename, int resync)
 {
 	char src_name[1024];
 	char dst_name[1024];
 	FILE *fi = nullptr, *fo = nullptr;
-	int i;
-	unsigned int j;
-	int num_bytes;
 	char str[256];
+	std::vector<unsigned char> buffer;
 	int ret = 0;
 
-	// build filenames
-	snprintf(src_name, sizeof(src_name) - 1, "%s.hex", filename);
-	src_name[sizeof(src_name) - 1] = 0;
-
-	snprintf(dst_name, sizeof(dst_name) - 1, "%s.pkt", filename);
-	dst_name[sizeof(dst_name) - 1] = 0;
-
-	// open files
+	if (filename == nullptr
+	    || snprintf(src_name, sizeof(src_name), "%s.hex", filename) >= (int)sizeof(src_name)
+	    || snprintf(dst_name, sizeof(dst_name), "%s.pkt", filename) >= (int)sizeof(dst_name))
+	{
+		return -1;
+	}
 	fi = fopen(src_name, "rt");
 	if (fi == nullptr)
 	{
 		fprintf(stderr, "Unable to open input file: %s\n", src_name);
 		return -1;
 	}
-
-	if (fseek(fi, 0, SEEK_END) < 0)
-	{
-		fclose(fi);
-		return -1;
-	}
-	const long file_size = ftell(fi);
-	if (file_size < 0)
-	{
-		fclose(fi);
-		return -1;
-	}
-	if (fseek(fi, 0, SEEK_SET) < 0)
-	{
-		fclose(fi);
-		return -1;
-	}
-
-	// allocate buffer
-	unsigned char* buffer = (unsigned char*)calloc(file_size < 131072 ? 65536 : file_size / 2, 1);
-	if (buffer == nullptr)
-	{
-		fprintf(stderr, "calloc error.\n");
-		fclose(fi);
-		return -1;
-	}
-	memset(buffer, 0xff, file_size/2);
-
 	fo = fopen(dst_name, "wt");
 	if (fo == nullptr)
 	{
 		fprintf(stderr, "Unable to open output file: %s\n", dst_name);
-		free(buffer);
 		fclose(fi);
 		return -1;
 	}
+	fprintf(fo, "TI packet decompiler for D-BUS, version 1.3\n");
+	fill_buf(fo, 0, 0, true);
 
-	fprintf(fo, "TI packet decompiler for D-BUS, version 1.2\n");
-
-	// skip comments
-	if (   fgets(str, sizeof(str), fi) == nullptr
-	       || fgets(str, sizeof(str), fi) == nullptr
-	       || fgets(str, sizeof(str), fi) == nullptr)
+	// Preserve the logger's preamble and ASCII-column format; do not scan the
+	// ASCII column as hexadecimal, even if it contains digits or A..F.
+	for (int line = 0; line < 3; line++)
 	{
-		goto exit;
-	}
-
-	// read source file
-	for (i = 0; !feof(fi);)
-	{
-		for (j = 0; j < 16 && !feof(fi); j++)
-		{
-			if (fscanf(fi, "%02X", (unsigned int *)&(buffer[i+j])) < 1)
-			{
-				ret = -1;
-				goto exit;
-			}
-			if (fgetc(fi) < 0)
-			{
-				goto exit;
-			}
-		}
-		i += j;
-
-		for (j=0; j<18 && !feof(fi); j++)
-		{
-			if (fgetc(fi) < 0)
-			{
-				goto exit;
-			}
-		}
-	}
-	num_bytes = i-1; // -1 due to EOF char
-	printf("%i bytes read.\n", num_bytes);
-
-	// process data
-	for (i = 0; i < num_bytes;)
-	{
-restart:
-		const unsigned char mid = buffer[i + 0];
-		const unsigned char cid = buffer[i + 1];
-		unsigned int length = buffer[i + 2];
-		length |= ((int)(buffer[i+3])) << 8;
-
-		// check for valid packet
-		if (is_a_machine_id(mid) == -1)
+		if (fgets(str, sizeof(str), fi) == nullptr)
 		{
 			ret = -1;
 			goto exit;
 		}
+	}
+	while (fgets(str, sizeof(str), fi) != nullptr)
+	{
+		char *cursor = str;
+		unsigned int count = 0;
+		while (*cursor && *cursor != '|')
+		{
+			while (isspace((unsigned char)*cursor)) cursor++;
+			if (*cursor == '\0' || *cursor == '|') break;
+			if (count == 16 || !isxdigit((unsigned char)cursor[0])
+			    || !isxdigit((unsigned char)cursor[1])
+			    || (cursor[2] != '\0' && cursor[2] != '|'
+			        && !isspace((unsigned char)cursor[2])))
+			{
+				ret = -1;
+				goto exit;
+			}
+			char hex[3] = {cursor[0], cursor[1], '\0'};
+			buffer.push_back((unsigned char)strtoul(hex, nullptr, 16));
+			cursor += 2;
+			count++;
+		}
+		if (strchr(str, '\n') == nullptr && !feof(fi))
+		{
+			// A logger line is much shorter than this buffer; a longer line is
+			// malformed rather than a second set of data without a boundary.
+			int next = fgetc(fi);
+			if (next != EOF)
+			{
+				ret = -1;
+				goto exit;
+			}
+		}
+	}
+	if (ferror(fi))
+	{
+		ret = -1;
+		goto exit;
+	}
+	printf("%lu bytes read.\n", (unsigned long)buffer.size());
 
-		// check for valid packet
-		const int idx = is_a_command_id(cid);
-		if (idx == -1)
+	for (size_t i = 0; i < buffer.size();)
+	{
+		if (buffer.size() - i < 2)
+		{
+			ret = -3;
+			goto exit;
+		}
+		const unsigned char mid = buffer[i];
+		const unsigned char cid = buffer[i + 1];
+		const int machine = is_a_machine_id(mid);
+		if (machine == -1)
+		{
+			ret = -1;
+			goto exit;
+		}
+		const int command = is_a_command_id(cid);
+		if (command == -1)
 		{
 			ret = -2;
 			goto exit;
 		}
-
-		fprintf(fo, "%02X %02X %02X %02X", mid, cid, length >> 8, length & 0xff);
-		for (j = 4; j <= WIDTH; j++)
+		const DBUSCommandInfo &info = commands[command];
+		// The TI-80 ACK has no header word, and libticalcs writes every
+		// data-less MID 0x00 packet (TI-80 SCR, probe RDC) as two bytes.
+		const bool ti80_short = (mid == 0x80 && cid == 0x56)
+		                    || (mid == 0x00 && !info.has_data);
+		const size_t header_size = ti80_short ? 2 : 4;
+		if (buffer.size() - i < header_size)
 		{
-			fprintf(fo, "   ");
+			ret = -3;
+			goto exit;
 		}
-		fprintf(fo, "  | ");
-		fprintf(fo, "%s: %s\n", machine_way[is_a_machine_id(mid)], command_name[is_a_command_id(cid)]);
-
-		i += 4;
-
-		// get data & checksum
-		if (cmd_with_data[idx] && length > 0)
+		const unsigned int word = ti80_short ? 0 : buffer[i + 2] | ((unsigned int)buffer[i + 3] << 8);
+		const size_t length = info.has_data ? word : 0;
+		const size_t packet_size = header_size + (length ? length + 2 : 0);
+		if (buffer.size() - i < packet_size && (!resync || !length))
 		{
-			// data
-			for(j = 0; j < length; j++, i++)
+			ret = -3;
+			goto exit;
+		}
+		fprintf(fo, "%02X %02X", mid, cid);
+		if (!ti80_short) fprintf(fo, " %02X %02X", word & 0xff, word >> 8);
+		for (size_t j = header_size; j <= WIDTH; j++) fprintf(fo, "   ");
+		fprintf(fo, "  | %s: %s (TI: %s)", machine_way[machine], info.name, info.official_name);
+		if (!info.has_data && !ti80_short && word)
+		{
+			fprintf(fo, " [%s=%04X]", cid == 0x87 ? "key" : "status", word);
+		}
+		fputc('\n', fo);
+		i += header_size;
+		bool restarted = false;
+		if (length)
+		{
+			unsigned int checksum = 0;
+			for (size_t j = 0; j < length; j++)
 			{
-				if (resync && buffer[i] == 0x98 && (buffer[i+1] == 0x15 ||  buffer[i+1] == 0x56))
+				if (i == buffer.size())
+				{
+					ret = -3;
+					goto exit;
+				}
+				if (resync && i + 1 < buffer.size() && buffer[i] == 0x98
+				    && (buffer[i + 1] == 0x15 || buffer[i + 1] == 0x56))
 				{
 					printf("Warning: there is packets in data !\n");
 					fprintf(fo, "Beware : length of previous packet is wrong !\n");
-					goto restart;
+					fill_buf(fo, 0, 1);
+					restarted = true;
+					break;
 				}
-
-				fill_buf(fo, buffer[i], 0);
+				checksum += buffer[i];
+				fill_buf(fo, buffer[i++], 0);
 			}
-
-			fill_buf(fo, 0, !0);
-			//fprintf(fo, "\n");
-
-			// write checksum
-			fprintf(fo, "    ");
-			fprintf(fo, "%02X ", buffer[i++]);
-			fprintf(fo, "%02X ", buffer[i++]);
-			fprintf(fo, "\n");
+			if (restarted) continue;
+			fill_buf(fo, 0, 1);
+			if (buffer.size() - i < 2)
+			{
+				ret = -3;
+				goto exit;
+			}
+			const unsigned int expected = buffer[i] | ((unsigned int)buffer[i + 1] << 8);
+			fprintf(fo, "    %02X %02X", buffer[i], buffer[i + 1]);
+			if ((checksum & 0xffff) != expected) fprintf(fo, " (Checksum mismatch)");
+			fputc('\n', fo);
+			i += 2;
 		}
 	}
 
 exit:
-	if (ret < 0)
-	{
-		printf("Error %i\n", -ret);
-	}
-
-	free(buffer);
-	fclose(fo);
-	fclose(fi);
-
+	if (ret < 0) printf("Error %i\n", -ret);
+	fill_buf(fo, 0, 0, true);
+	if (fclose(fo) != 0) ret = -1;
+	if (fclose(fi) != 0) ret = -1;
 	return ret;
 }
 
