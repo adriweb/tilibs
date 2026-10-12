@@ -59,6 +59,7 @@ class USBDevice {
         await new Promise(resolve => setImmediate(resolve));
         for (const reject of this.waiting) reject(new DOMException('Transfer cancelled by close', 'AbortError'));
         this.waiting.clear();
+        this.readPending = null;
     }
     transferIn(endpoint, length) {
         this.calls.push('read');
@@ -69,7 +70,19 @@ class USBDevice {
             const bytes = this.endless ? new Uint8Array(length) : Uint8Array.from(this.bytes.splice(0, length));
             return Promise.resolve({ status: 'ok', data: new DataView(bytes.buffer) });
         }
-        return new Promise((_, reject) => this.waiting.add(reject));
+        return new Promise((resolve, reject) => {
+            this.waiting.add(reject);
+            this.readPending = { resolve, reject, length };
+        });
+    }
+    feed(bytes) {
+        this.bytes.push(...bytes);
+        if (!this.readPending) return;
+        const { resolve, reject, length } = this.readPending;
+        this.readPending = null;
+        this.waiting.delete(reject);
+        const data = Uint8Array.from(this.bytes.splice(0, length));
+        resolve({ status: 'ok', data: new DataView(data.buffer) });
     }
     transferOut(endpoint, bytes) {
         this.calls.push('write');
@@ -292,18 +305,43 @@ async function testWasm(path, failReset) {
         if (data.length) { const sum = data.reduce((a, b) => a + b, 0); bytes.push(sum & 255, sum >> 8); }
         return bytes;
     };
-    const receive = async () => {
-        h.device.bytes.push(...packet(0x56), ...packet(6, [2, 0, 0x1d, 3, 0, 4, 0, 5, 0, 0, 0]),
+    const prepare = async () => {
+        assert.equal(await h.context.ccallAsync(module, 'is_ready', 'number', ['number'], [h.state.handle]), 0);
+        writes.splice(0);
+    };
+    const receive = async (delay = false) => {
+        await prepare();
+        const bytes = [...packet(6, [2, 0, 0x1d, 3, 0, 4, 0, 5, 0, 0, 0]),
             ...packet(0x56), ...packet(0x15, [1, 2]), ...packet(0x15, [3, 4, 5]),
-            ...packet(0x15, [6, 7, 8, 9]), ...packet(0x15, [10, 11, 12, 13, 14]));
-        assert.equal(await h.context.ccallAsync(module, 'calc_recv_backup', 'number', ['number', 'string'],
-            [h.state.handle, '/backup.86b']), 0);
-        const bytes = module.FS.readFile('/backup.86b');
-        assert.equal(Buffer.from(bytes.subarray(0, 8)).toString(), '**TI86**');
+            ...packet(0x15, [6, 7, 8, 9]), ...packet(0x15, [10, 11, 12, 13, 14])];
+        if (!delay) h.device.bytes.push(...bytes);
+        const pending = h.context.ccallAsync(module, 'calc_recv_backup', 'number', ['number', 'string'],
+            [h.state.handle, '/backup.86b'], { timeoutMs: null });
+        if (delay) {
+            while (!h.device.waiting.size) await new Promise(resolve => setTimeout(resolve, 10));
+            await new Promise(resolve => setTimeout(resolve, 1300));
+            assert.deepEqual(writes, [], 'waiting for a manual backup sends no request');
+            assert.equal(h.transport.needsRecovery, false, 'human wait exceeds the packet deadline');
+            assert.equal(module.__manualBackupWaiting, true);
+            h.device.feed(bytes);
+        }
+        assert.equal(await pending, 0);
+        assert.equal(module.__manualBackupWaiting, false);
+        assert.deepEqual(writes, [[6, 0x56, 0, 0], [6, 0x09, 0, 0],
+            ...Array.from({ length: 4 }, () => [6, 0x56, 0, 0])], 'manual backup replies only after calculator VAR');
+        const file = module.FS.readFile('/backup.86b');
+        assert.equal(Buffer.from(file.subarray(0, 8)).toString(), '**TI86**');
         assert.equal(h.device.bytes.length, 0);
     };
-    await receive();
-    assert.deepEqual(writes[0], [6, 0xa2, 11, 0, 0, 0, 0x1d, 0, 0, 0, 0, 0, 0, 0, 0, 0x1d, 0]);
+    await receive(true);
+    // Once the first header arrives, a stalled transfer must still time out.
+    await prepare();
+    h.device.bytes.push(...packet(6, [2, 0, 0x1d, 3, 0, 4, 0, 5, 0, 0, 0]));
+    const stalledAt = Date.now();
+    assert.notEqual(await h.context.ccallAsync(module, 'calc_recv_backup', 'number', ['number', 'string'],
+        [h.state.handle, '/stalled.86b'], { timeoutMs: null }), 0);
+    assert.ok(Date.now() - stalledAt < 2500, 'started backup retains the native packet timeout');
+    assert.equal(module.FS.analyzePath('/stalled.86b').exists, false);
     // A wrong reply with extra bytes in the same USB read leaves libticables'
     // private rBuf dirty. The next valid backup must not consume that tail.
     h.device.bytes.push(...packet(0x92), ...packet(0x15, [0x55]));
@@ -315,7 +353,9 @@ async function testWasm(path, failReset) {
     assert.ok(Date.now() - started < 2500, 'native timeout and buffer drain complete without the JS watchdog');
     assert.equal(h.context.getModuleCallState(module).dead, false);
     await receive();
-    const stuck = h.context.ccallAsync(module, 'calc_screenshot', 'number', ['number'], [h.state.handle]);
+    await prepare();
+    const stuck = h.context.ccallAsync(module, 'calc_recv_backup', 'number', ['number', 'string'],
+        [h.state.handle, '/cancelled.86b'], { timeoutMs: null });
     const cancelled = assert.rejects(stuck, error => error.silent === true);
     while (!h.device.waiting.size) await new Promise(resolve => setTimeout(resolve, 10));
     await h.context.nukeConnection(false);
@@ -326,10 +366,71 @@ async function testWasm(path, failReset) {
     console.log(`Compiled WASM/libusb TI-86 backup, timeout/retry and bomb cancellation passed (USB reset ${failReset ? 'rejected' : 'accepted'})`);
 }
 
+async function testManualRestoreWasm(path, model) {
+    const h = await wasmHarness(path, model, false);
+    const {module, writes} = h;
+    const mid = model === 2 ? 0x82 : model === 6 ? 0x85 : 0x86;
+    const packet = (cmd, data = []) => {
+        const bytes = [mid, cmd, data.length & 255, data.length >> 8, ...data];
+        if (data.length) { const sum = data.reduce((a, b) => a + b, 0); bytes.push(sum & 255, sum >> 8); }
+        return bytes;
+    };
+    const parts = [[1, 2], [3, 4, 5], [6, 7, 8, 9], ...(model === 7 ? [[10, 11, 12, 13, 14]] : [])];
+    const header = [2, 0, model === 2 ? 0x0f : 0x1d, 3, 0, 4, 0, 5, 0, 0, 0];
+    h.device.bytes.push(...packet(6, header), ...packet(0x56), ...parts.flatMap(p => packet(0x15, p)));
+    const filename = `/restore.${model === 2 ? '82b' : model === 6 ? '85b' : '86b'}`;
+    assert.equal(await h.context.ccallAsync(module, 'calc_recv_backup', 'number', ['number', 'string'],
+        [h.state.handle, filename], {timeoutMs: null}), 0);
+    writes.splice(0);
+    h.device.bytes.push(...packet(0x56)); // Calculator is already in Receive mode.
+    const restoring = h.context.ccallAsync(module, 'send_file_custom', 'number',
+        ['number', 'string', 'string', 'number', 'number'], [h.state.handle, filename, '', -1, 0], {timeoutMs: null});
+    while (!h.device.waiting.size) await new Promise(resolve => setTimeout(resolve, 10));
+    await new Promise(resolve => setTimeout(resolve, 1300));
+    assert.equal(module.__manualBackupWaiting, true, 'Continue confirmation gets a human wait');
+    assert.equal(h.transport.needsRecovery, false, 'reading the backup warning exceeds 1.1 seconds');
+    h.device.feed([...packet(9), ...parts.flatMap(() => packet(0x56))]);
+    assert.equal(await restoring, 0);
+    assert.equal(module.__manualBackupWaiting, false);
+    assert.equal(writes[0][1], 6, 'restore starts with a nonsilent backup VAR');
+    assert.equal(writes.filter(p => p[1] === 0x15).length, parts.length);
+    // A partial CTS is a broken packet, not more time for a human.
+    h.device.bytes.push(...packet(0x56));
+    const partial = h.context.ccallAsync(module, 'send_file_custom', 'number',
+        ['number', 'string', 'string', 'number', 'number'], [h.state.handle, filename, '', -1, 0], {timeoutMs: null});
+    while (!h.device.waiting.size) await new Promise(resolve => setTimeout(resolve, 10));
+    h.device.feed([mid, 9]);
+    const started = Date.now();
+    assert.notEqual(await partial, 0);
+    assert.ok(Date.now() - started < 2500, 'partial CTS keeps normal packet deadlines');
+    assert.equal(h.transport.needsRecovery, false, 'file-send failure recovers the cable before another transfer');
+    assert.equal(module.__manualBackupWaiting, false);
+    // ACK and CTS can arrive in one USB read; subsequent data ACKs still need a deadline.
+    h.device.bytes.push(...packet(0x56), ...packet(9));
+    const dataStarted = Date.now();
+    assert.notEqual(await h.context.ccallAsync(module, 'send_file_custom', 'number',
+        ['number', 'string', 'string', 'number', 'number'], [h.state.handle, filename, '', -1, 0], {timeoutMs: null}), 0);
+    assert.ok(Date.now() - dataStarted < 2500, 'coalesced CTS does not extend the data-ACK deadline');
+    assert.equal(h.transport.needsRecovery, false);
+    assert.equal(module.__manualBackupWaiting, false);
+    h.device.bytes.push(...packet(0x56));
+    const cancelling = h.context.ccallAsync(module, 'send_file_custom', 'number',
+        ['number', 'string', 'string', 'number', 'number'], [h.state.handle, filename, '', -1, 0], {timeoutMs: null});
+    const cancelled = assert.rejects(cancelling, error => error.silent === true);
+    while (!h.device.waiting.size) await new Promise(resolve => setTimeout(resolve, 10));
+    assert.equal(module.__manualBackupWaiting, true);
+    await h.context.nukeConnection(false);
+    await cancelled;
+    assert.equal(module.__manualBackupWaiting, false);
+    assert.equal(h.device.waiting.size, 0);
+    console.log(`Compiled WASM TI-${model === 2 ? 82 : model === 6 ? 85 : 86} restore human wait and partial-CTS timeout passed`);
+}
+
 (async () => {
     await main();
     if (process.argv[2]) {
         await test83PlusWasm(process.argv[2]);
+        for (const model of [2, 6, 7]) await testManualRestoreWasm(process.argv[2], model);
         for (const failReset of [false, true]) await testWasm(process.argv[2], failReset);
         process.exit(0);
     }

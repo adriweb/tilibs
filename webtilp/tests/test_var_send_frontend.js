@@ -22,11 +22,13 @@ async function run(model, plan, {finishResult = 0, sendResult = 0, rejectSend = 
         hasSilverlinkConnected: () => true, isTI89TActive: () => false,
         clearNativeWarnings() {}, log() {}, getNativeWarningSuffix: () => '',
         formatErrorResult: (_module, result) => String(result),
-        async ccallAsync(_module, name, _ret, types, args) {
+        runGuidedBackup: async (_direction, _name, operation) => operation(),
+        async ccallAsync(_module, name, _ret, types, args, options) {
             calls.push({name, types: [...types], args: [...args]});
             if (name === 'finish_var_send') return finishResult;
             assert.ok(['send_file_custom', 'send_file_entry_custom'].includes(name));
             assert.equal(types.length, args.length);
+            if (args[1].includes('BACKUP')) assert.equal(options.timeoutMs, [2, 6, 7].includes(model) ? null : 60000);
             if (rejectSend) throw new Error('disconnected');
             return sendResult;
         }
@@ -74,6 +76,9 @@ async function main() {
         assert.equal(mixed.calls.at(-1).args.at(-1), 0);
     }
     for (const model of [3, 7, 13]) {
+        const backup = await run(model, [item('BACKUP', {fileClass: 'backup'})]);
+        assert.ifError(backup.error);
+        assert.equal(backup.result.successCount, 1);
         const normal = await run(model, [item('ONE'), item('TWO', {sendByEntry: true, entryIndex: 1})]);
         assert.ifError(normal.error);
         assert.equal(normal.calls.length, 2);
