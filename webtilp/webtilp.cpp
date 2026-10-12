@@ -149,6 +149,7 @@ extern "C" int hp_prime_library_exit(void);
 extern "C" {
 
 enum {
+    TICALCS_ERR_ABORT = 256,
     TICALCS_ERR_NOT_READY = 257,
     TICALCS_ERR_BUSY = 269,
     TICABLES_ERR_READ_ERROR = 3,
@@ -1586,7 +1587,45 @@ int calc_recv_backup(CableHandle* cable_handle, const char* path) {
         return ready_result;
     }
 
-    const int result = ticalcs_calc_recv_backup2(g_calc_handle, path);
+    // Like TiLP, TI-82/85/86 wait for the user to send a backup. Stop retrying
+    // as soon as a packet header arrives, so transfer failures still time out.
+    const bool manual = g_calc_handle->model == CALC_TI82
+        || g_calc_handle->model == CALC_TI85 || g_calc_handle->model == CALC_TI86;
+    struct ReceiveState {
+        bool started = false;
+        ticalcs_event_hook_type previous_hook;
+        void* previous_user;
+    } receive_state{false, ticalcs_calc_get_event_hook(g_calc_handle),
+        ticalcs_calc_get_event_user_pointer(g_calc_handle)};
+    if (manual) {
+        // Only the first SilverLink read may wait for a human. Its JS transport
+        // restores the packet deadline as soon as any bytes arrive.
+        EM_ASM({ Module.__manualBackupWaiting = true; });
+        ticalcs_calc_set_event_user_pointer(g_calc_handle, &receive_state);
+        ticalcs_calc_set_event_hook(g_calc_handle,
+            [](CalcHandle* handle, uint32_t count, const CalcEventData* event, void* user) {
+                auto* state = static_cast<ReceiveState*>(user);
+                if (event->type == CALC_EVENT_TYPE_AFTER_RECV_DBUS_PKT_HEADER
+                    && (event->retval == 0 || event->data.dbus_pkt.id != 0)) {
+                    state->started = true;
+                }
+                return state->previous_hook
+                    ? state->previous_hook(handle, count, event, state->previous_user) : event->retval;
+            });
+    }
+    int result;
+    do {
+        result = ticalcs_calc_recv_backup2(g_calc_handle, path);
+        if (!manual || receive_state.started || result != TICABLES_ERR_READ_TIMEOUT) break;
+        if (g_update.cancel) { result = TICALCS_ERR_ABORT; break; }
+        update_progress_tick();
+        emscripten_sleep(100);
+    } while (true);
+    if (manual) {
+        EM_ASM({ Module.__manualBackupWaiting = false; });
+        ticalcs_calc_set_event_hook(g_calc_handle, receive_state.previous_hook);
+        ticalcs_calc_set_event_user_pointer(g_calc_handle, receive_state.previous_user);
+    }
     if (result == 0) {
         write_last_path(path);
     }
@@ -2683,7 +2722,44 @@ int send_file_custom(CableHandle* cable_handle, const char* filename, const char
     } else if (tifiles_file_is_tigroup(filename)) {
         result = ticalcs_calc_send_tigroup2(g_calc_handle, filename, (TigMode)(TIG_ALL | TIG_BACKUP));
     } else if (fclass == TIFILE_BACKUP) {
+        // TI-82/85/86 ACK the backup VAR, then wait for Continue on the
+        // calculator. Only that confirmation read may exceed the packet
+        // deadline. JS restores the deadline as soon as reply bytes arrive.
+        const bool manual = g_calc_handle->model == CALC_TI82
+            || g_calc_handle->model == CALC_TI85 || g_calc_handle->model == CALC_TI86;
+        struct RestoreState {
+            bool initial_ack_seen = false;
+            ticalcs_event_hook_type previous_hook;
+            void* previous_user;
+        } restore_state{false, ticalcs_calc_get_event_hook(g_calc_handle),
+            ticalcs_calc_get_event_user_pointer(g_calc_handle)};
+        if (manual) {
+            ticalcs_calc_set_event_user_pointer(g_calc_handle, &restore_state);
+            ticalcs_calc_set_event_hook(g_calc_handle,
+                [](CalcHandle* handle, uint32_t count, const CalcEventData* event, void* user) {
+                    auto* state = static_cast<RestoreState*>(user);
+                    if (state->initial_ack_seen
+                        && event->type == CALC_EVENT_TYPE_AFTER_RECV_DBUS_PKT_HEADER) {
+                        // CTS can already be in libticables' buffered USB read,
+                        // so clear the wait even without another JS transferIn.
+                        EM_ASM({ Module.__manualBackupWaiting = false; });
+                    }
+                    if (!state->initial_ack_seen && event->retval == 0
+                        && event->type == CALC_EVENT_TYPE_AFTER_RECV_DBUS_PKT_HEADER
+                        && event->data.dbus_pkt.cmd == 0x56 /* ACK */) {
+                        state->initial_ack_seen = true;
+                        EM_ASM({ Module.__manualBackupWaiting = true; });
+                    }
+                    return state->previous_hook
+                        ? state->previous_hook(handle, count, event, state->previous_user) : event->retval;
+                });
+        }
         result = ticalcs_calc_send_backup2(g_calc_handle, filename);
+        if (manual) {
+            EM_ASM({ Module.__manualBackupWaiting = false; });
+            ticalcs_calc_set_event_hook(g_calc_handle, restore_state.previous_hook);
+            ticalcs_calc_set_event_user_pointer(g_calc_handle, restore_state.previous_user);
+        }
     } else {
         FileContent* content = tifiles_content_create_regular(g_calc_model);
         if (!content) {

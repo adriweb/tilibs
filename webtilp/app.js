@@ -822,6 +822,8 @@ const I18N_EN = {
     "archive": "Archive",
     "flash_apps": "Flash apps",
     "backup_note": "Standard backups may fail on large memory contents. TIGroup is recommended for big backups.",
+    "backup_manual_note": "After clicking Create Backup, send a Backup from the calculator's LINK menu. WebTILP will wait for you to start it.",
+    "backup_manual_waiting": "Waiting for backup: send a Backup from the calculator's LINK menu.",
     "loading_dirlist": "Loading directory listing...",
     "create_backup": "Create Backup",
     "theme_prefix": "Theme",
@@ -889,7 +891,28 @@ const I18N_EN = {
     "prompt_rename_entry": "Rename {kind}:",
     "kind_folder": "folder",
     "kind_item": "item",
-    "close": "Close"
+    "close": "Close",
+    "backup_receive_first": "Click Create Backup in WebTILP first.",
+    "backup_receive_82": "On the calculator: 2nd → LINK → SEND → 4:Back Up… → 1:Transmit.",
+    "backup_receive_8586": "On the calculator: 2nd → LINK → F1:SEND → F1:BKUP → F1:XMIT.",
+    "backup_receive_finish": "Keep the cable connected. WebTILP downloads the backup when the transfer finishes.",
+    "backup_receive_auto": "Keep the calculator on its home screen. WebTILP starts the backup automatically.",
+    "backup_rom_menu_note": "Button names can vary with the ROM version. Follow the corresponding SEND / RECEIVE choices in your calculator’s LINK menu.",
+    "backup_restore_title": "Restore Backup",
+    "backup_receive_title": "Receiving Backup",
+    "backup_restore_file": "Backup file: {file}",
+    "backup_restore_warning": "Restoring a memory backup replaces the calculator’s current memory. Save a backup first if you need to keep it.",
+    "backup_restore_82_prepare": "Before clicking Restore Backup, put the calculator in receive mode: 2nd → LINK → RECEIVE → 1:Receive.",
+    "backup_restore_8586_prepare": "Before clicking Restore Backup, put the calculator in receive mode: 2nd → LINK → F2:RECV.",
+    "backup_restore_auto": "Keep the calculator on its home screen. WebTILP starts the restore automatically.",
+    "backup_restore_start": "Click Restore Backup in WebTILP.",
+    "backup_restore_82_continue": "When the calculator shows WARNING — Backup, press 1:Continue to begin restoring.",
+    "backup_restore_8586_continue": "When the calculator shows WARNING Memory Backup, press F1:CONT to begin restoring.",
+    "backup_wait_82": "Waiting for backup: on the calculator, LINK → SEND → 4:Back Up… → 1:Transmit.",
+    "backup_wait_8586": "Waiting for backup: on the calculator, LINK → F1:SEND → F1:BKUP → F1:XMIT.",
+    "backup_restore_wait": "On the calculator, choose Continue / CONT at the backup warning.",
+    "backup_transfer_cancel": "Cancel transfer",
+    "backup_transfer_cancelling": "Cancelling transfer…"
 };
 
 const LOCALE_CACHE = new Map([['en', I18N_EN]]);
@@ -1395,6 +1418,7 @@ function installSilverLinkTransport(device) {
     };
     const abort = () => {
         if (aborting) return aborting;
+        if (transport.module) transport.module.__manualBackupWaiting = false;
         capture();
         poisoned = true;
         aborting = (async () => {
@@ -1414,6 +1438,7 @@ function installSilverLinkTransport(device) {
         let timer;
         const expired = {};
         try {
+            if (timeoutMs === null) return await transfer;
             const result = await Promise.race([transfer, new Promise(resolve => {
                 timer = setTimeout(() => resolve(expired), timeoutMs);
             })]);
@@ -1430,7 +1455,11 @@ function installSilverLinkTransport(device) {
         device[name] = async (...args) => {
             if (poisoned) throw new DOMException('SilverLink needs buffer recovery.', 'NetworkError');
             try {
-                const result = await run(name, args);
+                const waitingForBackup = name === 'transferIn' && transport.module?.__manualBackupWaiting;
+                const result = await run(name, args, waitingForBackup ? null : 1100);
+                if (name === 'transferIn' && result.data?.byteLength && transport.module) {
+                    transport.module.__manualBackupWaiting = false;
+                }
                 if (result.status !== 'ok') await abort();
                 return result;
             } catch (error) {
@@ -1519,7 +1548,7 @@ function installSilverLinkTransport(device) {
 async function recoverSilverLinkOperation(module, name, returnType, value, handle) {
     const device = module.__silverLinkDevice || state.authorizedDevice;
     const transport = silverLinkTransports.get(device);
-    const protocolCall = /^(calc_(recv_|send_|dump_|del_|new_|rename_|change_|screenshot|dirlist_json|get_clock_json|sync_clock)|is_ready$)/.test(name);
+    const protocolCall = /^(calc_(recv_|send_|dump_|del_|new_|rename_|change_|screenshot|dirlist_json|get_clock_json|sync_clock)|send_file_(entry_)?custom$|finish_var_send$|is_ready$)/.test(name);
     const failed = (returnType === 'number' && protocolCall && value !== 0)
         || (name === 'calc_get_info_string' && !value);
     if (!transport || !failed) return value;
@@ -3445,6 +3474,16 @@ const els = {
     settingsModal: document.getElementById('settingsModal'),
     newFolderModal: document.getElementById('newFolderModal'),
     backupModal: document.getElementById('backupModal'),
+    backupGuideModal: document.getElementById('backupGuideModal'),
+    backupGuideTitle: document.getElementById('backupGuideTitle'),
+    backupGuideFile: document.getElementById('backupGuideFile'),
+    backupGuideWarning: document.getElementById('backupGuideWarning'),
+    backupGuideSteps: document.getElementById('backupGuideSteps'),
+    backupGuideVersion: document.getElementById('backupGuideVersion'),
+    backupGuideStatus: document.getElementById('backupGuideStatus'),
+    btnStartBackupRestore: document.getElementById('btnStartBackupRestore'),
+    btnCancelBackupGuide: document.getElementById('btnCancelBackupGuide'),
+    btnCloseBackupGuide: document.getElementById('btnCloseBackupGuide'),
     splashScreen: document.getElementById('splashScreen'),
     mainContent: document.getElementById('mainContent'),
     btnSplashConnect: document.getElementById('btnSplashConnect'),
@@ -8833,6 +8872,91 @@ function openTransferModal(plan, options) {
     });
 }
 
+function getNativeBackupSteps(model, direction) {
+    if (![2, 3, 6, 7].includes(model)) return [];
+    if (direction === 'receive') {
+        return [model === 3 ? 'backup_receive_auto' : model === 2 ? 'backup_receive_82' : 'backup_receive_8586',
+            'backup_receive_finish'];
+    }
+    return model === 3 ? ['backup_restore_auto', 'backup_restore_start']
+        : [model === 2 ? 'backup_restore_82_prepare' : 'backup_restore_8586_prepare',
+            'backup_restore_start', model === 2 ? 'backup_restore_82_continue' : 'backup_restore_8586_continue'];
+}
+
+function getNativeBackupWaitingLabel(model) {
+    return t(model === 2 ? 'backup_wait_82' : 'backup_wait_8586');
+}
+
+async function runGuidedBackup(direction, filename, operation) {
+    const model = getActiveCalcModelId();
+    if (!els.backupGuideModal || !getNativeBackupSteps(model, direction).length) return operation();
+    const restore = direction === 'restore';
+    const epoch = state.operationEpoch;
+    const previousFocus = document.activeElement;
+    setTextContent(els.backupGuideTitle, t(restore ? 'backup_restore_title' : 'backup_receive_title'));
+    setTextContent(els.backupGuideFile, filename ? tFormat('backup_restore_file', { file: filename }) : '');
+    els.backupGuideFile.classList.toggle('hidden', !filename);
+    els.backupGuideWarning.classList.toggle('hidden', !restore);
+    setTextContent(els.backupGuideWarning, t('backup_restore_warning'));
+    els.backupGuideSteps.replaceChildren(...getNativeBackupSteps(model, direction).map(key => {
+        const li = document.createElement('li');
+        li.textContent = t(key);
+        return li;
+    }));
+    els.backupGuideVersion.classList.toggle('hidden', ![2, 6].includes(model));
+    setTextContent(els.backupGuideVersion, t('backup_rom_menu_note'));
+    setTextContent(els.btnStartBackupRestore, t('backup_restore_title'));
+    els.btnStartBackupRestore.classList.toggle('hidden', !restore);
+    setTextContent(els.btnCancelBackupGuide, t('cancel'));
+    els.btnCloseBackupGuide.setAttribute('aria-label', t('cancel'));
+    setTextContent(els.backupGuideStatus, '');
+    els.backupGuideModal.classList.remove('hidden');
+    els.backupGuideModal.setAttribute('aria-hidden', 'false');
+    let started = false;
+    let cancelled = false;
+    let decide;
+    const onStart = () => decide?.(true);
+    const onCancel = () => {
+        cancelled = true;
+        if (!started) { decide?.(false); return; }
+        setTextContent(els.backupGuideStatus, t('backup_transfer_cancelling'));
+        // Use the same cancellation and buffer recovery as the emergency-reset button.
+        nukeConnection(false).catch(error => logError(error, 'Cancel backup failed'));
+    };
+    els.btnStartBackupRestore.addEventListener('click', onStart);
+    els.btnCancelBackupGuide.addEventListener('click', onCancel);
+    els.btnCloseBackupGuide.addEventListener('click', onCancel);
+    try {
+        if (restore) {
+            els.btnStartBackupRestore.focus();
+            const confirmed = await new Promise(resolve => { decide = resolve; });
+            if (!confirmed || state.operationEpoch !== epoch) return null;
+        }
+        started = true;
+        decide = null;
+        els.btnStartBackupRestore.classList.add('hidden');
+        setTextContent(els.btnCancelBackupGuide, t('backup_transfer_cancel'));
+        els.btnCancelBackupGuide.focus();
+        const status = restore ? (model === 3 ? 'backup_restore_auto' : 'backup_restore_wait')
+            : (model === 3 ? 'backup_receive_auto' : model === 2 ? 'backup_wait_82' : 'backup_wait_8586');
+        setTextContent(els.backupGuideStatus, t(status));
+        const result = await operation();
+        if (cancelled) {
+            const error = new Error('Backup transfer cancelled.');
+            error.silent = true;
+            throw error;
+        }
+        return result;
+    } finally {
+        els.btnStartBackupRestore.removeEventListener('click', onStart);
+        els.btnCancelBackupGuide.removeEventListener('click', onCancel);
+        els.btnCloseBackupGuide.removeEventListener('click', onCancel);
+        els.backupGuideModal.classList.add('hidden');
+        els.backupGuideModal.setAttribute('aria-hidden', 'true');
+        previousFocus?.focus();
+    }
+}
+
 function setBackupModalLoading(isLoading, message) {
     if (els.backupModalOverlay) {
         els.backupModalOverlay.classList.toggle('hidden', !isLoading);
@@ -8894,7 +9018,13 @@ function openBackupModal(options) {
         if (els.tigroupOptions) {
             els.tigroupOptions.classList.toggle('hidden', !isTigroup);
         }
+        const model = getActiveCalcModelId();
+        const keys = !isTigroup ? getNativeBackupSteps(model, 'receive') : [];
+        const lines = keys.length ? [t('backup_receive_first'), ...keys.map(key => t(key))] : [t('backup_note')];
+        if (!isTigroup && [2, 6].includes(model)) lines.push(t('backup_rom_menu_note'));
+        setTextContent(document.getElementById('backupNote'), lines.join('\n\n'));
     };
+    updateModeVisibility();
 
     els.backupModal.classList.remove('hidden');
     setBackupModalLoading(false);
@@ -9106,31 +9236,37 @@ async function performTransfers(plan, module, options) {
 
             let result = 0;
             try {
+                const manualRestore = item.fileClass === 'backup' && [2, 6, 7].includes(model);
                 const deferEot = needsEot && isVar;
                 if (!deferEot) await finishVarSend();
                 // A failed send may leave the protocol out of sync. Only
                 // finalize after a successful data exchange, never after abort.
                 pendingEot = false;
                 clearNativeWarnings();
-                if (item.sendByEntry && Number.isInteger(item.entryIndex)) {
-                    result = await ccallAsync(
-                        module,
-                        'send_file_entry_custom',
-                        'number',
-                        ['number', 'string', 'number', 'number', 'string', 'number', 'number'],
-                        [handle, item.path, item.entryIndex, item.containerKind || 0, folderOverride, locationCode, Number(deferEot)],
-                        { timeoutMs: 60000, useProgress: true, progressLabel: `Sending ${displayName}` }
-                    );
-                } else {
-                    result = await ccallAsync(
-                        module,
-                        'send_file_custom',
-                        'number',
-                        ['number', 'string', 'string', 'number', 'number'],
-                        [handle, item.path, folderOverride, locationCode, Number(deferEot)],
-                        { timeoutMs: 60000, useProgress: true, progressLabel: `Sending ${displayName}` }
-                    );
-                }
+                const send = () => {
+                    if (item.sendByEntry && Number.isInteger(item.entryIndex)) {
+                        return ccallAsync(
+                            module,
+                            'send_file_entry_custom',
+                            'number',
+                            ['number', 'string', 'number', 'number', 'string', 'number', 'number'],
+                            [handle, item.path, item.entryIndex, item.containerKind || 0, folderOverride, locationCode, Number(deferEot)],
+                            { timeoutMs: manualRestore ? null : 60000, useProgress: true, progressLabel: `Sending ${displayName}` }
+                        );
+                    } else {
+                        return ccallAsync(
+                            module,
+                            'send_file_custom',
+                            'number',
+                            ['number', 'string', 'string', 'number', 'number'],
+                            [handle, item.path, folderOverride, locationCode, Number(deferEot)],
+                            { timeoutMs: manualRestore ? null : 60000, useProgress: true, progressLabel: `Sending ${displayName}` }
+                        );
+                    }
+                };
+                result = item.fileClass === 'backup' && [2, 3, 6, 7].includes(model)
+                    ? await runGuidedBackup('restore', displayName, send) : await send();
+                if (result === null) break;
                 pendingEot = deferEot && result === 0;
             } finally {
                 if (timeoutAdjusted) {
@@ -9530,9 +9666,11 @@ async function receiveBackup() {
         }
         const filename = `backup.${extension}`;
         const target = `/downloads/${filename}`;
+        const manualBackup = !isTigroup && [2, 6, 7].includes(getActiveCalcModelId());
+        if (manualBackup) log(getNativeBackupWaitingLabel(getActiveCalcModelId()));
         const result = isTigroup
             ? await ccallAsync(module, 'calc_recv_tigroup', 'number', ['number', 'string', 'number'], [handle, target, backupChoice.mode], { timeoutMs: PROGRESS_IDLE_TIMEOUT_MS, useProgress: true, progressLabel: 'Receiving backup (tigroup)' })
-            : await ccallAsync(module, 'calc_recv_backup', 'number', ['number', 'string'], [handle, target], { timeoutMs: PROGRESS_IDLE_TIMEOUT_MS, useProgress: true, progressLabel: 'Receiving backup' });
+            : await runGuidedBackup('receive', '', () => ccallAsync(module, 'calc_recv_backup', 'number', ['number', 'string'], [handle, target], { timeoutMs: manualBackup ? null : PROGRESS_IDLE_TIMEOUT_MS, useProgress: true, progressLabel: manualBackup ? getNativeBackupWaitingLabel(getActiveCalcModelId()) : 'Receiving backup' }));
         if (result !== 0) {
             log(`Backup failed (${formatErrorResult(module, result)}).`);
             return;
