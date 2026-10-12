@@ -1252,7 +1252,12 @@ int calc_screenshot(CableHandle* cable_handle) {
     }
 
     printf("=== Testing Calculator Screenshot ===\n");
-    const int ready_result = ensure_calc_ready(cable_handle, 0);
+    // Like TiLP's screen_capture(), only Nspire screenshots require a
+    // readiness check; other models may capture screens while reporting busy.
+    int ready_result = ensure_calc_handle_attached(cable_handle);
+    if (ready_result == 0 && ticonv_model_is_tinspire(g_calc_model)) {
+        ready_result = ensure_calc_ready(cable_handle, 0);
+    }
     if (ready_result != 0) {
         return ready_result;
     }

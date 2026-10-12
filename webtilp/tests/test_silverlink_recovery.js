@@ -24,6 +24,7 @@ class USBDevice {
     productId = 0xe001;
     opened = true;
     calls = [];
+    writes = [];
     bytes = [];
     waiting = new Set();
     holdWrites = false;
@@ -72,6 +73,7 @@ class USBDevice {
     }
     transferOut(endpoint, bytes) {
         this.calls.push('write');
+        this.writes.push([...bytes]);
         if (this.holdWrites) return new Promise((_, reject) => this.waiting.add(reject));
         return Promise.resolve({ status: 'ok', bytesWritten: bytes.byteLength });
     }
@@ -204,7 +206,7 @@ async function main() {
     console.log('SilverLink deadlines, native/USB buffer recovery, FIFO and bomb cancellation tests passed');
 }
 
-async function testWasm(path, failReset) {
+async function wasmHarness(path, model, failReset) {
     const h = harness(new USBDevice(), true);
     h.device.failReset = failReset;
     const descriptor = [18, 1, 0x10, 1, 0, 0, 0, 8, 0x51, 4, 1, 0xe0, 0, 1, 1, 2, 3, 1];
@@ -227,15 +229,64 @@ async function testWasm(path, failReset) {
     const module = h.state.module = await require(require('node:path').resolve(path))();
     await module.ccall('init', 'number', [], [], { async: true });
     module._set_cable_model(4); module._set_force_cable(1);
-    module._set_calc_model(7); module._set_force_calc(1);
+    module._set_calc_model(model); module._set_force_calc(1);
     module.__silverLinkDevice = h.device;
     h.transport.module = module;
     h.state.handle = await module.ccall('create_handle', 'number', [], [], { async: true });
     assert.ok(h.state.handle);
     assert.equal(await module.ccall('open_cable', 'number', ['number'], [h.state.handle], { async: true }), 0);
-    const writes = [];
-    const rawWrite = h.device.transferOut;
-    h.device.transferOut = (...args) => { writes.push([...args[1]]); return rawWrite(...args); };
+    return { ...h, module, writes: h.device.writes };
+}
+
+async function test83PlusWasm(path) {
+    const h = await wasmHarness(path, 4, true); // TI-83+, USB reset rejected.
+    const { module, writes } = h;
+    // Start with a ready calculator, then simulate LinkView's silence.
+    h.device.bytes.push(0x73, 0x56, 0, 0);
+    assert.equal(await h.context.ccallAsync(module, 'is_ready', 'number', ['number'], [h.state.handle]), 0);
+    assert.deepEqual(writes.splice(0), [[0x23, 0x68, 0, 0]], 'explicit Is Ready sends RDC');
+    for (const [name, returnType, expectedPacket] of [
+        ['calc_get_info_string', 'string', [0x23, 0x2d, 0, 0]],
+        ['calc_screenshot', 'number', [0x23, 0x6d, 0, 0]]
+    ]) {
+        const started = Date.now();
+        const result = await h.context.ccallAsync(module, name, returnType, ['number'], [h.state.handle]);
+        if (returnType === 'string') assert.equal(result, '');
+        else assert.notEqual(result, 0);
+        assert.deepEqual(writes.splice(0), [expectedPacket], `${name} sends its request; screenshot skips readiness after failed info`);
+        assert.ok(Date.now() - started < 2500, `${name} stops at the SilverLink deadline`);
+        assert.equal(h.transport.needsRecovery, false);
+        assert.equal(h.context.getModuleCallState(module).dead, false);
+        assert.equal(h.device.waiting.size, 0);
+    }
+    for (const [name, returnType, argTypes, args] of [
+        ['calc_get_info_string', 'string', [], []],
+        ['calc_send_key', 'number', ['number'], [9]],
+        ['calc_recv_backup', 'number', ['string'], ['/blocked.8xb']]
+    ]) {
+        const result = await h.context.ccallAsync(module, name, returnType,
+            ['number', ...argTypes], [h.state.handle, ...args]);
+        if (returnType === 'string') assert.equal(result, '');
+        else assert.notEqual(result, 0);
+        assert.deepEqual(writes.splice(0), [[0x23, 0x68, 0, 0]], `${name} requires readiness after recovery and stops when LinkView does not reply`);
+        assert.equal(h.transport.needsRecovery, false);
+        assert.equal(h.context.getModuleCallState(module).dead, false);
+        assert.equal(h.device.waiting.size, 0);
+    }
+    assert.equal(module.FS.analyzePath('/blocked.8xb').exists, false, 'failed readiness prevents the backup operation');
+    // An acknowledged readiness query lets the actual device-info request run.
+    h.device.bytes.push(0x73, 0x56, 0, 0);
+    assert.equal(await h.context.ccallAsync(module, 'calc_get_info_string', 'string', ['number'], [h.state.handle]), '');
+    assert.deepEqual(writes.splice(0), [[0x23, 0x68, 0, 0], [0x23, 0x2d, 0, 0]], 'device info retains the readiness handshake');
+    h.device.bytes.push(0x73, 0x56, 0, 0);
+    assert.equal(await h.context.ccallAsync(module, 'is_ready', 'number', ['number'], [h.state.handle]), 0);
+    assert.deepEqual(writes, [[0x23, 0x68, 0, 0]], 'explicit Is Ready still sends RDC after recovery');
+    console.log('Compiled WASM/libusb TI-83+ screenshot exception, info/transfer readiness gates and recovery passed');
+}
+
+async function testWasm(path, failReset) {
+    const h = await wasmHarness(path, 7, failReset);
+    const { module, writes } = h;
     const packet = (cmd, data = []) => {
         const bytes = [0x86, cmd, data.length & 255, data.length >> 8, ...data];
         if (data.length) { const sum = data.reduce((a, b) => a + b, 0); bytes.push(sum & 255, sum >> 8); }
@@ -278,6 +329,7 @@ async function testWasm(path, failReset) {
 (async () => {
     await main();
     if (process.argv[2]) {
+        await test83PlusWasm(process.argv[2]);
         for (const failReset of [false, true]) await testWasm(process.argv[2], failReset);
         process.exit(0);
     }
