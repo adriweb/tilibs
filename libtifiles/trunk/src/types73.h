@@ -38,12 +38,17 @@
 #define TI73_PIC    0x07
 #define TI73_GDB    0x08
 #define TI73_CPLX   0x0C
+#define TI73_CATLIST 0x0D
 #define TI73_WDW    0x0F	//deprecated
 #define TI73_WINDW	0x0F
 #define TI73_ZSTO   0x10
 #define TI73_TAB    0x11	//deprecated
 #define TI73_TABLE	0x11
 #define TI73_BKUP   0x13
+#define TI73_RED_SIMPLE_FRAC   0x14
+#define TI73_RED_MIXED_FRAC    0x15
+#define TI73_UNRED_SIMPLE_FRAC 0x16
+#define TI73_UNRED_MIXED_FRAC  0x17
 #define TI73_DIR    0x19
 #define TI73_AVAR	0x1A
 #define TI73_AMS    0x23

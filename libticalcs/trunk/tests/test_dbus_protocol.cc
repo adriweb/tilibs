@@ -69,6 +69,33 @@ static void check_64k_flash_packet()
 	dissect(CALC_TI89, data, ERR_INVALID_PACKET);
 }
 
+static void check_ti73_types()
+{
+	CHECK(TI73_CATLIST == 0x0d);
+	CHECK(strcmp(tifiles_vartype2string(CALC_TI73, TI73_CATLIST), "CATLIST") == 0);
+	CHECK(strcmp(tifiles_vartype2fext(CALC_TI73, TI73_CATLIST), "73l") == 0);
+	CHECK(strcmp(tifiles_vartype2type(CALC_TI73, TI73_CATLIST), "Categorical List") == 0);
+	const uint8_t types[] = {TI73_RED_SIMPLE_FRAC, TI73_RED_MIXED_FRAC,
+	                         TI73_UNRED_SIMPLE_FRAC, TI73_UNRED_MIXED_FRAC};
+	const char *names[] = {"RFRAC", "RMFRAC", "UFRAC", "UMFRAC"};
+	for (size_t i = 0; i < 4; i++)
+	{
+		CHECK(types[i] == 0x14 + i);
+		CHECK(strcmp(tifiles_vartype2fext(CALC_TI73, types[i]), "73n") == 0);
+		CHECK(strcmp(tifiles_vartype2string(CALC_TI73, types[i]), names[i]) == 0);
+		CHECK(tifiles_string2vartype(CALC_TI73, names[i]) == types[i]);
+	}
+	// Shared extensions keep their existing canonical import type.
+	CHECK(tifiles_fext2vartype(CALC_TI73, "73l") == TI73_LIST);
+	CHECK(tifiles_fext2vartype(CALC_TI73, "73n") == TI73_REAL);
+	const char list_name[9] = {0x5d, 0x01, 0, 0, 0, 0, 0, 0, 0};
+	char *real_list = ticonv_varname_detokenize(CALC_TI73, list_name, TI73_LIST);
+	char *category_list = ticonv_varname_detokenize(CALC_TI73, list_name, TI73_CATLIST);
+	CHECK(real_list && category_list && strcmp(real_list, category_list) == 0);
+	ticonv_varname_free(real_list);
+	ticonv_varname_free(category_list);
+}
+
 static void check_commands()
 {
 	struct Command { uint8_t value; uint8_t alias; const char *name; const char *description; };
@@ -114,7 +141,8 @@ int main()
 	check_commands();
 	check_short_packets();
 	check_64k_flash_packet();
+	check_ti73_types();
 	CHECK(ticalcs_library_exit() == 0);
-	puts("DBUS command and framing tests passed");
+	puts("DBUS command, framing and TI-73 type tests passed");
 	return 0;
 }
