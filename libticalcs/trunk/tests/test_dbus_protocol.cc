@@ -106,11 +106,34 @@ static void check_short_packets()
 	}
 	dissect(CALC_TI83P, {0x73, 0x56}, ERR_INVALID_PACKET);
 	dissect(CALC_TI83P, {0x73, 0x56, 0x00}, ERR_INVALID_PACKET);
+	// RDC is a parameter packet on the host side; the other data-less
+	// commands follow the receive path's four-byte framing.
+	const uint8_t host_commands[] = {DBUS_CMD_RDY, DBUS_CMD_SCR, DBUS_CMD_RID, DBUS_CMD_CNT};
+	for (uint8_t command : host_commands)
+	{
+		CHECK(dissect(CALC_TI89, {0x08, command, 0x01, 0x00}).find("[status=0001]") != std::string::npos);
+		dissect(CALC_TI89, {0x08, command, 0x01, 0x00, 0x00, 0x00, 0x00}, ERR_INVALID_PACKET);
+	}
+	CHECK(dissect(CALC_TI83P, {0x23, DBUS_CMD_RDY, 0x00, 0x00}).find("[status=") == std::string::npos);
 	dissect(CALC_TI80, {0x00, DBUS_CMD_SCR});
+	// Generic RDC requires four bytes even though it shares the TI-80 MID.
+	dissect(CALC_NONE, {0x00, DBUS_CMD_RDY}, ERR_INVALID_PACKET);
+	dissect(CALC_NONE, {0x00, DBUS_CMD_XDP}, ERR_INVALID_PACKET);
+	CHECK(dissect(CALC_NONE, {0x00, DBUS_CMD_RDY, 0x00, 0x00}).find("RDY (Request Device Characteristics)") != std::string::npos);
 	dissect(CALC_TI80, {0x80, DBUS_CMD_ACK});
 	dissect(CALC_TI80, {0x80, DBUS_CMD_ACK, 0x00, 0x00}, ERR_INVALID_PACKET);
 	dissect(CALC_TI83P, {0x73, DBUS_CMD_XDP, 0x01, 0x00, 0x51, 0x51, 0x00});
 	dissect(CALC_TI83P, {0x73, DBUS_CMD_XDP, 0x01, 0x00, 0x51}, ERR_INVALID_PACKET);
+	{
+		MockCalculator calc(CALC_TI80);
+		CHECK(dbus_send(calc.handle, DBUS_MID_PC_TI80, DBUS_CMD_SCR, 0, nullptr) == 0);
+		CHECK(outgoing == (std::vector<uint8_t>{DBUS_MID_PC_TI80, DBUS_CMD_SCR}));
+	}
+	{
+		MockCalculator calc(CALC_TI83P);
+		CHECK(dbus_send(calc.handle, DBUS_MID_PC_TIXX, DBUS_TI_CMD_RDC, 0, nullptr) == 0);
+		CHECK(outgoing == (std::vector<uint8_t>{DBUS_MID_PC_TIXX, DBUS_TI_CMD_RDC, 0, 0}));
+	}
 }
 
 static void check_64k_flash_packet()
@@ -183,7 +206,7 @@ static void check_public_probe(uint8_t hardware, CalcModel expected_model, bool 
 	CHECK(detected == expected_model);
 	CHECK(received == incoming.size());
 	CHECK(outgoing == (std::vector<uint8_t>{
-		DBUS_MID_PC_TIXX, DBUS_TI_CMD_RDC,
+		DBUS_MID_PC_TIXX, DBUS_TI_CMD_RDC, 0, 0,
 		DBUS_MID_PC_TI83p, DBUS_TI_CMD_RDI, 0, 0,
 		DBUS_MID_PC_TI83p, DBUS_TI_CMD_RDY, 0, 0,
 		DBUS_MID_PC_TI83p, DBUS_TI_CMD_ACK, 0, 0
@@ -199,7 +222,7 @@ static void check_public_probe_ti73()
 	CHECK(ticalcs_probe_usb_calc(&calc.cable, &detected) == 0);
 	CHECK(detected == CALC_TI73);
 	CHECK(received == incoming.size());
-	CHECK(outgoing == (std::vector<uint8_t>{DBUS_MID_PC_TIXX, DBUS_TI_CMD_RDC}));
+	CHECK(outgoing == (std::vector<uint8_t>{DBUS_MID_PC_TIXX, DBUS_TI_CMD_RDC, 0, 0}));
 }
 
 static void check_ti73_types()
