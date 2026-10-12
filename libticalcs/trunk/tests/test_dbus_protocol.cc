@@ -17,6 +17,67 @@
 		} \
 	} while (0)
 
+static std::vector<uint8_t> incoming, outgoing;
+static size_t received;
+
+static int cable_recv(CableHandle *, uint8_t *data, uint32_t length)
+{
+	CHECK(received <= incoming.size());
+	CHECK(length <= incoming.size() - received);
+	if (length) memcpy(data, incoming.data() + received, length);
+	received += length;
+	return 0;
+}
+
+static int cable_send(CableHandle *, uint8_t *data, uint32_t length)
+{
+	outgoing.insert(outgoing.end(), data, data + length);
+	return 0;
+}
+
+static void packet(uint8_t mid, uint8_t cmd, const std::vector<uint8_t> &data = {})
+{
+	incoming.push_back(mid);
+	incoming.push_back(cmd);
+	incoming.push_back(data.size() & 0xff);
+	incoming.push_back(data.size() >> 8);
+	if (!data.empty())
+	{
+		incoming.insert(incoming.end(), data.begin(), data.end());
+		const uint16_t sum = tifiles_checksum(data.data(), data.size());
+		incoming.push_back(sum & 0xff);
+		incoming.push_back(sum >> 8);
+	}
+}
+
+struct MockCalculator
+{
+	CableFncts functions = {};
+	CableHandle cable = {};
+	CalcHandle *handle;
+
+	MockCalculator(CalcModel model)
+	{
+		incoming.clear();
+		outgoing.clear();
+		received = 0;
+		functions.recv = cable_recv;
+		functions.send = cable_send;
+		cable.cable = &functions;
+		cable.open = 1;
+		handle = ticalcs_handle_new(model);
+		CHECK(handle);
+		handle->cable = &cable;
+		handle->open = handle->attached = 1;
+	}
+
+	~MockCalculator()
+	{
+		handle->attached = 0;
+		ticalcs_handle_del(handle);
+	}
+};
+
 static std::string dissect(CalcModel model, const std::vector<uint8_t> &data, int expected = 0)
 {
 	FILE *file = tmpfile();
@@ -67,6 +128,78 @@ static void check_64k_flash_packet()
 	dissect(CALC_TI83P, data, ERR_INVALID_PACKET);
 	data[1] = DBUS_CMD_VAR;
 	dissect(CALC_TI89, data, ERR_INVALID_PACKET);
+}
+
+static void check_device_information(CalcModel handle_model, uint8_t hardware,
+                                     CalcModel expected_model, size_t length = 8)
+{
+	MockCalculator calc(handle_model);
+	const uint8_t host = handle_model == CALC_TI73 ? DBUS_MID_TI73_PC : DBUS_MID_TI83p_PC;
+	const uint8_t target = handle_model == CALC_TI73 ? DBUS_MID_PC_TI73 : DBUS_MID_PC_TI83p;
+	std::vector<uint8_t> data = {1, (uint8_t)(handle_model == CALC_TI73 ? 0x91 : 19), 1, 2, 3, hardware, 7, 9};
+	data.resize(length, 0xa5);
+	packet(host, DBUS_CMD_ACK);
+	packet(host, DBUS_CMD_ACK);
+	packet(host, DBUS_CMD_XDP, data);
+	CalcInfos infos;
+	memset(&infos, 0xa5, sizeof(infos));
+	CHECK(ticalcs_calc_get_version(calc.handle, &infos) == (length < DBUS_RDI_MIN_SIZE ? ERR_INVALID_PACKET : 0));
+	CHECK(received == incoming.size());
+	const std::vector<uint8_t> expected = {
+		target, DBUS_TI_CMD_RDI, 0, 0,
+		target, DBUS_TI_CMD_RDY, 0, 0,
+		target, DBUS_TI_CMD_ACK, 0, 0
+	};
+	CHECK(outgoing == expected);
+	if (length < DBUS_RDI_MIN_SIZE)
+	{
+		CHECK(infos.mask == 0);
+		return;
+	}
+	const uint64_t fields = INFOS_OS_VERSION | INFOS_BOOT_VERSION | INFOS_BATTERY_ENOUGH
+	                      | INFOS_HW_VERSION | INFOS_LANG_ID | INFOS_SUB_LANG_ID;
+	CHECK((infos.mask & fields) == fields);
+	CHECK(infos.hw_version == hardware);
+	CHECK(infos.battery == 0);
+	CHECK(infos.language_id == 7);
+	CHECK(infos.sub_lang_id == 9);
+	CHECK(strcmp(infos.boot_version, "1.02") == 0);
+	CHECK(strcmp(infos.os_version, handle_model == CALC_TI73 ? "1.91" : "1.19") == 0);
+	CHECK((infos.mask & INFOS_CALC_MODEL) == (expected_model == CALC_NONE ? 0 : INFOS_CALC_MODEL));
+	CHECK(infos.model == expected_model);
+}
+
+static void check_public_probe(uint8_t hardware, CalcModel expected_model, bool usb_probe)
+{
+	MockCalculator calc(CALC_TI83P);
+	calc.cable.model = CABLE_SLV;
+	packet(DBUS_MID_TI83p_PC, DBUS_CMD_ACK); // RDC acknowledgement.
+	packet(DBUS_MID_TI83p_PC, DBUS_CMD_ACK); // RDI acknowledgement.
+	packet(DBUS_MID_TI83p_PC, DBUS_CMD_ACK); // RDY acknowledgement.
+	packet(DBUS_MID_TI83p_PC, DBUS_CMD_XDP, {1, 19, 1, 2, 0, hardware, 0, 0});
+	CalcModel detected = CALC_NONE;
+	CHECK((usb_probe ? ticalcs_probe_usb_calc(&calc.cable, &detected)
+	                 : ticalcs_probe_calc(&calc.cable, &detected)) == 0);
+	CHECK(detected == expected_model);
+	CHECK(received == incoming.size());
+	CHECK(outgoing == (std::vector<uint8_t>{
+		DBUS_MID_PC_TIXX, DBUS_TI_CMD_RDC,
+		DBUS_MID_PC_TI83p, DBUS_TI_CMD_RDI, 0, 0,
+		DBUS_MID_PC_TI83p, DBUS_TI_CMD_RDY, 0, 0,
+		DBUS_MID_PC_TI83p, DBUS_TI_CMD_ACK, 0, 0
+	}));
+}
+
+static void check_public_probe_ti73()
+{
+	MockCalculator calc(CALC_TI73);
+	calc.cable.model = CABLE_SLV;
+	packet(DBUS_MID_TI73_PC, DBUS_CMD_ACK);
+	CalcModel detected = CALC_NONE;
+	CHECK(ticalcs_probe_usb_calc(&calc.cable, &detected) == 0);
+	CHECK(detected == CALC_TI73);
+	CHECK(received == incoming.size());
+	CHECK(outgoing == (std::vector<uint8_t>{DBUS_MID_PC_TIXX, DBUS_TI_CMD_RDC}));
 }
 
 static void check_ti73_types()
@@ -141,8 +274,28 @@ int main()
 	check_commands();
 	check_short_packets();
 	check_64k_flash_packet();
+	check_device_information(CALC_TI73, 0, CALC_TI73);
+	check_device_information(CALC_TI73, 1, CALC_NONE);
+	check_device_information(CALC_TI83P, 0, CALC_TI83P);
+	check_device_information(CALC_TI83P, 1, CALC_TI83P);
+	check_device_information(CALC_TI84P, 2, CALC_TI84P);
+	check_device_information(CALC_TI84P, 3, CALC_TI84P);
+	check_device_information(CALC_TI84PC, 5, CALC_TI84PC);
+	check_device_information(CALC_TI84PC, 4, CALC_NONE);
+	check_device_information(CALC_TI84PC, 0xff, CALC_NONE);
+	for (size_t length = 8; length <= 11; length++) check_device_information(CALC_TI83P, 0, CALC_TI83P, length);
+	check_device_information(CALC_TI83P, 0, CALC_NONE, 7);
 	check_ti73_types();
+	check_public_probe_ti73();
+	for (bool usb_probe : {true, false})
+	{
+		check_public_probe(0, CALC_TI83P, usb_probe);
+		check_public_probe(2, CALC_TI84P, usb_probe);
+		check_public_probe(5, CALC_TI84PC, usb_probe);
+		check_public_probe(4, CALC_TI83P, usb_probe);
+		check_public_probe(0xff, CALC_TI83P, usb_probe);
+	}
 	CHECK(ticalcs_library_exit() == 0);
-	puts("DBUS command, framing and TI-73 type tests passed");
+	puts("DBUS command, framing, RDI and TI-73 type tests passed");
 	return 0;
 }
