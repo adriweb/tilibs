@@ -159,6 +159,7 @@ jobs:
           make -C webtilp test-python-bytecode-wasm
           node webtilp/tests/test_wasm_startup.cjs
           node webtilp/tests/test_evo_webusb_serial.js webtilp/webtilp.js
+          node webtilp/tests/test_silverlink_recovery.js webtilp/webtilp.js
           node --input-type=module - <<'JS'
           import assert from 'node:assert/strict';
           import createTIVarsLib from './webtilp/TIVarsLib.js';

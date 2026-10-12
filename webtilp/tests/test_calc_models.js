@@ -44,6 +44,7 @@ const context = {
     isSerialDevice: device => Boolean(device.serialPort),
     isGrayLinkSerialDevice: () => false,
     bindSerialPortToModule() {}, log() {}, updateDeviceModelDisplay() {},
+    installSilverLinkTransport: () => null,
     hasSilverlinkConnected: () => false,
     deviceMatches: (left, right) => left === right
 };
