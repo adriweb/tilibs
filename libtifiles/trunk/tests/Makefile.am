@@ -2,14 +2,16 @@
 
 AM_CPPFLAGS = -I$(top_srcdir)/src @GLIB_CFLAGS@ @TICONV_CFLAGS@
 
-EXTRA_DIST = test_tifiles_2.cc test_evo_files.cc torture_tifiles.c tifiles2.supp vcheck
+EXTRA_DIST = test_tifiles_2.cc test_evo_files.cc test_ti73_types.cc torture_tifiles.c tifiles2.supp vcheck
 
-noinst_PROGRAMS = test_tifiles_2 test_evo_files torture_tifiles
+noinst_PROGRAMS = test_tifiles_2 test_evo_files test_ti73_types torture_tifiles
 
 test_tifiles_2_SOURCES = test_tifiles_2.cc
 test_tifiles_2_LDADD = $(top_builddir)/src/libtifiles2.la @GLIB_LIBS@
 test_evo_files_SOURCES = test_evo_files.cc
 test_evo_files_LDADD = $(top_builddir)/src/libtifiles2.la @GLIB_LIBS@
+test_ti73_types_SOURCES = test_ti73_types.cc
+test_ti73_types_LDADD = $(top_builddir)/src/libtifiles2.la @GLIB_LIBS@ @TICONV_LIBS@
 torture_tifiles_SOURCES = torture_tifiles.c
 torture_tifiles_LDADD = $(top_builddir)/src/libtifiles2.la @GLIB_LIBS@
 
@@ -29,4 +31,4 @@ dist-hook:
 		$(distdir)/test/ti89 \
 		$(distdir)/test/ti92
 
-TESTS = torture_tifiles test_evo_files
+TESTS = torture_tifiles test_evo_files test_ti73_types
