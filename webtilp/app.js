@@ -1371,6 +1371,166 @@ function retireModule(module, reason) {
     }
 }
 
+// WebUSB has no transfer timeout. libusb's WebUSB cancellation is a no-op,
+// so a Promise.race alone would let a late transfer touch freed native state.
+// Closing the USBDevice cancels the browser I/O; wait for it to settle before
+// returning an error to libusb. Scope this to the SilverLink (0451:e001).
+const silverLinkTransports = new WeakMap();
+function installSilverLinkTransport(device) {
+    if (device?.vendorId !== 0x0451 || device.productId !== PID_SILVERLINK) return null;
+    if (silverLinkTransports.has(device)) return silverLinkTransports.get(device);
+    const raw = Object.fromEntries(['transferIn', 'transferOut'].map(name => [name, device[name].bind(device)]));
+    const pending = new Set();
+    let poisoned = false;
+    let aborting = null;
+    let recovering = null;
+    let configuration;
+    let interfaces = [];
+    const capture = () => {
+        if (!device.configuration) return;
+        configuration = device.configuration.configurationValue;
+        const claimed = device.configuration.interfaces.filter(iface => iface.claimed)
+            .map(iface => ({ number: iface.interfaceNumber, alternate: iface.alternate }));
+        if (claimed.length) interfaces = claimed; // Retain the pipes across native close.
+    };
+    const abort = () => {
+        if (aborting) return aborting;
+        capture();
+        poisoned = true;
+        aborting = (async () => {
+            let closeError;
+            try { await device.close(); } catch (error) { closeError = error; }
+            await Promise.allSettled([...pending]);
+            if (closeError) throw closeError;
+        })().finally(() => { aborting = null; });
+        return aborting;
+    };
+    const run = async (name, args, timeoutMs = 1100) => {
+        capture();
+        const transfer = Promise.resolve().then(() => raw[name](...args));
+        pending.add(transfer);
+        // Both handlers consume rejection and remove the pending browser I/O.
+        transfer.then(() => pending.delete(transfer), () => pending.delete(transfer));
+        let timer;
+        const expired = {};
+        try {
+            const result = await Promise.race([transfer, new Promise(resolve => {
+                timer = setTimeout(() => resolve(expired), timeoutMs);
+            })]);
+            if (result === expired) {
+                await abort();
+                throw new DOMException('SilverLink transfer timed out after 1.1 seconds.', 'TimeoutError');
+            }
+            return result;
+        } finally {
+            clearTimeout(timer);
+        }
+    };
+    for (const name of Object.keys(raw)) {
+        device[name] = async (...args) => {
+            if (poisoned) throw new DOMException('SilverLink needs buffer recovery.', 'NetworkError');
+            try {
+                const result = await run(name, args);
+                if (result.status !== 'ok') await abort();
+                return result;
+            } catch (error) {
+                await abort();
+                throw error;
+            }
+        };
+    }
+    const reopen = async () => {
+        await device.open();
+        if (device.configuration?.configurationValue !== configuration) await device.selectConfiguration(configuration);
+        for (const iface of interfaces) {
+            await device.claimInterface(iface.number);
+            if (iface.alternate.alternateSetting !== 0) {
+                await device.selectAlternateInterface(iface.number, iface.alternate.alternateSetting);
+            }
+        }
+    };
+    const recover = () => {
+        if (recovering) return recovering;
+        capture();
+        const savedInterfaces = interfaces;
+        recovering = (async () => {
+            await abort();
+            interfaces = savedInterfaces;
+            if (configuration === undefined || !interfaces.length) {
+                poisoned = false;
+                return; // No claimed pipes, so no protocol transfer could run.
+            }
+            await reopen();
+            // Some browser/driver combinations cannot reset a SilverLink.
+            // Recovery depends on closing pending I/O and draining the pipes;
+            // a USB bus reset is only a best-effort step, not the buffer flush.
+            try {
+                await device.reset();
+            } catch (error) {
+                console.warn('[WebTILP] SilverLink USB reset failed; reopening and draining the cable', error);
+            }
+            // Even a failed reset may release claims. Reopen must succeed before
+            // endpoint cleanup can run, and drain failures keep the cable poisoned.
+            await reopen();
+            for (const iface of interfaces) {
+                for (const ep of iface.alternate.endpoints.filter(ep => ep.type === 'bulk')) {
+                    await device.clearHalt(ep.direction, ep.endpointNumber);
+                    if (ep.direction !== 'in') continue;
+                    // Drain to a quiet pipe, with a finite byte/time budget.
+                    let drained = 0;
+                    const deadline = Date.now() + 1100;
+                    while (true) {
+                        if (drained >= 65536 || Date.now() >= deadline) {
+                            throw new Error('SilverLink buffer did not become quiet; reconnect the cable.');
+                        }
+                        let result;
+                        try {
+                            result = await run('transferIn', [ep.endpointNumber, ep.packetSize], 100);
+                        } catch (error) {
+                            if (error.name === 'TimeoutError') break;
+                            throw error;
+                        }
+                        if (result.status === 'stall') {
+                            await device.clearHalt('in', ep.endpointNumber);
+                            break;
+                        }
+                        if (result.status !== 'ok') throw new Error(`SilverLink drain failed (${result.status}).`);
+                        if (!result.data?.byteLength) break;
+                        drained += result.data.byteLength;
+                    }
+                    // A quiet-read timeout closed the device. Reclaim it before
+                    // visiting any remaining endpoint.
+                    if (!device.opened) await reopen();
+                }
+            }
+            await device.close();
+            poisoned = false;
+        })().finally(async () => {
+            try { if (device.opened) await device.close(); }
+            finally { recovering = null; }
+        });
+        return recovering;
+    };
+    const transport = { abort, recover, module: null, get needsRecovery() { return poisoned; } };
+    silverLinkTransports.set(device, transport);
+    return transport;
+}
+
+async function recoverSilverLinkOperation(module, name, returnType, value, handle) {
+    const device = module.__silverLinkDevice || state.authorizedDevice;
+    const transport = silverLinkTransports.get(device);
+    const protocolCall = /^(calc_(recv_|send_|dump_|del_|new_|rename_|change_|screenshot|dirlist_json|get_clock_json|sync_clock)|is_ready$)/.test(name);
+    const failed = (returnType === 'number' && protocolCall && value !== 0)
+        || (name === 'calc_get_info_string' && !value);
+    if (!transport || !failed) return value;
+    // Still own the Asyncify slot here. Native close discards libticables' rBuf;
+    // USB recovery discards the hardware pipe. Preserve the original error.
+    await module.ccall('close_cable', 'number', ['number'], [handle], { async: true });
+    if (state.module === module) state.cableOpen = false;
+    await transport.recover();
+    return value;
+}
+
 /**
  * Called when a JS-side timeout fired while the underlying WASM call is still
  * suspended inside Asyncify. The call cannot be cancelled from JS; if it does
@@ -1538,7 +1698,7 @@ async function ccallAsync(module, name, returnType, argTypes, args, options = {}
         }
         entered = true;
         let settled = false;
-        const underlying = Promise.resolve(result);
+        const underlying = Promise.resolve(result).then(value => recoverSilverLinkOperation(module, name, returnType, value, args[0]));
         underlying.then(
             () => { settled = true; release(); },
             () => { settled = true; release(); }
@@ -3700,6 +3860,12 @@ function applySettingsToModule() {
 async function applyWebUsbDeviceCableHint(module, device) {
     if (!device || !module) {
         return;
+    }
+    const silverLink = installSilverLinkTransport(device);
+    if (silverLink) {
+        if (silverLink.needsRecovery) await silverLink.recover();
+        silverLink.module = module;
+        module.__silverLinkDevice = device;
     }
     if (isSerialDevice(device)) {
         bindSerialPortToModule(module, device);
@@ -10964,10 +11130,25 @@ function clearLog() {
 }
 
 async function nukeConnection(tryReconnect = true) {
+    if (state.nukeInProgress) return;
+    state.nukeInProgress = true;
     if (els.btnNuke) {
         setButtonLoading(els.btnNuke, true);
     }
     clearActiveOperations('Operation cancelled by emergency reset.');
+    const silverLink = silverLinkTransports.get(state.authorizedDevice);
+    const module = state.module || silverLink?.module;
+    let nativeIdle = true;
+    if (silverLink) {
+        try {
+            // Closing cancels browser I/O before touching the native handles.
+            await withTimeout(silverLink.abort(), 'Cancelling SilverLink I/O', 3000);
+            if (module) await withTimeout(getModuleCallState(module).tail, 'Waiting for SilverLink I/O', 3000);
+        } catch (error) {
+            nativeIdle = false;
+            console.warn('[WebTILP] SilverLink I/O did not stop; retiring the module without native teardown', error);
+        }
+    }
     const wasHPPrime = isHPPrimeActive();
     const wasNumWorks = isNumWorksActive();
     if (wasHPPrime && state.module) {
@@ -10984,16 +11165,21 @@ async function nukeConnection(tryReconnect = true) {
             console.warn('[WebTILP] Failed to close the NumWorks WebUSB session cleanly', err);
         }
     }
-    if (!wasHPPrime && !wasNumWorks) {
+    if (!silverLink && !wasHPPrime && !wasNumWorks) {
         try { await state.authorizedDevice?.reset(); } catch (e) {}
     }
     if (isNspireActive()) {
         try { await state.authorizedDevice?.forget(); } catch (e) {}
     }
     try {
-        if (state.module && !wasHPPrime && !wasNumWorks) {
+        if (state.module && nativeIdle && !wasHPPrime && !wasNumWorks) {
             try {
-                state.module._notify_usb_disconnect();
+                retireModule(state.module, 'emergency reset');
+                if (silverLink) {
+                    await state.module.ccall('notify_usb_disconnect', null, [], [], { async: true });
+                } else {
+                    state.module._notify_usb_disconnect();
+                }
             } catch (err) {
                 console.warn('[WebTILP] Failed to reset USB state', err);
             }
@@ -11004,6 +11190,8 @@ async function nukeConnection(tryReconnect = true) {
         state.activeFamily = DEVICE_FAMILY_TI;
         state.numWorksBackend = null;
         state.module = null;
+        state.progressHooked = false;
+        state.progressTickPtr = null;
         state.cableOpen = false;
         state.authorizedDevice = null;
         state.pendingEvoUsbDevice = null;
@@ -11017,14 +11205,18 @@ async function nukeConnection(tryReconnect = true) {
         setStatus('status_disconnected', false);
         log('Device disconnected.');
     }
-    if (els.btnNuke) {
-        setButtonLoading(els.btnNuke, false);
-    }
-
     try {
+        if (silverLink) {
+            if (!nativeIdle) throw new Error('SilverLink I/O is still pending; reconnect the cable before retrying.');
+            await silverLink.recover();
+        }
         tryReconnect && await connect();
     } catch (err) {
         console.warn('Failed to reconnect automatically, just do it manually.', err);
+        if (silverLink) logError(err, 'SilverLink recovery failed');
+    } finally {
+        state.nukeInProgress = false;
+        if (els.btnNuke) setButtonLoading(els.btnNuke, false);
     }
 }
 
