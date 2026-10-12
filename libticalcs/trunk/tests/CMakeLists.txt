@@ -10,6 +10,7 @@ add_executable(test_evo_errors test_evo_errors.cc)
 add_executable(test_evo_protocol test_evo_protocol.cc)
 add_executable(test_nsp_protocol test_nsp_protocol.cc)
 add_executable(test_ti92_backup test_ti92_backup.cc)
+add_executable(test_dbus_protocol test_dbus_protocol.cc)
 if(NOT WIN32) # not compatible for now
     add_executable(test_ticalcs_2 test_ticalcs_2.cc)
 endif()
@@ -27,6 +28,7 @@ if(WIN32)
     target_link_libraries(test_evo_protocol PRIVATE ${LIBUSB0})
     target_link_libraries(test_nsp_protocol PRIVATE ${LIBUSB0})
     target_link_libraries(test_ti92_backup PRIVATE ${LIBUSB0})
+    target_link_libraries(test_dbus_protocol PRIVATE ${LIBUSB0})
 else()
     pkg_check_modules(libusb REQUIRED IMPORTED_TARGET libusb-1.0>=1.0.16)
     target_link_libraries(torture_ticalcs PRIVATE PkgConfig::libusb)
@@ -36,6 +38,7 @@ else()
     target_link_libraries(test_evo_protocol PRIVATE PkgConfig::libusb)
     target_link_libraries(test_nsp_protocol PRIVATE PkgConfig::libusb)
     target_link_libraries(test_ti92_backup PRIVATE PkgConfig::libusb)
+    target_link_libraries(test_dbus_protocol PRIVATE PkgConfig::libusb)
     target_link_libraries(test_ticalcs_2 PRIVATE PkgConfig::libusb)
     if(NOT EMSCRIPTEN)
         target_link_libraries(nnse_transfer_smoke PRIVATE PkgConfig::libusb)
@@ -52,6 +55,7 @@ if(NOT EMSCRIPTEN)
     target_link_libraries(test_evo_protocol PRIVATE ZLIB::ZLIB PkgConfig::glib PkgConfig::LibArchive)
     target_link_libraries(test_nsp_protocol PRIVATE ZLIB::ZLIB PkgConfig::glib PkgConfig::LibArchive)
     target_link_libraries(test_ti92_backup PRIVATE ZLIB::ZLIB PkgConfig::glib PkgConfig::LibArchive)
+    target_link_libraries(test_dbus_protocol PRIVATE ZLIB::ZLIB PkgConfig::glib PkgConfig::LibArchive)
     if(NOT WIN32) # not compatible for now
         target_link_libraries(test_ticalcs_2 PRIVATE ZLIB::ZLIB PkgConfig::glib PkgConfig::LibArchive)
     endif()
@@ -67,6 +71,7 @@ else()
     target_link_libraries(test_evo_protocol PRIVATE PkgConfig::glib)
     target_link_libraries(test_nsp_protocol PRIVATE PkgConfig::glib)
     target_link_libraries(test_ti92_backup PRIVATE PkgConfig::glib)
+    target_link_libraries(test_dbus_protocol PRIVATE PkgConfig::glib)
     target_link_libraries(test_ticalcs_2 PRIVATE PkgConfig::glib)
 endif()
 
@@ -79,7 +84,7 @@ if(USE_ICONV)
     add_compile_definitions(USE_ICONV)
 endif()
 
-foreach(tar torture_ticalcs test_evo_errors test_evo_protocol test_nsp_protocol test_ti92_backup test_dusb_var_header test_receive_bounds test_ticalcs_2 nnse_transfer_smoke)
+foreach(tar torture_ticalcs test_evo_errors test_evo_protocol test_nsp_protocol test_ti92_backup test_dbus_protocol test_dusb_var_header test_receive_bounds test_ticalcs_2 nnse_transfer_smoke)
     if(tar STREQUAL test_ticalcs_2 AND WIN32)
         continue() # not compatible for now
     endif ()
@@ -112,9 +117,10 @@ add_custom_target(ticalcs2_check
     COMMAND "$<TARGET_FILE:test_evo_protocol>"
     COMMAND "$<TARGET_FILE:test_nsp_protocol>"
     COMMAND "$<TARGET_FILE:test_ti92_backup>"
+    COMMAND "$<TARGET_FILE:test_dbus_protocol>"
     COMMAND "$<TARGET_FILE:test_dusb_var_header>"
     COMMAND "$<TARGET_FILE:test_receive_bounds>"
-    DEPENDS torture_ticalcs test_evo_errors test_evo_protocol test_nsp_protocol test_ti92_backup test_dusb_var_header test_receive_bounds
+    DEPENDS torture_ticalcs test_evo_errors test_evo_protocol test_nsp_protocol test_ti92_backup test_dbus_protocol test_dusb_var_header test_receive_bounds
     COMMENT "Run the ticalcs2 torture tests"
     EXCLUDE_FROM_ALL
 )

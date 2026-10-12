@@ -113,35 +113,62 @@ extern "C" {
  # means the device id is ignored with this command.
  $ means it's a silent command
 */
-// Official names found in TI's DBUS implementation in the activitygrapher TINCS Navigator plugin.
-#define DBUS_CMD_VAR  0x06      // [*  ] Variable Header - includes a std variable header (official name: RTS)
-#define DBUS_CMD_CTS  0x09      // [   ] Continue - used to signal OK to send a variable (official name: RDY)
-#define DBUS_CMD_XDP  0x15      // [*  ] Data packet - Pure data (official name: XDP)
-#define DBUS_CMD_ELD  0x29      // [  $] Enable Lockdown (official name: EBL)
-#define DBUS_CMD_DLD  0x2A      // [  $] Disable Lockdown (official name: DBL)
-#define DBUS_CMD_EKE  0x2B      // [  $] Enable Key Echo - start sending keypresses as scan codes in remote control packets (official name: EKE)
+// TI names and descriptions verified against ActivityGrapher DBUSCommand.
+// Keep legacy libticalcs spellings: RTS, RDY and REQ mean different commands in TI's vocabulary.
+#define DBUS_CMD_VAR  0x06      // [*  ] Request To Send (official name: RTS)
+#define DBUS_CMD_CTS  0x09      // [   ] Ready for Data (official name: RDY)
+#define DBUS_CMD_XDP  0x15      // [*  ] Transmit Data Packet (official name: XDP)
+#define DBUS_CMD_ELD  0x29      // [  $] Enable Background Processing Link (official name: EBL)
+#define DBUS_CMD_DLD  0x2A      // [  $] Disable Background Processing Link (official name: DBL)
+#define DBUS_CMD_EKE  0x2B      // [  $] Enable Key Echo (official name: EKE)
 #define DBUS_CMD_DKE  0x2C      // [  $] Disable Key Echo (official name: DKE)
-#define DBUS_CMD_VER  0x2D      // [  $] Request version (official name: RDI)
-#define DBUS_CMD_SKP  0x36      // [*  ] Skip/Exit - used when duplicate name is found (official name: EOR)
-#define DBUS_CMD_SID  0x47      // [*#$] Send calc ID (official name: SIOA)
+#define DBUS_CMD_VER  0x2D      // [  $] Request Device Information (official name: RDI)
+#define DBUS_CMD_SKP  0x36      // [*  ] Error on Request (official name: EOR)
+#define DBUS_CMD_SID  0x47      // [*#$] Set IO Address (official name: SIOA)
 #define DBUS_CMD_ACK  0x56      // [   ] Acknowledge (official name: ACK)
-#define DBUS_CMD_ERR  0x5A      // [   ] Checksum error: send last packet again (official name: CHK)
-#define DBUS_CMD_RDY  0x68      // [ #$] Test if calc is ready (official name: RDC)
-#define DBUS_CMD_SCR  0x6D      // [  $] Request screenshot (official name: REQ)
+#define DBUS_CMD_ERR  0x5A      // [   ] Checksum Error (official name: CHK)
+#define DBUS_CMD_RDY  0x68      // [ #$] Request Device Characteristics (official name: RDC)
+#define DBUS_CMD_SCR  0x6D      // [  $] Request Screen Image (official name: REQ)
 #define DBUS_CMD_GID  0x6E      // [  $] Get Calculator ID - on 83+ reads 9 bytes right from cert
 #define DBUS_CMD_DMP  0x6F      // [* $] Request dump of memory page
 #define DBUS_CMD_TG2  0x70      // [* $] Testguard2 packet - its long and complicated.
-#define DBUS_CMD_RID  0x74      // [ #$] Request calc ID (official name: RIOA)
-#define DBUS_CMD_CNT  0x78      // [  $] Continue (official name: RTC)
-#define DBUS_CMD_KEY  0x87      // [  $] Send key (official name: SKY)
-#define DBUS_CMD_DEL  0x88      // [* $] Delete variable/app (official name: DVL)
-#define DBUS_CMD_RUN  0x89      // [* $] Run variable/app (official name: EPL)
-#define DBUS_CMD_EOT  0x92      // [   ] End Of Transmission: no more variables to send (official name: DONE)
-#define DBUS_CMD_REQ  0xA2      // [* $] Request variable - includes a std var header (official name: GET)
+#define DBUS_CMD_RID  0x74      // [ #$] Request I/O Address (official name: RIOA)
+#define DBUS_CMD_CNT  0x78      // [  $] Request To Continue (official name: RTC)
+#define DBUS_CMD_KEY  0x87      // [  $] Send Keypress (official name: SKY)
+#define DBUS_CMD_DEL  0x88      // [* $] Delete Variable Link (official name: DVL)
+#define DBUS_CMD_RUN  0x89      // [* $] Execute Program Link (official name: EPL)
+#define DBUS_CMD_EOT  0x92      // [   ] Done (official name: DONE)
+#define DBUS_CMD_REQ  0xA2      // [* $] Get Data Object (official name: GET)
 #define DBUS_CMD_ERR2 0xB4      // [   ] Checksum error: send last packet again
-#define DBUS_CMD_IND  0xB7      // [* $] Request variable index (official name: GTE)
-#define DBUS_CMD_RTS  0xC9      // [* $] Request to send - includes a padded var header (official name: SEND)
-#define DBUS_CMD_RSE  0xCA      // [* $] Request to send and execute - same as above but runs it after send (official name: SETP)
+#define DBUS_CMD_IND  0xB7      // [* $] Get Data Element (official name: GTE)
+#define DBUS_CMD_RTS  0xC9      // [* $] Send Data Object (official name: SEND)
+#define DBUS_CMD_RSE  0xCA      // [* $] Send and Execute Temporary Program (official name: SETP)
+
+// Unambiguous aliases for TI's command vocabulary.
+#define DBUS_TI_CMD_ACK   DBUS_CMD_ACK
+#define DBUS_TI_CMD_CHK   DBUS_CMD_ERR
+#define DBUS_TI_CMD_DBL   DBUS_CMD_DLD
+#define DBUS_TI_CMD_DKE   DBUS_CMD_DKE
+#define DBUS_TI_CMD_DONE  DBUS_CMD_EOT
+#define DBUS_TI_CMD_DVL   DBUS_CMD_DEL
+#define DBUS_TI_CMD_EBL   DBUS_CMD_ELD
+#define DBUS_TI_CMD_EKE   DBUS_CMD_EKE
+#define DBUS_TI_CMD_EOR   DBUS_CMD_SKP
+#define DBUS_TI_CMD_EPL   DBUS_CMD_RUN
+#define DBUS_TI_CMD_GET   DBUS_CMD_REQ
+#define DBUS_TI_CMD_GTE   DBUS_CMD_IND
+#define DBUS_TI_CMD_RDC   DBUS_CMD_RDY
+#define DBUS_TI_CMD_RDI   DBUS_CMD_VER
+#define DBUS_TI_CMD_REQ   DBUS_CMD_SCR
+#define DBUS_TI_CMD_RDY   DBUS_CMD_CTS
+#define DBUS_TI_CMD_RIOA  DBUS_CMD_RID
+#define DBUS_TI_CMD_RTC   DBUS_CMD_CNT
+#define DBUS_TI_CMD_RTS   DBUS_CMD_VAR
+#define DBUS_TI_CMD_SETP  DBUS_CMD_RSE
+#define DBUS_TI_CMD_SEND  DBUS_CMD_RTS
+#define DBUS_TI_CMD_SKY   DBUS_CMD_KEY
+#define DBUS_TI_CMD_SIOA  DBUS_CMD_SID
+#define DBUS_TI_CMD_XDP   DBUS_CMD_XDP
 
 // Rejection codes (CMD82_SKIP)
 
