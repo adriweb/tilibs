@@ -139,6 +139,21 @@ const char* TICALL dbus_cmd2officialname(uint8_t id)
 	return "";
 }
 
+// Returns 1 if the command carries a data block, 0 if its header word is a
+// value (or unused), and -1 for an unknown command.
+static int dbus_cmd_has_data(uint8_t id)
+{
+	for (unsigned int i = 0; i < sizeof(cmd_types) / sizeof(cmd_types[0]); i++)
+	{
+		if (id == cmd_types[i].id)
+		{
+			return cmd_types[i].has_data;
+		}
+	}
+
+	return -1;
+}
+
 const char* TICALL dbus_cmd2desc(uint8_t id)
 {
 	for (unsigned int i = 0; i < sizeof(cmd_types) / sizeof(cmd_types[0]); i++)
@@ -212,8 +227,10 @@ int TICALL dbus_send(CalcHandle* handle, uint8_t target, uint8_t cmd, uint16_t l
 			buf[2] = 0x00;
 			buf[3] = 0x00;
 
-			// The TI-80 does not use length
-			ret = ticables_cable_send(handle->cable, buf, (target == DBUS_MID_PC_TI80) ? 2 : 4);
+			// Only the TI-80 screen request omits the header word. Generic
+			// RDC also uses MID 0x00, but requires all four header bytes.
+			const bool ti80_screen = target == DBUS_MID_PC_TI80 && cmd == DBUS_CMD_SCR;
+			ret = ticables_cable_send(handle->cable, buf, ti80_screen ? 2 : 4);
 		}
 		else
 		{
@@ -552,22 +569,14 @@ int TICALL dbus_dissect(CalcModel model, FILE * f, const uint8_t * data, uint32_
 	// Get the special case of the TI-80 2-byte packets out of the way first.
 	if (mid == DBUS_MID_PC_TI80)
 	{
-		if (cmd == DBUS_CMD_SCR)
+		// Only the TI-80 SCR omits the header word; generic RDC shares
+		// MID 0x00 but still has the ordinary four-byte header.
+		if (len == 2 && cmd == DBUS_CMD_SCR)
 		{
-			if (len == 2)
-			{
-				// TI-80 SCR command.
-				expected_length = 2;
-			}
-			else
-			{
-				// len >= 4.
-				goto read_length;
-			}
+			expected_length = 2;
 		}
 		else
 		{
-			// This can also be e.g. a generic RDY.
 			goto read_length;
 		}
 	}
@@ -604,11 +613,10 @@ read_length:
 		{
 			length = 0;
 		}
-		// These commands carry a status / key value in the header word, not a
-		// data length. This matches the receive path and TI's Z80 handlers.
-		header_value = cmd == DBUS_CMD_ACK || cmd == DBUS_CMD_CTS
-		            || cmd == DBUS_CMD_ERR || cmd == DBUS_CMD_ERR2
-		            || cmd == DBUS_CMD_EOT || cmd == DBUS_CMD_KEY;
+		// Data-less commands carry a status / key value (or zero) in the header
+		// word, not a data length. This matches the receive path, hex2dbus and
+		// TI's Z80 handlers (ACK, DONE, CHK, RDY, plus RDC on the host side).
+		header_value = dbus_cmd_has_data(cmd) == 0;
 		if (header_value)
 		{
 			expected_length = 4;
@@ -647,7 +655,7 @@ read_length:
 
 	fprintf(f, "%08lX %02X %02X", (unsigned long)(header_value ? 0 : length), mid, cmd);
 	fprintf(f, "\t| %s: %s (%s)", direction, cmdname, cmddesc);
-	if (header_value)
+	if (header_value && length)
 	{
 		fprintf(f, " [%s=%04lX]", cmd == DBUS_CMD_KEY ? "key" : "status", (unsigned long)length);
 	}
