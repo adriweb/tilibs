@@ -5,6 +5,8 @@ project(libticables2-tests
 
 add_executable(torture_ticables torture_ticables.c)
 add_executable(test_ticables_2 test_ticables_2.cc)
+# Compile the production trace decoder directly: it is an internal symbol.
+add_executable(test_dbus_trace test_dbus_trace.cc ../src/hex2dbus.cc)
 if(NOT WIN32)
     add_executable(test_usb_endpoints test_usb_endpoints.cc)
     if(NOT EMSCRIPTEN)
@@ -22,7 +24,7 @@ if(NOT WIN32)
     endif()
 endif()
 
-set(TICABLES_TEST_TARGETS torture_ticables test_ticables_2)
+set(TICABLES_TEST_TARGETS torture_ticables test_ticables_2 test_dbus_trace)
 if(NOT WIN32)
     list(APPEND TICABLES_TEST_TARGETS test_usb_endpoints)
 endif()
@@ -49,16 +51,18 @@ if(NOT WIN32)
     endif()
     add_custom_target(ticables2_check
         COMMAND "$<TARGET_FILE:torture_ticables>"
+        COMMAND "$<TARGET_FILE:test_dbus_trace>"
         COMMAND "$<TARGET_FILE:test_usb_endpoints>"
         ${TICABLES_USB_ENUMERATION_COMMAND}
-        DEPENDS torture_ticables test_usb_endpoints ${TICABLES_USB_ENUMERATION_DEPENDENCY}
+        DEPENDS torture_ticables test_dbus_trace test_usb_endpoints ${TICABLES_USB_ENUMERATION_DEPENDENCY}
         COMMENT "Run the ticables2 torture tests"
         EXCLUDE_FROM_ALL
     )
 else()
     add_custom_target(ticables2_check
         COMMAND "$<TARGET_FILE:torture_ticables>"
-        DEPENDS torture_ticables
+        COMMAND "$<TARGET_FILE:test_dbus_trace>"
+        DEPENDS torture_ticables test_dbus_trace
         COMMENT "Run the ticables2 torture tests"
         EXCLUDE_FROM_ALL
     )
