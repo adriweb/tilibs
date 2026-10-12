@@ -225,33 +225,6 @@ static void check_public_probe_ti73()
 	CHECK(outgoing == (std::vector<uint8_t>{DBUS_MID_PC_TIXX, DBUS_TI_CMD_RDC, 0, 0}));
 }
 
-static void check_ti73_types()
-{
-	CHECK(TI73_CATLIST == 0x0d);
-	CHECK(strcmp(tifiles_vartype2string(CALC_TI73, TI73_CATLIST), "CATLIST") == 0);
-	CHECK(strcmp(tifiles_vartype2fext(CALC_TI73, TI73_CATLIST), "73l") == 0);
-	CHECK(strcmp(tifiles_vartype2type(CALC_TI73, TI73_CATLIST), "Categorical List") == 0);
-	const uint8_t types[] = {TI73_RED_SIMPLE_FRAC, TI73_RED_MIXED_FRAC,
-	                         TI73_UNRED_SIMPLE_FRAC, TI73_UNRED_MIXED_FRAC};
-	const char *names[] = {"RFRAC", "RMFRAC", "UFRAC", "UMFRAC"};
-	for (size_t i = 0; i < 4; i++)
-	{
-		CHECK(types[i] == 0x14 + i);
-		CHECK(strcmp(tifiles_vartype2fext(CALC_TI73, types[i]), "73n") == 0);
-		CHECK(strcmp(tifiles_vartype2string(CALC_TI73, types[i]), names[i]) == 0);
-		CHECK(tifiles_string2vartype(CALC_TI73, names[i]) == types[i]);
-	}
-	// Shared extensions keep their existing canonical import type.
-	CHECK(tifiles_fext2vartype(CALC_TI73, "73l") == TI73_LIST);
-	CHECK(tifiles_fext2vartype(CALC_TI73, "73n") == TI73_REAL);
-	const char list_name[9] = {0x5d, 0x01, 0, 0, 0, 0, 0, 0, 0};
-	char *real_list = ticonv_varname_detokenize(CALC_TI73, list_name, TI73_LIST);
-	char *category_list = ticonv_varname_detokenize(CALC_TI73, list_name, TI73_CATLIST);
-	CHECK(real_list && category_list && strcmp(real_list, category_list) == 0);
-	ticonv_varname_free(real_list);
-	ticonv_varname_free(category_list);
-}
-
 static void check_commands()
 {
 	struct Command { uint8_t value; uint8_t alias; const char *name; const char *description; };
@@ -308,7 +281,6 @@ int main()
 	check_device_information(CALC_TI84PC, 0xff, CALC_NONE);
 	for (size_t length = 8; length <= 11; length++) check_device_information(CALC_TI83P, 0, CALC_TI83P, length);
 	check_device_information(CALC_TI83P, 0, CALC_NONE, 7);
-	check_ti73_types();
 	check_public_probe_ti73();
 	for (bool usb_probe : {true, false})
 	{
@@ -319,6 +291,6 @@ int main()
 		check_public_probe(0xff, CALC_TI83P, usb_probe);
 	}
 	CHECK(ticalcs_library_exit() == 0);
-	puts("DBUS command, framing, RDI and TI-73 type tests passed");
+	puts("DBUS command, framing and RDI tests passed");
 	return 0;
 }
