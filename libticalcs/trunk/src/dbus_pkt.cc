@@ -43,34 +43,34 @@ typedef struct
 
 static const DBUSCmdInfo cmd_types[] =
 {
-	{ DBUS_CMD_VAR,  1, "VAR",  "RTS",  "Variable header" },
-	{ DBUS_CMD_CTS,  0, "CTS",  "RDY",  "Continue To Send" },
-	{ DBUS_CMD_XDP,  1, "XDP",  "XDP",  "Data Packet" },
-	{ DBUS_CMD_ELD,  0, "ELD",  "EBL",  "Enable LockDown" },
-	{ DBUS_CMD_DLD,  0, "DLD",  "DBL",  "Disable LockDown" },
+	{ DBUS_CMD_VAR,  1, "VAR",  "RTS",  "Request To Send" },
+	{ DBUS_CMD_CTS,  0, "CTS",  "RDY",  "Ready for Data" },
+	{ DBUS_CMD_XDP,  1, "XDP",  "XDP",  "Transmit Data Packet" },
+	{ DBUS_CMD_ELD,  0, "ELD",  "EBL",  "Enable Background Processing Link" },
+	{ DBUS_CMD_DLD,  0, "DLD",  "DBL",  "Disable Background Processing Link" },
 	{ DBUS_CMD_EKE,  0, "EKE",  "EKE",  "Enable Key Echo" },
 	{ DBUS_CMD_DKE,  0, "DKE",  "DKE",  "Disable Key Echo" },
-	{ DBUS_CMD_VER,  0, "VER",  "RDI",  "Request version" },
-	{ DBUS_CMD_SKP,  1, "SKP",  "EOR",  "Skip/Exit" },
-	{ DBUS_CMD_SID,  1, "SID",  "SIOA", "Send calc ID" },
+	{ DBUS_CMD_VER,  0, "VER",  "RDI",  "Request Device Information" },
+	{ DBUS_CMD_SKP,  1, "SKP",  "EOR",  "Error on Request" },
+	{ DBUS_CMD_SID,  1, "SID",  "SIOA", "Set IO Address" },
 	{ DBUS_CMD_ACK,  0, "ACK",  "ACK",  "Acknowledge" },
-	{ DBUS_CMD_ERR,  1, "ERR",  "CHK",  "Checksum error" }, // ERR has data when receiving.
-	{ DBUS_CMD_RDY,  0, "RDY",  "RDC",  "Test calculator ready" },
-	{ DBUS_CMD_SCR,  0, "SCR",  "REQ",  "Request screenshot" },
+	{ DBUS_CMD_ERR,  0, "ERR",  "CHK",  "Checksum Error" }, // Checksum-error status is in the header word.
+	{ DBUS_CMD_RDY,  0, "RDY",  "RDC",  "Request Device Characteristics" },
+	{ DBUS_CMD_SCR,  0, "SCR",  "REQ",  "Request Screen Image" },
 	{ DBUS_CMD_GID,  0, "GID",  "???",  "Get calculator ID (from cert)" },
 	{ DBUS_CMD_DMP,  1, "DMP",  "???",  "Request memory page dump" },
 	{ DBUS_CMD_TG2,  1, "TG2",  "???",  "TestGuard 2 packet" },
-	{ DBUS_CMD_RID,  0, "RID",  "RIOA", "Request calc ID" },
-	{ DBUS_CMD_CNT,  0, "CNT",  "RTC",  "Continue" },
-	{ DBUS_CMD_KEY,  0, "KEY",  "SKY",  "Send key" }, // KEY has special 4-byte format: no length.
-	{ DBUS_CMD_DEL,  1, "DEL",  "DVL",  "Delete variable / app" },
-	{ DBUS_CMD_RUN,  1, "RUN",  "EPL",  "Run variable / app" },
-	{ DBUS_CMD_EOT,  0, "EOT",  "DONE", "End Of Transmission" },
-	{ DBUS_CMD_REQ,  1, "REQ",  "GET",  "Request variable" },
-	{ DBUS_CMD_ERR2, 1, "ERR2", "???",  "Checksum error" }, // ERR2 might have data when receiving ?
-	{ DBUS_CMD_IND,  1, "IND",  "GTE",  "Request variable index" },
-	{ DBUS_CMD_RTS,  1, "RTS",  "SEND", "Request To Send" },
-	{ DBUS_CMD_RSE,  1, "RSE",  "SETP", "Request to Send and Execute" },
+	{ DBUS_CMD_RID,  0, "RID",  "RIOA", "Request I/O Address" },
+	{ DBUS_CMD_CNT,  0, "CNT",  "RTC",  "Request To Continue" },
+	{ DBUS_CMD_KEY,  0, "KEY",  "SKY",  "Send Keypress" }, // KEY has special 4-byte format: no length.
+	{ DBUS_CMD_DEL,  1, "DEL",  "DVL",  "Delete Variable Link" },
+	{ DBUS_CMD_RUN,  1, "RUN",  "EPL",  "Execute Program Link" },
+	{ DBUS_CMD_EOT,  0, "EOT",  "DONE", "Done" },
+	{ DBUS_CMD_REQ,  1, "REQ",  "GET",  "Get Data Object" },
+	{ DBUS_CMD_ERR2, 0, "ERR2", "???",  "Checksum error" }, // Legacy checksum-error status is in the header word.
+	{ DBUS_CMD_IND,  1, "IND",  "GTE",  "Get Data Element" },
+	{ DBUS_CMD_RTS,  1, "RTS",  "SEND", "Send Data Object" },
+	{ DBUS_CMD_RSE,  1, "RSE",  "SETP", "Send and Execute Temporary Program" },
 };
 
 typedef struct
@@ -533,8 +533,9 @@ int TICALL dbus_recv(CalcHandle* handle, uint8_t* host, uint8_t* cmd, uint16_t* 
 
 int TICALL dbus_dissect(CalcModel model, FILE * f, const uint8_t * data, uint32_t len)
 {
-	uint16_t length = 0;
+	uint32_t length = 0;
 	uint32_t expected_length = 0;
+	bool header_value = false;
 	VALIDATE_NONNULL(f);
 	VALIDATE_NONNULL(data);
 
@@ -603,7 +604,26 @@ read_length:
 		{
 			length = 0;
 		}
-		expected_length = ((length == 0) ? 4 : 6 + length); // Always 4-byte header, 2-byte checksum if data.
+		// These commands carry a status / key value in the header word, not a
+		// data length. This matches the receive path and TI's Z80 handlers.
+		header_value = cmd == DBUS_CMD_ACK || cmd == DBUS_CMD_CTS
+		            || cmd == DBUS_CMD_ERR || cmd == DBUS_CMD_ERR2
+		            || cmd == DBUS_CMD_EOT || cmd == DBUS_CMD_KEY;
+		if (header_value)
+		{
+			expected_length = 4;
+		}
+		else
+		{
+			// The TI-68k Flash sender emits 64 KiB XDP blocks with length 0000.
+			// Do not infer this convention for other commands or families.
+			if (cmd == DBUS_CMD_XDP && tifiles_calc_is_ti9x(model)
+			    && length == 0 && len == 65536U + 6)
+			{
+				length = 65536U;
+			}
+			expected_length = ((length == 0) ? 4 : 6 + length);
+		}
 	}
 
 	if (len != expected_length)
@@ -625,8 +645,12 @@ read_length:
 		ticalcs_warning("Unknown command ID %u (%X)", cmd, cmd);
 	}
 
-	fprintf(f, "%08lX %02X %02X", (unsigned long)length, mid, cmd);
+	fprintf(f, "%08lX %02X %02X", (unsigned long)(header_value ? 0 : length), mid, cmd);
 	fprintf(f, "\t| %s: %s (%s)", direction, cmdname, cmddesc);
+	if (header_value)
+	{
+		fprintf(f, " [%s=%04lX]", cmd == DBUS_CMD_KEY ? "key" : "status", (unsigned long)length);
+	}
 
 	if (len > 4)
 	{
