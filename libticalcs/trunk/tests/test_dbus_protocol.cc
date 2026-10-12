@@ -7,6 +7,7 @@
 
 #include "../src/ticalcs.h"
 #include "../src/dbus_pkt.h"
+#include "../src/cmdz80.h"
 #include "../src/error.h"
 
 #define CHECK(condition) \
@@ -19,10 +20,12 @@
 
 static std::vector<uint8_t> incoming, outgoing;
 static size_t received;
+static int receive_failure, send_failure;
 
 static int cable_recv(CableHandle *, uint8_t *data, uint32_t length)
 {
 	CHECK(received <= incoming.size());
+	if (received == incoming.size() && receive_failure) return receive_failure;
 	CHECK(length <= incoming.size() - received);
 	if (length) memcpy(data, incoming.data() + received, length);
 	received += length;
@@ -32,7 +35,7 @@ static int cable_recv(CableHandle *, uint8_t *data, uint32_t length)
 static int cable_send(CableHandle *, uint8_t *data, uint32_t length)
 {
 	outgoing.insert(outgoing.end(), data, data + length);
-	return 0;
+	return send_failure;
 }
 
 static void packet(uint8_t mid, uint8_t cmd, const std::vector<uint8_t> &data = {})
@@ -61,12 +64,15 @@ struct MockCalculator
 		incoming.clear();
 		outgoing.clear();
 		received = 0;
+		receive_failure = 0;
+		send_failure = 0;
 		functions.recv = cable_recv;
 		functions.send = cable_send;
 		cable.cable = &functions;
 		cable.open = 1;
 		handle = ticalcs_handle_new(model);
 		CHECK(handle);
+		handle->updat->cancel = 0;
 		handle->cable = &cable;
 		handle->open = handle->attached = 1;
 	}
@@ -77,6 +83,260 @@ struct MockCalculator
 		ticalcs_handle_del(handle);
 	}
 };
+
+struct ChecksumModel
+{
+	CalcModel model;
+	uint8_t calculator_mid, pc_mid;
+	bool acknowledge_chk, notify_chk;
+};
+
+// Literal wire expectations keep the ROM-supported scope independent of
+// the library's model-to-MID and checksum-recovery helpers.
+static const ChecksumModel checksum_models[] = {
+	{CALC_TI73,  0x74, 0x07, true,  true},
+	{CALC_TI82,  0x82, 0x02, true,  true},
+	{CALC_TI83,  0x83, 0x03, true,  true},
+	{CALC_TI83P, 0x73, 0x23, true,  true},
+	{CALC_TI84P, 0x73, 0x23, true,  true},
+	{CALC_TI85,  0x85, 0x05, true,  true},
+	{CALC_TI86,  0x86, 0x06, true,  true},
+	{CALC_TI89,  0x98, 0x08, false, true},
+	{CALC_TI89T, 0x98, 0x08, false, true},
+	{CALC_TI80,  0x80, 0x00, false, false},
+	{CALC_TI84PC,0x73, 0x23, false, false},
+	{CALC_TI92,  0x89, 0x09, false, false},
+	{CALC_TI92P, 0x88, 0x08, false, false},
+	{CALC_V200,  0x88, 0x08, false, false},
+	{CALC_TI84P_USB, 0x73, 0x23, false, false},
+	{CALC_TI89T_USB, 0x98, 0x08, false, false},
+};
+
+static void check_received_checksum_error(const ChecksumModel &model, uint8_t command,
+                                          int busy = 0, int failed_send = 0)
+{
+	MockCalculator calc(model.model);
+	calc.handle->busy = busy;
+	send_failure = failed_send;
+	// The CHK header word can be nonzero without carrying any data.
+	incoming = {model.calculator_mid, command};
+	if (model.model != CALC_TI80) incoming.insert(incoming.end(), {0x0b, 0x00});
+	const size_t error_end = incoming.size();
+	incoming.insert(incoming.end(), {model.calculator_mid, 0x56});
+	if (model.model != CALC_TI80) incoming.insert(incoming.end(), {0x00, 0x00});
+	uint8_t data[16];
+	memset(data, 0xa5, sizeof(data));
+	uint8_t host = 0, cmd = 0;
+	uint16_t length = 0;
+	CHECK(dbus_recv(calc.handle, &host, &cmd, &length, data) == ERR_CHECKSUM);
+	CHECK(host == model.calculator_mid && cmd == command);
+	CHECK(length == (model.model == CALC_TI80 ? 0 : 11));
+	CHECK(received == error_end); // No payload read, retransmission, or read-ahead.
+	CHECK(calc.handle->busy == busy);
+	for (uint8_t value : data) CHECK(value == 0xa5);
+	const std::vector<uint8_t> expected = model.acknowledge_chk && command == 0x5a
+		? std::vector<uint8_t>{model.pc_mid, 0x56, 0x00, 0x00} : std::vector<uint8_t>{};
+	CHECK(outgoing == expected);
+	send_failure = 0;
+	CHECK(dbus_recv(calc.handle, &host, &cmd, &length, data) == 0);
+	CHECK(host == model.calculator_mid && cmd == 0x56 && length == 0);
+	CHECK(received == incoming.size() && outgoing == expected);
+	CHECK(calc.handle->busy == busy);
+}
+
+static void check_bad_checksum_data(const ChecksumModel &model, uint8_t command,
+                                    int busy = 0, int failed_send = 0)
+{
+	MockCalculator calc(model.model);
+	calc.handle->busy = busy;
+	send_failure = failed_send;
+	const std::vector<uint8_t> bad = {0xa1, 0xb2, 0xc3, 0xd4, 0xe5};
+	const std::vector<uint8_t> good = {0x21, 0x43, 0x65};
+	packet(model.calculator_mid, command, bad);
+	incoming.back() ^= 1;
+	const size_t error_end = incoming.size();
+	packet(model.calculator_mid, 0x15, good);
+	uint8_t *data = (uint8_t *)calc.handle->buffer;
+	memset(data, 0xa5, 16);
+	uint8_t host = 0, cmd = 0;
+	uint16_t length = 0;
+	CHECK(dbus_recv(calc.handle, &host, &cmd, &length, data) == ERR_CHECKSUM);
+	CHECK(host == model.calculator_mid && cmd == command && length == bad.size());
+	CHECK(received == error_end);
+	CHECK(calc.handle->busy == busy);
+	// Sending the error notification must not clobber an aliased receive buffer.
+	CHECK(memcmp(data, bad.data(), bad.size()) == 0);
+	for (size_t i = bad.size(); i < 16; i++) CHECK(data[i] == 0xa5);
+	const std::vector<uint8_t> expected = model.notify_chk && (command == 0x06 || command == 0x15)
+		? std::vector<uint8_t>{model.pc_mid, 0x5a, 0x00, 0x00} : std::vector<uint8_t>{};
+	CHECK(outgoing == expected);
+	send_failure = 0;
+	CHECK(dbus_recv(calc.handle, &host, &cmd, &length, data) == 0);
+	CHECK(host == model.calculator_mid && cmd == 0x15 && length == good.size());
+	CHECK(memcmp(data, good.data(), good.size()) == 0);
+	CHECK(received == incoming.size() && outgoing == expected); // Good data produces no CHK.
+	CHECK(calc.handle->busy == busy);
+}
+
+static void check_checksum_transport_errors()
+{
+	for (int busy : {0, 1})
+	{
+		for (bool missing_data : {false, true})
+		{
+			MockCalculator calc(CALC_TI86);
+			calc.handle->busy = busy;
+			if (missing_data) incoming = {0x86, 0x15, 0x03, 0x00, 0x21, 0x43, 0x65};
+			receive_failure = ERROR_READ_TIMEOUT;
+			uint8_t host = 0, cmd = 0, data[16] = {};
+			uint16_t length = 0;
+			CHECK(dbus_recv(calc.handle, &host, &cmd, &length, data) == ERROR_READ_TIMEOUT);
+			CHECK(received == incoming.size() && outgoing.empty());
+			CHECK(calc.handle->busy == busy);
+		}
+		MockCalculator calc(CALC_TI86);
+		calc.handle->busy = busy;
+		calc.handle->updat->cancel = 1;
+		packet(0x86, 0x15, {0x21, 0x43, 0x65});
+		uint8_t host = 0, cmd = 0, data[16] = {};
+		uint16_t length = 0;
+		CHECK(dbus_recv(calc.handle, &host, &cmd, &length, data) == ERR_ABORT);
+		CHECK(received == 5 && outgoing.empty());
+		CHECK(calc.handle->busy == busy);
+	}
+}
+
+static void check_checksum_recovery()
+{
+	for (const ChecksumModel &model : checksum_models)
+	{
+		check_received_checksum_error(model, 0x5a);
+		check_received_checksum_error(model, 0xb4); // Legacy ERR2 retains its existing behavior.
+		check_bad_checksum_data(model, 0x15);
+		if (model.model != CALC_TI80) check_bad_checksum_data(model, 0x06);
+	}
+	// Nested ownership and failed recovery sends must preserve the original error.
+	const ChecksumModel ti86 = {CALC_TI86, 0x86, 0x06, true, true};
+	const ChecksumModel ti89 = {CALC_TI89, 0x98, 0x08, false, true};
+	check_received_checksum_error(ti86, 0x5a, 1, ERROR_WRITE_TIMEOUT);
+	check_bad_checksum_data(ti86, 0x15, 1, ERROR_WRITE_TIMEOUT);
+	check_bad_checksum_data(ti89, 0x06, 1, ERROR_WRITE_TIMEOUT);
+	// Other data commands have no ROM-verified abort notification policy.
+	for (uint8_t command : {0x36, 0x47, 0xa2, 0xb7, 0xc9})
+	{
+		check_bad_checksum_data(ti86, command);
+		check_bad_checksum_data(ti89, command);
+	}
+	check_checksum_transport_errors();
+}
+
+static void check_bad_screenshot(CalcModel model, uint8_t calculator_mid, uint8_t pc_mid,
+                                 size_t screen_size)
+{
+	MockCalculator calc(model);
+	const std::vector<uint8_t> data(screen_size, 0x5a);
+	packet(calculator_mid, 0x56);
+	packet(calculator_mid, 0x15, data);
+	incoming.back() ^= 1;
+	const size_t error_end = incoming.size();
+	packet(calculator_mid, 0x56);
+	packet(calculator_mid, 0x15, data);
+	CalcScreenCoord screen = {};
+	screen.format = SCREEN_FULL;
+	uint8_t *bitmap = nullptr;
+	CHECK(ticalcs_calc_recv_screen(calc.handle, &screen, &bitmap) == ERR_CHECKSUM);
+	CHECK(bitmap == nullptr && calc.handle->busy == 0);
+	CHECK(received == error_end);
+	std::vector<uint8_t> expected = {pc_mid, 0x6d, 0x00, 0x00, pc_mid, 0x5a, 0x00, 0x00};
+	CHECK(outgoing == expected); // No successful-data ACK after the CHK abort.
+	CHECK(ticalcs_calc_recv_screen(calc.handle, &screen, &bitmap) == 0);
+	CHECK(bitmap != nullptr && calc.handle->busy == 0);
+	CHECK(memcmp(bitmap, data.data(), screen_size) == 0);
+	expected.insert(expected.end(), {pc_mid, 0x6d, 0x00, 0x00, pc_mid, 0x56, 0x00, 0x00});
+	CHECK(received == incoming.size() && outgoing == expected);
+	ticalcs_free_screen(bitmap);
+}
+
+static void check_color_screenshot_error()
+{
+	MockCalculator calc(CALC_TI84PC);
+	packet(0x73, 0x56);
+	packet(0x73, 0x15, {0x21, 0x43}); // Initial color screenshot chunk.
+	packet(0x73, 0x15, {0x65, 0x87, 0xa9});
+	incoming.back() ^= 1;
+	const size_t error_end = incoming.size();
+	packet(0x73, 0x92);
+	CalcScreenCoord screen = {};
+	uint8_t *bitmap = nullptr;
+	CHECK(ticalcs_calc_recv_screen(calc.handle, &screen, &bitmap) == ERR_CHECKSUM);
+	CHECK(bitmap == nullptr && calc.handle->busy == 0);
+	CHECK(received == error_end);
+	CHECK(outgoing == (std::vector<uint8_t>{0x23, 0x6d, 0x00, 0x00, 0x23, 0x56, 0x00, 0x00}));
+}
+
+static void check_expected_asm_completion(CalcModel model, uint8_t calculator_mid, uint8_t pc_mid)
+{
+	for (int busy : {0, 1})
+	{
+		MockCalculator calc(model);
+		calc.handle->busy = busy;
+		incoming = {calculator_mid, 0x5a, 0x0b, 0x00};
+		uint16_t status = 0;
+		CHECK(ti82_recv_ERR(calc.handle, &status) == 0);
+		CHECK(status == 11 && received == incoming.size());
+		CHECK(outgoing.empty() && calc.handle->busy == busy);
+		CHECK(tiz80_send_ACK(calc.handle, pc_mid) == 0);
+		CHECK(outgoing == (std::vector<uint8_t>{pc_mid, 0x56, 0x00, 0x00}));
+		CHECK(calc.handle->busy == busy);
+	}
+	// Exercise the public caller that uploads the bootstrap and owns its ACK.
+	MockCalculator calc(model);
+	packet(calculator_mid, 0x56);
+	packet(calculator_mid, 0x09);
+	packet(calculator_mid, 0x56);
+	incoming.insert(incoming.end(), {calculator_mid, 0x5a, 0x0b, 0x00});
+	FileContent *content = tifiles_content_create_regular(model);
+	CHECK(content);
+	VarEntry *entry = tifiles_ve_create_alloc_data(4);
+	CHECK(entry);
+	entry->size = 4;
+	strcpy(entry->name, "TEST");
+	entry->type = model == CALC_TI82 ? TI82_PRGM : TI85_PRGM;
+	memset(entry->data, 0, 4);
+	CHECK(tifiles_content_add_entry(content, entry) == 1);
+	CHECK(ticalcs_calc_send_var(calc.handle, MODE_SEND_EXEC_ASM, content) == 0);
+	CHECK(received == incoming.size() && calc.handle->busy == 0);
+	std::vector<uint8_t> commands;
+	for (size_t offset = 0; offset < outgoing.size();)
+	{
+		CHECK(outgoing.size() - offset >= 4 && outgoing[offset] == pc_mid);
+		const uint8_t command = outgoing[offset + 1];
+		commands.push_back(command);
+		const uint16_t length = outgoing[offset + 2] | ((uint16_t)outgoing[offset + 3] << 8);
+		offset += command == 0x56 ? 4 : 6 + length;
+		CHECK(offset <= outgoing.size());
+	}
+	CHECK(commands == (std::vector<uint8_t>{0x06, 0x56, 0x15, 0x06, 0x56}));
+	CHECK(std::vector<uint8_t>(outgoing.end() - 4, outgoing.end()) ==
+	      (std::vector<uint8_t>{pc_mid, 0x56, 0x00, 0x00}));
+	tifiles_content_delete_regular(content);
+}
+
+static void check_invalid_command_cleanup()
+{
+	for (int busy : {0, 1})
+	{
+		MockCalculator calc(CALC_TI86);
+		calc.handle->busy = busy;
+		incoming = {0x86, 0xff, 0x00, 0x00, 0x86, 0x56, 0x00, 0x00};
+		uint8_t host = 0, cmd = 0, data[16] = {};
+		uint16_t length = 0;
+		CHECK(dbus_recv(calc.handle, &host, &cmd, &length, data) == ERR_INVALID_CMD);
+		CHECK(received == 4 && outgoing.empty() && calc.handle->busy == busy);
+		CHECK(dbus_recv(calc.handle, &host, &cmd, &length, data) == 0);
+		CHECK(received == incoming.size() && outgoing.empty() && calc.handle->busy == busy);
+	}
+}
 
 static std::string dissect(CalcModel model, const std::vector<uint8_t> &data, int expected = 0)
 {
@@ -268,6 +528,14 @@ int main()
 {
 	CHECK(ticalcs_library_init() == 1);
 	check_commands();
+	check_checksum_recovery();
+	check_bad_screenshot(CALC_TI86, 0x86, 0x06, 1024);
+	check_bad_screenshot(CALC_TI83P, 0x73, 0x23, 768);
+	check_bad_screenshot(CALC_TI89, 0x98, 0x08, 3840);
+	check_color_screenshot_error();
+	check_expected_asm_completion(CALC_TI82, 0x82, 0x02);
+	check_expected_asm_completion(CALC_TI85, 0x85, 0x05);
+	check_invalid_command_cleanup();
 	check_short_packets();
 	check_64k_flash_packet();
 	check_device_information(CALC_TI73, 0, CALC_TI73);
@@ -291,6 +559,6 @@ int main()
 		check_public_probe(0xff, CALC_TI83P, usb_probe);
 	}
 	CHECK(ticalcs_library_exit() == 0);
-	puts("DBUS command, framing and RDI tests passed");
+	puts("DBUS command, framing, checksum recovery, screenshot and RDI tests passed");
 	return 0;
 }

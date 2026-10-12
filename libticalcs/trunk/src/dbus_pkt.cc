@@ -222,15 +222,14 @@ int TICALL dbus_send(CalcHandle* handle, uint8_t target, uint8_t cmd, uint16_t l
 		if (data == nullptr)
 		{
 			// short packet (no data)
-			buf[0] = target;
-			buf[1] = cmd;
-			buf[2] = 0x00;
-			buf[3] = 0x00;
+			// Keep received data intact when it aliases handle->buffer and
+			// a checksum recovery packet is sent before returning to the caller.
+			uint8_t short_packet[4] = { target, cmd, 0, 0 };
 
 			// Only the TI-80 screen request omits the header word. Generic
 			// RDC also uses MID 0x00, but requires all four header bytes.
 			const bool ti80_screen = target == DBUS_MID_PC_TI80 && cmd == DBUS_CMD_SCR;
-			ret = ticables_cable_send(handle->cable, buf, ti80_screen ? 2 : 4);
+			ret = ticables_cable_send(handle->cable, short_packet, ti80_screen ? 2 : 4);
 		}
 		else
 		{
@@ -480,6 +479,43 @@ int TICALL dbus_recv_data(CalcHandle *handle, uint16_t* length, uint8_t* data)
 	return ret;
 }
 
+// These Z80 packet senders wait for ACK even when sending CHK. Other
+// families (notably TI-89), TI-80 and the legacy ERR2 command differ or have
+// not been verified, so do not extend this handshake to them implicitly.
+static uint8_t dbus_checksum_z80_mid(CalcModel model)
+{
+	switch (model)
+	{
+	case CALC_TI73:  return DBUS_MID_PC_TI73;
+	case CALC_TI82:  return DBUS_MID_PC_TI82;
+	case CALC_TI83:  return DBUS_MID_PC_TI83;
+	case CALC_TI83P:
+	case CALC_TI84P: return DBUS_MID_PC_TI83p;
+	case CALC_TI85:  return DBUS_MID_PC_TI85;
+	case CALC_TI86:  return DBUS_MID_PC_TI86;
+	default:        return 0;
+	}
+}
+
+static void dbus_checksum_reply(CalcHandle *handle, uint8_t cmd)
+{
+	uint8_t mid = dbus_checksum_z80_mid(handle->model);
+	if (cmd == DBUS_CMD_ERR && (handle->model == CALC_TI89 || handle->model == CALC_TI89T))
+	{
+		mid = DBUS_MID_PC_TI89;
+	}
+	if (mid)
+	{
+		// Best effort: preserve the original checksum error even if this
+		// recovery send fails. Neither direction expects a further reply.
+		const int ret = dbus_send(handle, mid, cmd, 0, nullptr);
+		if (ret)
+		{
+			ticalcs_warning("DBUS checksum recovery %s failed: %d", dbus_cmd2name(cmd), ret);
+		}
+	}
+}
+
 /*
   Receive a packet from TI (target) to PC (host):
   - host [out]	 : a machine ID uint8_t
@@ -505,6 +541,12 @@ int TICALL dbus_recv(CalcHandle* handle, uint8_t* host, uint8_t* cmd, uint16_t* 
 	{
 		if (*cmd == DBUS_CMD_ERR || *cmd == DBUS_CMD_ERR2)
 		{
+			if (*cmd == DBUS_CMD_ERR)
+			{
+				// The Z80 calculator waits for this ACK before unwinding
+				// its failed receive; a new request here would be lost.
+				dbus_checksum_reply(handle, DBUS_CMD_ACK);
+			}
 			ret = ERR_CHECKSUM;
 		}
 		else
@@ -519,6 +561,12 @@ int TICALL dbus_recv(CalcHandle* handle, uint8_t* host, uint8_t* cmd, uint16_t* 
 			case DBUS_CMD_IND:
 			case DBUS_CMD_RTS:
 				ret = dbus_recv_data(handle, length, data);
+				if (ret == ERR_CHECKSUM && (*cmd == DBUS_CMD_VAR || *cmd == DBUS_CMD_XDP))
+				{
+					// CHK aborts a calculator VAR/XDP sender waiting for ACK.
+					// It does not request retransmission or produce an ACK.
+					dbus_checksum_reply(handle, DBUS_CMD_ERR);
+				}
 				break;
 			case DBUS_CMD_CTS:	// short packet (no data)
 			case DBUS_CMD_ACK:
@@ -532,7 +580,8 @@ int TICALL dbus_recv(CalcHandle* handle, uint8_t* host, uint8_t* cmd, uint16_t* 
 			case DBUS_CMD_CNT:
 				break;
 			default:
-				return ERR_INVALID_CMD; // THIS RETURNS !
+				ret = ERR_INVALID_CMD;
+				break;
 			}
 
 			if (!ret && !(ref++ % 4))
