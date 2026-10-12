@@ -407,6 +407,26 @@
         </div>
     </div>
 
+    <div class="modal hidden" id="backupGuideModal" aria-hidden="true">
+        <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="backupGuideTitle">
+            <div class="modal-header">
+                <h3 id="backupGuideTitle">Backup transfer</h3>
+                <button class="btn ghost" id="btnCloseBackupGuide" aria-label="Cancel">✖️</button>
+            </div>
+            <div class="modal-body">
+                <p id="backupGuideFile"></p>
+                <p class="form-note" id="backupGuideWarning"></p>
+                <ol class="backup-guide-steps" id="backupGuideSteps"></ol>
+                <p class="form-note" id="backupGuideVersion"></p>
+                <p id="backupGuideStatus" role="status" aria-live="polite"></p>
+            </div>
+            <div class="modal-footer">
+                <button class="btn ghost" id="btnCancelBackupGuide">Cancel</button>
+                <button class="btn primary" id="btnStartBackupRestore">Restore Backup</button>
+            </div>
+        </div>
+    </div>
+
     <div class="modal hidden" id="connectionHelpModal" aria-hidden="true">
         <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="connectionHelpTitle">
             <div class="modal-header">

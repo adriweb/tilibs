@@ -84,6 +84,47 @@ struct MockCalculator
 	}
 };
 
+static void check_backup(CalcModel model, uint8_t mid, uint8_t type, bool requested)
+{
+	MockCalculator calc(model);
+	if (requested) packet(mid, DBUS_CMD_ACK);
+	packet(mid, DBUS_CMD_VAR, {2, 0, type, 3, 0, 4, 0, 5, 0, 0, 0});
+	packet(mid, DBUS_CMD_ACK); // ACK of our CTS
+	const std::vector<std::vector<uint8_t>> parts = {{1, 2}, {3, 4, 5}, {6, 7, 8, 9}, {10, 11, 12, 13, 14}};
+	const size_t count = model == CALC_TI86 ? 4 : 3;
+	for (size_t i = 0; i < count; i++) packet(mid, DBUS_CMD_XDP, parts[i]);
+	BackupContent *content = tifiles_content_create_backup(model);
+	CHECK(ticalcs_calc_recv_backup(calc.handle, content) == 0);
+	CHECK(content->model == model && content->type == type);
+	CHECK(content->data_length1 == 2 && content->data_length2 == 3 && content->data_length3 == 4);
+	CHECK(memcmp(content->data_part1, parts[0].data(), parts[0].size()) == 0);
+	CHECK(memcmp(content->data_part2, parts[1].data(), parts[1].size()) == 0);
+	CHECK(memcmp(content->data_part3, parts[2].data(), parts[2].size()) == 0);
+	if (model == CALC_TI86) {
+		CHECK(content->data_length4 == 5);
+		CHECK(memcmp(content->data_part4, parts[3].data(), parts[3].size()) == 0);
+	}
+	CHECK(received == incoming.size());
+	std::vector<uint8_t> expected;
+	const uint8_t host = model == CALC_TI83 ? 0x03 : model == CALC_TI86 ? 0x06 : model == CALC_TI82 ? 0x02 : 0x05;
+	if (requested) expected = {host, DBUS_CMD_REQ, 11, 0, 0, 0, type, 0, 0, 0, 0, 0, 0, 0, 0, type, 0};
+	for (uint8_t cmd : {DBUS_CMD_ACK, DBUS_CMD_CTS}) expected.insert(expected.end(), {host, cmd, 0, 0});
+	for (size_t i = 0; i < count; i++) expected.insert(expected.end(), {host, DBUS_CMD_ACK, 0, 0});
+	CHECK(outgoing == expected);
+	tifiles_content_delete_backup(content);
+}
+
+static void check_backup_timeout()
+{
+	MockCalculator calc(CALC_TI86);
+	receive_failure = ERROR_READ_TIMEOUT;
+	BackupContent *content = tifiles_content_create_backup(CALC_TI86);
+	CHECK(ticalcs_calc_recv_backup(calc.handle, content) == ERROR_READ_TIMEOUT);
+	CHECK(outgoing.empty()); // No host request while waiting for the calculator.
+	CHECK(calc.handle->busy == 0);
+	tifiles_content_delete_backup(content);
+}
+
 struct ChecksumModel
 {
 	CalcModel model;
@@ -528,6 +569,11 @@ int main()
 {
 	CHECK(ticalcs_library_init() == 1);
 	check_commands();
+	check_backup(CALC_TI86, 0x86, TI86_BKUP, false);
+	check_backup(CALC_TI83, 0x83, TI83_BKUP, true);
+	check_backup(CALC_TI82, 0x82, TI82_BKUP, false);
+	check_backup(CALC_TI85, 0x85, TI85_BKUP, false);
+	check_backup_timeout();
 	check_checksum_recovery();
 	check_bad_screenshot(CALC_TI86, 0x86, 0x06, 1024);
 	check_bad_screenshot(CALC_TI83P, 0x73, 0x23, 768);
@@ -559,6 +605,6 @@ int main()
 		check_public_probe(0xff, CALC_TI83P, usb_probe);
 	}
 	CHECK(ticalcs_library_exit() == 0);
-	puts("DBUS command, framing, checksum recovery, screenshot and RDI tests passed");
+	puts("DBUS command, framing, checksum recovery, screenshot, backup and RDI tests passed");
 	return 0;
 }

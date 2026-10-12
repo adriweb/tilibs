@@ -1356,6 +1356,24 @@ a {
     flex-wrap: wrap;
 }
 
+#backupNote {
+    white-space: pre-line;
+}
+
+.backup-guide-steps {
+    padding-inline-start: 24px;
+    line-height: 1.6;
+}
+
+.backup-guide-steps li + li {
+    margin-top: 12px;
+}
+
+#backupGuideFile,
+#backupGuideStatus {
+    overflow-wrap: anywhere;
+}
+
 .modal-footer-actions.hidden {
     display: none;
 }
