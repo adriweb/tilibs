@@ -206,9 +206,43 @@ static int		execute		(CalcHandle* handle, VarEntry *ve, const char* args)
 	return ret;
 }
 
+static int recv_screen_data(CalcHandle *handle, uint8_t *bitmap)
+{
+	uint8_t host = 0, cmd = 0;
+	uint16_t length = 0;
+	int ret = dbus_recv_header(handle, &host, &cmd, &length);
+	if (ret) return ret;
+	if (cmd == DBUS_CMD_ERR || cmd == DBUS_CMD_ERR2) return ERR_CHECKSUM;
+	if (cmd != DBUS_CMD_XDP) return ERR_INVALID_CMD;
+
+	const size_t screen_size = TI89_COLS * TI89_ROWS / 8;
+	// Receive outside dbus_recv_sized: its automatic CHK would abort the
+	// screenshot before we can apply the historical TI-68k checksum exception.
+	ret = dbus_recv_data_sized(handle, &length, bitmap, screen_size);
+	if ((ret == 0 || ret == ERR_CHECKSUM) && length != screen_size)
+	{
+		ret = ERR_INVALID_SCREENSHOT;
+	}
+	else if (ret == ERR_CHECKSUM)
+	{
+		// A physical TI-89 / AMS 2.08 returns a complete, correct bitmap with
+		// an invalid checksum. Keep this exception limited to screen data.
+		// TI Graph Link also skips checksum verification for screenshots.
+		ticalcs_info("Ignoring TI-68k screenshot checksum mismatch");
+		ret = 0;
+	}
+	if ((ret == ERR_INVALID_PACKET || ret == ERR_INVALID_SCREENSHOT)
+	    && (handle->model == CALC_TI89 || handle->model == CALC_TI89T))
+	{
+		// As for other rejected XDP packets, notify the sender after draining.
+		ti68k_send_ERR(handle, ti68k_handle_to_dbus_mid(handle));
+	}
+	return ret;
+}
+
 static int		recv_screen	(CalcHandle* handle, CalcScreenCoord* sc, uint8_t** bitmap)
 {
-	*bitmap = (uint8_t *)ticalcs_alloc_screen(65537U);
+	*bitmap = (uint8_t *)ticalcs_alloc_screen(TI89_COLS * TI89_ROWS / 8);
 	if (*bitmap == nullptr)
 	{
 		return ERR_MALLOC;
@@ -234,9 +268,8 @@ static int		recv_screen	(CalcHandle* handle, CalcScreenCoord* sc, uint8_t** bitm
 		ret = RECV_ACK(handle, NULL);
 		if (!ret)
 		{
-			uint16_t max_cnt;
-			ret = RECV_XDP(handle, &max_cnt, *bitmap, 65537U);
-			if (!ret || ret == ERR_CHECKSUM) // problem with checksum
+			ret = recv_screen_data(handle, *bitmap);
+			if (!ret)
 			{
 				// Clip the unused part of the screen (nevertheless usable with asm programs)
 				if (   ((handle->model == CALC_TI89) || (handle->model == CALC_TI89T))

@@ -179,7 +179,7 @@ static int		recv_screen	(CalcHandle* handle, CalcScreenCoord* sc, uint8_t** bitm
 		{
 			uint16_t pktsize;
 			ret = RECV_XDP(handle, &pktsize, data, 65542U);
-			if (!ret || ret == ERR_CHECKSUM) // problem with checksum
+			if (!ret)
 			{
 				ret = SEND_ACK(handle);
 				if (!ret)
@@ -213,6 +213,10 @@ static int		recv_screen	(CalcHandle* handle, CalcScreenCoord* sc, uint8_t** bitm
 								ret = SEND_ACK(handle);
 								break;
 							}
+							if (ret)
+							{
+								break;
+							}
 
 							if (pktsize > TI84PC_SCREEN_MAX_ENCODED_SIZE - size)
 							{
@@ -240,7 +244,6 @@ static int		recv_screen	(CalcHandle* handle, CalcScreenCoord* sc, uint8_t** bitm
 							}
 							else
 							{
-								ticalcs_free_screen(data);
 								ret = ERR_MALLOC;
 								break;
 							}
