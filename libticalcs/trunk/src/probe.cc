@@ -443,7 +443,17 @@ static int ticalcs_probe_calc_1(CalcHandle* handle, CalcModel* model)
 		ret = ticalcs_calc_get_version(handle, &infos);
 		if (!ret)
 		{
-			*model = infos.model;
+			if (host == DBUS_MID_TI83p_PC && !(infos.mask & INFOS_CALC_MODEL))
+			{
+				// The MID identifies the family transport even when RDI does not
+				// identify an exact product. Do not turn this into a CSE guess.
+				*model = CALC_TI83P;
+				ticalcs_info("Unknown TI-83 Plus-family hardware revision; using the family transport");
+			}
+			else
+			{
+				*model = infos.model;
+			}
 		}
 	} while(0);
 

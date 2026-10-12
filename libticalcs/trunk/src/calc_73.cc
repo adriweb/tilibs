@@ -1414,32 +1414,52 @@ static int		get_version	(CalcHandle* handle, CalcInfos* infos)
 	if (!ret)
 	{
 		memset(infos, 0, sizeof(CalcInfos));
-		if (length >= 11)
+		if (length >= DBUS_RDI_MIN_SIZE)
 		{
 			if (handle->model == CALC_TI73)
 			{
-				ticalcs_slprintf(infos->os_version, sizeof(infos->os_version), "%1x.%02x", buffer[0], buffer[1]);
-				ticalcs_slprintf(infos->boot_version, sizeof(infos->boot_version), "%1x.%02x", buffer[2], buffer[3]);
+				ticalcs_slprintf(infos->os_version, sizeof(infos->os_version), "%1x.%02x", buffer[DBUS_RDI_OS_VERSION], buffer[DBUS_RDI_OS_VERSION + 1]);
+				ticalcs_slprintf(infos->boot_version, sizeof(infos->boot_version), "%1x.%02x", buffer[DBUS_RDI_BOOT_VERSION], buffer[DBUS_RDI_BOOT_VERSION + 1]);
 			}
 			else
 			{
-				ticalcs_slprintf(infos->os_version, sizeof(infos->os_version), "%1i.%02i", buffer[0], buffer[1]);
-				ticalcs_slprintf(infos->boot_version, sizeof(infos->boot_version), "%1i.%02i", buffer[2], buffer[3]);
+				ticalcs_slprintf(infos->os_version, sizeof(infos->os_version), "%1i.%02i", buffer[DBUS_RDI_OS_VERSION], buffer[DBUS_RDI_OS_VERSION + 1]);
+				ticalcs_slprintf(infos->boot_version, sizeof(infos->boot_version), "%1i.%02i", buffer[DBUS_RDI_BOOT_VERSION], buffer[DBUS_RDI_BOOT_VERSION + 1]);
 			}
-			infos->battery = (buffer[4] & 1) ? 0 : 1;
-			infos->hw_version = buffer[5];
-			switch(buffer[5])
+			infos->battery = (buffer[DBUS_RDI_BATTERY] & 1) ? 0 : 1;
+			infos->hw_version = buffer[DBUS_RDI_HW_REVISION];
+			bool known_model = false;
+			if (handle->model == CALC_TI73)
 			{
-			case 0: infos->model = CALC_TI83P; break;
-			case 1: infos->model = CALC_TI83P; break;
-			case 2: infos->model = CALC_TI84P; break;
-			case 3: infos->model = CALC_TI84P; break;
-			case 5: infos->model = CALC_TI84PC; break;
-			default: infos->model = CALC_TI84PC; break; // If new models ever arise, they'll probably be 84+CSE or newer anyway.
+				if (buffer[DBUS_RDI_HW_REVISION] == DBUS_RDI_HW_TI73)
+				{
+					infos->model = CALC_TI73;
+					known_model = true;
+				}
 			}
-			infos->language_id = buffer[6];
-			infos->sub_lang_id = buffer[7];
-			infos->mask = (InfosMask)(INFOS_BOOT_VERSION | INFOS_OS_VERSION | INFOS_BATTERY_ENOUGH | INFOS_HW_VERSION | INFOS_CALC_MODEL | INFOS_LANG_ID | INFOS_SUB_LANG_ID);
+			else
+			{
+				switch (buffer[DBUS_RDI_HW_REVISION])
+				{
+				case DBUS_RDI_HW_TI83P:
+				case DBUS_RDI_HW_TI83P_SE:
+					infos->model = CALC_TI83P; known_model = true; break;
+				case DBUS_RDI_HW_TI84P:
+				case DBUS_RDI_HW_TI84P_SE:
+					infos->model = CALC_TI84P; known_model = true; break;
+				case DBUS_RDI_HW_TI84PC_SE:
+					infos->model = CALC_TI84PC; known_model = true; break;
+				default:
+					break; // Keep unknown revisions unknown, as TI does.
+				}
+			}
+			infos->language_id = buffer[DBUS_RDI_LANGUAGE];
+			infos->sub_lang_id = buffer[DBUS_RDI_SUB_LANGUAGE];
+			infos->mask = (InfosMask)(INFOS_BOOT_VERSION | INFOS_OS_VERSION | INFOS_BATTERY_ENOUGH | INFOS_HW_VERSION | INFOS_LANG_ID | INFOS_SUB_LANG_ID);
+			if (known_model)
+			{
+				infos->mask |= INFOS_CALC_MODEL;
+			}
 
 			tifiles_hexdump(buffer, length);
 			ticalcs_info(_("  OS: %s"), infos->os_version);
@@ -1450,6 +1470,7 @@ static int		get_version	(CalcHandle* handle, CalcInfos* infos)
 		else
 		{
 			ticalcs_warning("%s", _("Bad data length for version information"));
+			ret = ERR_INVALID_PACKET;
 		}
 	}
 
