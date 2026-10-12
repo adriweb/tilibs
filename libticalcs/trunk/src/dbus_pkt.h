@@ -170,6 +170,22 @@ extern "C" {
 #define DBUS_TI_CMD_SIOA  DBUS_CMD_SID
 #define DBUS_TI_CMD_XDP   DBUS_CMD_XDP
 
+// RDI response layout used by the TI-73 and TI-83 Plus / TI-84 Plus families.
+#define DBUS_RDI_MIN_SIZE       8
+#define DBUS_RDI_OS_VERSION     0
+#define DBUS_RDI_BOOT_VERSION   2
+#define DBUS_RDI_BATTERY         4
+#define DBUS_RDI_HW_REVISION     5
+#define DBUS_RDI_LANGUAGE        6
+#define DBUS_RDI_SUB_LANGUAGE    7
+
+#define DBUS_RDI_HW_TI73         0
+#define DBUS_RDI_HW_TI83P        0
+#define DBUS_RDI_HW_TI83P_SE     1
+#define DBUS_RDI_HW_TI84P        2
+#define DBUS_RDI_HW_TI84P_SE     3
+#define DBUS_RDI_HW_TI84PC_SE    5
+
 // Rejection codes (CMD82_SKIP)
 
 #define DBUS_REJ_EXIT     1
