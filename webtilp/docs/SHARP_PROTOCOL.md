@@ -212,6 +212,31 @@ WebSerial has no equivalent of its Windows bridge's atomic baud change and
 
 ## Validation and remaining hardware work
 
+### Serial discovery on Windows
+
+WebUSB can see the Sunplus adapter as `04FC:0201` while its COM port exposes
+different USB IDs or no IDs through WebSerial. For an explicitly selected Sharp
+model or an adapter discovered through WebUSB, WebTILP opens an **unfiltered**
+serial chooser: select the adapter's COM port manually. A fresh Connect click
+may still be required after the USB chooser consumes browser user activation.
+Automatic discovery continues to reuse only ports reporting the exact Sunplus
+identity; other granted ports are never automatically assumed to be Sharp.
+
+The log's `Sharp serial discovery` entry contains the actual selected port's
+`getInfo()`, metadata for already-authorized ports, and the separately selected
+WebUSB adapter's VID/PID. Empty serial metadata is preserved as `{}`. WebSerial
+does not expose COM names/paths to JavaScript, and `getPorts()` cannot enumerate
+ungranted ports. Matching USB IDs alone cannot uniquely associate two identical
+adapters; missing or different IDs cannot establish the USB-to-COM association.
+The information panel displays the selected serial port's actual IDs, or says
+that the IDs are unavailable, instead of substituting the Sunplus defaults.
+
+If the unfiltered chooser is still empty, check the Windows Device Manager COM
+port and driver and close any application using the port. That result requires
+OS/driver/browser evidence; adjusting the USB filter further cannot resolve it.
+
+### Tests
+
 ```
 make -C webtilp test
 SHARP_DUMPS_DIR=/path/to/sharp_dumps node webtilp/tests/test_sharp_backend.js
@@ -227,6 +252,8 @@ lifecycle, ambiguity, disconnect isolation, selectors and capability gates.
 
 `tests/sharp_frontend.html` runs the real UI against a clearly marked simulated
 serial peer. It is a browser QA harness, not proof of calculator compatibility.
+Add `?serialInfo=missing` or `?serialInfo=alternate` to exercise manual selection
+when the simulated serial driver omits or changes its USB identity.
 
 The supplied `sharp-receiver/README.md` reports earlier physical system captures
 for all four variants and byte-validated full ROM results. Those are evidence

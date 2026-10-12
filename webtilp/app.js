@@ -715,6 +715,9 @@ const I18N_EN = {
     "sharp_backend_unavailable": "The Sharp link backend failed to load.",
     "sharp_serial_required": "Sharp PC-Link requires WebSerial and the Sunplus serial driver. Use a Chromium browser on HTTPS or localhost.",
     "status_sharp_serial_authorization_required": "Click Connect Calculator again to authorize the Sharp serial port.",
+    "sharp_serial_choose_port": "Select the Sharp adapter's COM/serial port. All serial ports are shown, including ports without USB IDs.",
+    "sharp_serial_diagnostics": "Sharp serial discovery (actual browser metadata): {details}",
+    "sharp_serial_unknown_ids": "USB IDs not exposed",
     "sharp_connected": "Sharp serial cable connected. Start PC-Link on the calculator for normal transfers; use REPROGRAM for system or ROM reception.",
     "sharp_model": "Selected model",
     "sharp_transport": "Transport",
@@ -13543,8 +13546,25 @@ if (!self.isSecureContext) {
 
 
 function sharpSerialDevice(port, usbDevice = null) {
-    return serialPortToDevice(port, { usbDevice, serialKind: SERIAL_KIND_SHARP,
+    const device = serialPortToDevice(port, { usbDevice, serialKind: SERIAL_KIND_SHARP,
         vendorId: SHARP_VENDOR_ID, productId: SHARP_PRODUCT_ID, productName: 'Sharp EL-99xx' });
+    device.serialInfo = port.getInfo?.() || {};
+    device.usbDevice = usbDevice;
+    return device;
+}
+
+async function logSharpSerialDiagnostics(port, usbDevice) {
+    // getPorts lists granted ports only. getInfo can legitimately omit USB IDs;
+    // never substitute the wrapper's Sharp defaults in these diagnostics.
+    let authorized = null;
+    try {
+        authorized = (await navigator.serial.getPorts()).map(p => p.getInfo?.() || {});
+    } catch (error) { console.warn(error); }
+    log(tFormat('sharp_serial_diagnostics', { details: JSON.stringify({
+        selected: port ? port.getInfo?.() || {} : null,
+        authorized,
+        usbDiscovery: usbDevice ? { vendorId: usbDevice.vendorId, productId: usbDevice.productId } : null
+    }) }));
 }
 
 async function getAuthorizedSharpSerialDevices() {
@@ -13560,14 +13580,21 @@ async function requestSharpSerialDevice(usbDevice = null) {
     if (!navigator.serial) throw new Error(t('sharp_serial_required'));
     if (!self.isSecureContext) throw new Error(t('transport_secure_context_error'));
     const generation = state.sharpConnectionGeneration;
+    const checkGeneration = () => {
+        if (generation === state.sharpConnectionGeneration) return;
+        const error = new Error('Sharp connection cancelled.');
+        error.sharpConnectionCancelled = true; throw error;
+    };
     try {
-        const port = await navigator.serial.requestPort({ filters: [{
-            usbVendorId: SHARP_VENDOR_ID, usbProductId: SHARP_PRODUCT_ID
-        }] });
-        if (generation !== state.sharpConnectionGeneration) {
-            const error = new Error('Sharp connection cancelled.');
-            error.sharpConnectionCancelled = true; throw error;
-        }
+        log(t('sharp_serial_choose_port'));
+        // Only reached for explicit Sharp intent or a discovered Sharp USB
+        // adapter. Some serial drivers omit/change the USB identity, so let
+        // the user select the COM port without a VID/PID filter. Keep this
+        // request ahead of any await to preserve the click's activation.
+        const port = await navigator.serial.requestPort();
+        checkGeneration();
+        await logSharpSerialDiagnostics(port, usbDevice);
+        checkGeneration();
         return sharpSerialDevice(port, usbDevice);
     } catch (error) {
         if (generation !== state.sharpConnectionGeneration) {
@@ -13577,7 +13604,11 @@ async function requestSharpSerialDevice(usbDevice = null) {
             state.pendingSharpUsbDevice = usbDevice;
             error.sharpSerialAuthorizationRequired = true;
         }
-        if (error?.name === 'NotFoundError') return null;
+        if (error?.name === 'NotFoundError') {
+            await logSharpSerialDiagnostics(null, usbDevice);
+            checkGeneration();
+            return null;
+        }
         throw error;
     }
 }
@@ -13632,8 +13663,12 @@ function readSharpInfo(version = null) {
     const backend = state.sharpBackend;
     state.deviceModelName = globalThis.WebTILPSharp.MODELS[backend.model];
     state.deviceInfoProductName = state.deviceModelName;
+    const info = state.authorizedDevice?.serialInfo || {};
+    const hex = value => Number.isInteger(value) ? value.toString(16).toUpperCase().padStart(4, '0') : '?';
+    const serialIdentity = info.usbVendorId !== undefined || info.usbProductId !== undefined
+        ? `${hex(info.usbVendorId)}:${hex(info.usbProductId)}` : t('sharp_serial_unknown_ids');
     const entries = [{ key: t('sharp_model'), value: state.deviceModelName },
-        { key: t('sharp_transport'), value: 'Sunplus 04FC:0201 / WebSerial' },
+        { key: t('sharp_transport'), value: `${serialIdentity} / WebSerial` },
         { key: t('sharp_protocol'), value: 'PC-Link / REPROGRAM' }];
     if (version) entries.push({ key: t('sharp_version'), value: version });
     state.deviceInfoEntries = entries; renderDeviceInfo(entries);
