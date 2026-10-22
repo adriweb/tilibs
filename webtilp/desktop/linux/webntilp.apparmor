@@ -1,0 +1,10 @@
+# Optional Ubuntu 24.04 / AppArmor 4 namespace permission for the tarball
+# installed at this exact path. Chromium's own sandbox remains enabled.
+# https://documentation.ubuntu.com/release-notes/24.04/#unprivileged-user-namespace-restrictions
+abi <abi/4.0>,
+
+include <tunables/global>
+
+profile webntilp /opt/webntilp/webntilp flags=(unconfined) {
+  userns,
+}

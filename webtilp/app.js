@@ -11832,6 +11832,9 @@ function waitForIsolationWorker(registration, timeoutMs = 30000) {
 }
 
 async function prepareServiceWorker() {
+    // Desktop assets ship with the application; a cached web worker could keep
+    // serving a previous release after the application itself has been updated.
+    if (window.location.protocol === 'webntilp:') return false;
     // Hard refresh can restore the pre-isolation sessionStorage snapshot. Keep
     // the one-retry guard in the navigation URL instead, then remove it on success.
     const reloadParam = '__webtilp_isolation';
