@@ -1,0 +1,5 @@
+# Optional systemd-logind uaccess rules for the TI USB IDs supported by
+# WebTILP. Other calculator families and serial/hidraw nodes need their own
+# permissions. Install as /etc/udev/rules.d/69-webntilp.rules, reload rules,
+# and reconnect the calculator. See the desktop README for details.
+SUBSYSTEM=="usb", ATTR{idVendor}=="0451", ATTR{idProduct}=="e001|e003|e004|e008|e012|e018|e01c|e022", TAG+="uaccess"
