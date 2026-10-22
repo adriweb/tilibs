@@ -1,0 +1,233 @@
+name: Build Web'nTILP
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'webtilp/desktop/**'
+      - '.github/workflows/build.webntilp.workflow.yml'
+      - '.github/workflows/build.webtilp.workflow.yml'
+  push:
+    tags: ['webntilp-v*']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: webntilp-${{ github.ref }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
+
+jobs:
+  web:
+    name: Build shared offline web assets
+    uses: ./.github/workflows/build.webtilp.workflow.yml
+    with:
+      desktop-build: true
+
+  package:
+    name: Package ${{ matrix.platform }} ${{ matrix.arch }}
+    needs: web
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: win
+            arch: x64
+            runner: windows-2022
+          - platform: mac
+            arch: x64
+            runner: macos-15-intel
+          - platform: mac
+            arch: arm64
+            runner: macos-15
+          - platform: linux
+            arch: x64
+            runner: ubuntu-24.04
+          - platform: linux
+            arch: arm64
+            runner: ubuntu-24.04-arm
+    defaults:
+      run:
+        shell: bash
+        working-directory: webtilp/desktop
+    steps:
+      - name: Check out the same source revision
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Set up Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: '24.19.0'
+          cache: npm
+          cache-dependency-path: webtilp/desktop/package-lock.json
+
+      - name: Download source-built web assets
+        uses: actions/download-artifact@v4
+        with:
+          name: webtilp-site
+          path: webtilp
+
+      - name: Check release version
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          node - <<'JS'
+          const assert = require('node:assert/strict');
+          const { version } = require('./package.json');
+          assert.equal(process.env.RELEASE_TAG, `webntilp-v${version}`,
+            'The desktop package version must match its release tag');
+          JS
+
+      - name: Install desktop build dependencies
+        run: npm ci
+
+      - name: Test desktop integration and stage offline assets
+        run: |
+          node - <<'JS'
+          const assert = require('node:assert/strict');
+          const sources = require('../build-sources.json');
+          assert.equal(sources.tilibs, process.env.GITHUB_SHA,
+            'Desktop assets must come from the exact source revision being packaged');
+          JS
+          npm test
+          npm run stage
+
+      - name: Install Linux desktop test dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb libnss3 libatk-bridge2.0-0t64 libgtk-3-0t64 libgbm1 libasound2t64
+          # Ubuntu 24's AppArmor policy blocks arbitrary Chromium user namespaces.
+          # Permit them only on this disposable CI host, keeping the app sandbox on.
+          if sysctl kernel.apparmor_restrict_unprivileged_userns >/dev/null 2>&1; then
+            sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          fi
+
+      - name: Smoke test bundled Chromium on Linux
+        if: runner.os == 'Linux'
+        run: xvfb-run -a npm run smoke
+
+      - name: Smoke test bundled Chromium on Windows and macOS
+        if: runner.os != 'Linux'
+        run: npm run smoke
+
+      - name: Build installers and portable archives
+        env:
+          # Signing may be configured separately; unsigned builds stay reviewable.
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+        run: npm run dist -- --${{ matrix.platform }} --${{ matrix.arch }} --publish never
+
+      - name: Locate packaged application
+        run: |
+          node - <<'JS'
+          const assert = require('node:assert/strict');
+          const fs = require('node:fs');
+          const path = require('node:path');
+          const { execFileSync } = require('node:child_process');
+          const config = require('./package.json');
+          function findArchives(directory) {
+            return fs.readdirSync(directory, { withFileTypes: true }).flatMap(entry => {
+              const filename = path.join(directory, entry.name);
+              return entry.isDirectory() ? findArchives(filename)
+                : entry.name === 'app.asar' ? [filename] : [];
+            });
+          }
+          const archives = findArchives(path.resolve('dist'));
+          assert.equal(archives.length, 1, 'Expected exactly one native unpacked app');
+          const resources = path.dirname(archives[0]);
+          const appDirectory = path.dirname(resources);
+          let executable;
+          if (process.platform === 'darwin') {
+            const plist = JSON.parse(execFileSync('plutil', [
+              '-convert', 'json', '-o', '-', path.join(appDirectory, 'Info.plist')
+            ], { encoding: 'utf8' }));
+            executable = path.join(appDirectory, 'MacOS', plist.CFBundleExecutable);
+          } else {
+            const platform = process.platform === 'win32' ? 'win' : process.platform;
+            const name = config.build[platform]?.executableName || config.build.executableName
+              || config.build.productName || config.productName || config.name;
+            executable = path.join(appDirectory, name + (process.platform === 'win32' ? '.exe' : ''));
+          }
+          assert.ok(fs.statSync(executable).isFile(), 'Packaged executable is missing');
+          fs.appendFileSync(process.env.GITHUB_ENV, `WEBNTILP_EXECUTABLE=${executable}\n`);
+          console.log(`Will smoke test ${executable}`);
+          JS
+
+      - name: Smoke test packaged application on Linux
+        if: runner.os == 'Linux'
+        run: xvfb-run -a npm run smoke
+
+      - name: Smoke test packaged application on Windows and macOS
+        if: runner.os != 'Linux'
+        run: npm run smoke
+
+      - name: Upload desktop downloads
+        uses: actions/upload-artifact@v4
+        with:
+          name: webntilp-${{ matrix.platform }}-${{ matrix.arch }}
+          path: |
+            webtilp/desktop/dist/*.exe
+            webtilp/desktop/dist/*.dmg
+            webtilp/desktop/dist/*.zip
+            webtilp/desktop/dist/*.AppImage
+            webtilp/desktop/dist/*.tar.gz
+          if-no-files-found: error
+          retention-days: 30
+
+  release:
+    name: Prepare draft release
+    if: startsWith(github.ref, 'refs/tags/webntilp-v')
+    needs: package
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - name: Download all desktop packages
+        uses: actions/download-artifact@v4
+        with:
+          pattern: webntilp-*
+          path: downloads
+          merge-multiple: true
+
+      - name: Prepare checksums and release notes
+        run: |
+          python3 - <<'PY'
+          import hashlib
+          from pathlib import Path
+          root = Path('downloads')
+          packages = sorted(p for p in root.iterdir() if p.is_file())
+          if not packages:
+              raise SystemExit('No desktop packages were downloaded')
+          (root / 'SHA256SUMS.txt').write_text(''.join(
+              f'{hashlib.file_digest(p.open("rb"), "sha256").hexdigest()}  {p.name}\n'
+              for p in packages
+          ))
+          Path('release-notes.md').write_text(
+              "Web'nTILP packages WebTILP with Chromium for offline use from the first launch.\n\n"
+              "Choose the download matching your operating system and CPU architecture. "
+              "USB and serial connections still require the appropriate operating-system drivers "
+              "or Linux device permissions.\n\n"
+              "These builds are unsigned and are not notarized. Review and sign the packages "
+              "as appropriate before publishing this draft.\n"
+          )
+          PY
+
+      - name: Create or update draft GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            # A rerun must never replace downloads on an already published release.
+            test "$(gh release view "$RELEASE_TAG" --json isDraft --jq .isDraft)" = true
+            gh release upload "$RELEASE_TAG" downloads/* --clobber
+          else
+            gh release create "$RELEASE_TAG" downloads/* --verify-tag --draft \
+              --title "Web'nTILP ${RELEASE_TAG#webntilp-v}" --notes-file release-notes.md
+          fi
