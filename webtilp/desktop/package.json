@@ -1,0 +1,87 @@
+{
+  "name": "webntilp",
+  "productName": "Web'nTILP",
+  "desktopName": "org.webtilp.webntilp.desktop",
+  "version": "0.1.0",
+  "description": "WebTILP with bundled Chromium for offline calculator transfers",
+  "author": "Adrien Bertrand",
+  "license": "GPL-2.0-or-later",
+  "private": true,
+  "engines": { "node": ">=22.12.0" },
+  "main": "main.cjs",
+  "scripts": {
+    "stage": "node scripts/stage-assets.cjs",
+    "prestart": "npm run stage",
+    "start": "electron .",
+    "test": "node --test tests/*.test.cjs",
+    "smoke": "node scripts/smoke.cjs",
+    "predist": "npm run stage",
+    "dist": "electron-builder --publish never",
+    "pack": "npm run stage && electron-builder --dir --publish never"
+  },
+  "devDependencies": {
+    "electron": "44.7.2",
+    "electron-builder": "26.15.3",
+    "playwright-core": "1.64.1"
+  },
+  "build": {
+    "appId": "org.webtilp.webntilp",
+    "productName": "Web'nTILP",
+    "artifactName": "Web-nTILP-${version}-${os}-${arch}.${ext}",
+    "asar": true,
+    "afterExtract": "scripts/preserve-runtime-licenses.cjs",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "main.cjs",
+      "protocol.cjs",
+      "permissions.cjs",
+      "app/**/*",
+      "package.json"
+    ],
+    "mac": {
+      "category": "public.app-category.utilities",
+      "icon": "../android-chrome-512x512.png",
+      "target": [
+        "dmg",
+        "zip"
+      ],
+      "hardenedRuntime": true,
+      "entitlements": "entitlements.mac.plist",
+      "entitlementsInherit": "entitlements.mac.plist"
+    },
+    "win": {
+      "icon": "../android-chrome-512x512.png",
+      "target": [
+        "nsis",
+        "portable"
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true
+    },
+    "portable": {
+      "artifactName": "Web-nTILP-${version}-${os}-${arch}-portable.${ext}"
+    },
+    "linux": {
+      "executableName": "webntilp",
+      "syncDesktopName": true,
+      "extraResources": [{ "from": "linux", "to": "linux" }],
+      "icon": "../android-chrome-512x512.png",
+      "category": "Utility",
+      "target": [
+        "AppImage",
+        "tar.gz"
+      ],
+      "desktop": {
+        "entry": {
+          "Name": "Web'nTILP",
+          "Comment": "Offline calculator transfers with WebTILP"
+        }
+      }
+    }
+  }
+}
