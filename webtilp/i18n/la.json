@@ -158,6 +158,7 @@
   "model": "Exemplar",
   "free_memory": "Memoria libera",
   "refresh_device_info": "Notitias apparatus renova",
+  "device_info_unsupported": "Hoc exemplar informationes de instrumento non praebet.",
   "sync_clock": "Horologium synchroniza",
   "transfers": "Translationes",
   "is_ready": "Paratus",
