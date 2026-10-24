@@ -2136,7 +2136,7 @@ static unsigned int compute_location_mask_for_entry(const VarEntry* ve) {
     return (LOC_RAM | LOC_ARCHIVE);
 }
 
-static void append_var_entry_json_with_container(GString* out, const VarEntry* ve, const char* container_type, int container_index) {
+static void append_var_entry_json_with_container(GString* out, const VarEntry* ve, CalcModel name_model, const char* container_type, int container_index) {
     if (!out || !ve) {
         return;
     }
@@ -2144,18 +2144,20 @@ static void append_var_entry_json_with_container(GString* out, const VarEntry* v
     char folder_buf[128] = {};
     const char* raw_name = ve->name;
     const char* raw_folder = ve->folder;
+    // File readers encode names for content->model_dst, which can differ from
+    // the connected calculator (e.g. tokenized .8xl names versus USB TI-UTF-8).
     if (raw_name && *raw_name) {
-        if (ticonv_varname_to_utf8_sn(g_calc_model, raw_name, name_buf, sizeof(name_buf), ve->type) == nullptr) {
+        if (ticonv_varname_to_utf8_sn(name_model, raw_name, name_buf, sizeof(name_buf), ve->type) == nullptr) {
             strncpy(name_buf, raw_name, sizeof(name_buf) - 1);
         }
     }
     if (raw_folder && *raw_folder) {
-        if (ticonv_varname_to_utf8_sn(g_calc_model, raw_folder, folder_buf, sizeof(folder_buf), ve->type) == nullptr) {
+        if (ticonv_varname_to_utf8_sn(name_model, raw_folder, folder_buf, sizeof(folder_buf), ve->type) == nullptr) {
             strncpy(folder_buf, raw_folder, sizeof(folder_buf) - 1);
         }
     }
 
-    const char* type_name = tifiles_vartype2type(g_calc_model, ve->type);
+    const char* type_name = tifiles_vartype2type(name_model, ve->type);
     const unsigned int location_mask = compute_location_mask_for_entry(ve);
 
     g_string_append(out, "{\"name\":\"");
@@ -2183,8 +2185,8 @@ static void append_var_entry_json_with_container(GString* out, const VarEntry* v
     g_string_append(out, "}");
 }
 
-static void append_var_entry_json(GString* out, const VarEntry* ve) {
-    append_var_entry_json_with_container(out, ve, nullptr, -1);
+static void append_var_entry_json(GString* out, const VarEntry* ve, CalcModel name_model) {
+    append_var_entry_json_with_container(out, ve, name_model, nullptr, -1);
 }
 
 static uint32_t get_flash_content_size(const FlashContent* content) {
@@ -2306,7 +2308,7 @@ static void get_file_metadata_json(const char* filename, const char** class_name
             if (!first) {
                 g_string_append(entries_json_out, ",");
             }
-            append_var_entry_json_with_container(entries_json_out, te->content.regular->entries[0], "var", (int)i);
+            append_var_entry_json_with_container(entries_json_out, te->content.regular->entries[0], te->content.regular->model_dst, "var", (int)i);
             first = false;
         }
         for (unsigned int i = 0; i < content->n_apps; i++) {
@@ -2357,7 +2359,7 @@ static void get_file_metadata_json(const char* filename, const char** class_name
         if (!first) {
             g_string_append(entries_json_out, ",");
         }
-        append_var_entry_json(entries_json_out, ve);
+        append_var_entry_json(entries_json_out, ve, content->model_dst);
         first = false;
     }
     tifiles_content_delete_regular(content);

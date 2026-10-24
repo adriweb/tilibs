@@ -134,3 +134,41 @@ extern "C" EMSCRIPTEN_KEEPALIVE void test_var_name_teardown() {
     ticables_handle_del(g_cable_handle);
     g_cable_handle = nullptr;
 }
+
+extern "C" EMSCRIPTEN_KEEPALIVE void test_var_name_files() {
+    FileContent* content = tifiles_content_create_regular(CALC_TI83P);
+    content->num_entries = 2;
+    content->entries = tifiles_ve_create_array(2);
+    for (unsigned i = 0; i < 2; ++i) {
+        VarEntry* entry = content->entries[i] = tifiles_ve_create();
+        entry->type = 1; // A real list containing one zero.
+        entry->name[0] = 0x5d;
+        entry->name[1] = i;
+        entry->size = 11;
+        entry->data = static_cast<uint8_t*>(g_malloc0(entry->size));
+        entry->data[0] = 1;
+    }
+    assert(tifiles_file_write_regular("/lists.8xg", content, nullptr) == 0);
+    content->num_entries = 1;
+    assert(tifiles_file_write_regular("/L1.8xl", content, nullptr) == 0);
+    TigContent* tig = tifiles_content_create_tigroup(CALC_TI83P, 0);
+    TigEntry* te = tifiles_te_create("L1.8xl", TIFILE_SINGLE, CALC_TI83P);
+    tifiles_content_delete_regular(te->content.regular);
+    te->content.regular = tifiles_content_dup_regular(content);
+    assert(tifiles_content_add_te(tig, te) == 1);
+    assert(tifiles_file_write_tigroup("/lists.tig", tig) == 0);
+    tifiles_content_delete_tigroup(tig);
+    content->num_entries = 2;
+    tifiles_content_delete_regular(content);
+
+    content = tifiles_content_create_regular(CALC_TI89);
+    content->num_entries = 1;
+    content->entries = tifiles_ve_create_array(1);
+    VarEntry* entry = content->entries[0] = tifiles_ve_create();
+    strcpy(entry->name, "\x88"); // theta in an alpha folder, in the TI-89 charset.
+    strcpy(entry->folder, "\x80");
+    entry->size = 1;
+    entry->data = static_cast<uint8_t*>(g_malloc0(1));
+    assert(tifiles_file_write_regular("/theta.89e", content, nullptr) == 0);
+    tifiles_content_delete_regular(content);
+}

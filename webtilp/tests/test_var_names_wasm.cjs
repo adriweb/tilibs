@@ -5,6 +5,24 @@ const timeout = setTimeout(() => { console.error('Variable-name WASM test timed 
 (async () => {
     const module = await createModule({print() {}, printErr() {}});
     await module.ccall('init', 'number', [], [], {async: true});
+    module.ccall('test_var_name_files', null, [], []);
+    // File names use the reader's charset, regardless of the connected model.
+    for (const model of [4, 13, 20]) {
+        module.ccall('set_calc_model', null, ['number'], [model]);
+        for (const [path, names] of [['/L1.8xl', ['L₁']], ['/lists.8xg', ['L₁', 'L₂']], ['/lists.tig', ['L₁']]]) {
+            const info = JSON.parse(module.ccall('file_get_entries_json', 'string', ['string'], [path]));
+            assert.deepEqual(info.entries.map(entry => entry.name), names, `model ${model}: ${path}`);
+            const batch = JSON.parse(module.ccall('files_get_entries_json', 'string', ['string'], [path]));
+            assert.deepEqual(batch.files[0].entries, info.entries);
+        }
+    }
+    for (const model of [8, 14]) {
+        module.ccall('set_calc_model', null, ['number'], [model]);
+        const info = JSON.parse(module.ccall('file_get_entries_json', 'string', ['string'], ['/theta.89e']));
+        assert.equal(info.entries[0].name, 'θ');
+        assert.equal(info.entries[0].folder, 'α');
+    }
+    console.log('File metadata preserves tokenized Z80 and TI-89 names across DBUS/USB models, singles, groups and TIGroup.');
     for (const fixture of [
         {model: 3, type: 1, raw: '5d', display: 'L₁'},
         {model: 3, type: 1, raw: '5d01', display: 'L₂'},
