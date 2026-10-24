@@ -290,15 +290,16 @@ int TICALL dbus_send(CalcHandle* handle, uint8_t target, uint8_t cmd, uint16_t l
 				}
 			}
 
-			// send last chunk
-			if (!ret)
+			// DBUS has no USB zero-length-packet terminator. An exact number
+			// of chunks already sent the entire framed packet.
+			if (!ret && r)
 			{
 				ret = ticables_cable_send(handle->cable, &buf[i*handle->priv.progress_blk_size], (uint16_t)r);
 				if (!ret)
 				{
 					ticables_progress_get(handle->cable, nullptr, nullptr, &handle->updat->rate);
 
-					handle->updat->cnt1 += 1;
+					handle->updat->cnt1 += r;
 					if (length > handle->priv.progress_min_size)
 					{
 						handle->updat->pbar();
