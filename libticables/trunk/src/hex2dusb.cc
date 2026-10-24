@@ -256,42 +256,28 @@ static FILE *logfile = nullptr;
 
 static int hex_read(unsigned char *data)
 {
-	static int idx = 0;
-	unsigned int data2;
-
-	if (feof(hex))
+	// Read only the hexadecimal column. In particular, a live capture may
+	// end without whitespace, a newline, or a complete ASCII column.
+	for (;;)
 	{
-		return -1;
-	}
-
-	const int ret = fscanf(hex, "%02X", &data2);
-	if (ret < 1)
-	{
-		return -1;
-	}
-	*data = (unsigned char)(data2 & 0xFF);
-	if (fgetc(hex) < 0)
-	{
-		return -1;
-	}
-	idx++;
-
-	if (idx >= 16)
-	{
-		idx = 0;
-		for (int i = 0; (i < 67-49) && !feof(hex); i++)
+		const int high = fgetc(hex);
+		if (high == EOF) return -1;
+		if (high == '|')
 		{
-			if (fgetc(hex) < 0)
-			{
-				return -1;
-			}
+			int c;
+			do { c = fgetc(hex); } while (c != EOF && c != '\n');
+			continue;
 		}
+		if (isspace((unsigned char)high)) continue;
+		const int low = fgetc(hex);
+		if (!isxdigit((unsigned char)high) || low == EOF || !isxdigit((unsigned char)low)) return -1;
+		const char byte[] = {(char)high, (char)low, '\0'};
+		*data = (unsigned char)strtoul(byte, nullptr, 16);
+		return 0;
 	}
-
-	return 0;
 }
 
-static int dusb_write(int dir, uint8_t data)
+static int dusb_write(int dir, uint8_t data, bool reset = false)
 {
 	static uint8_t array[20];
   	static int i = 0;
@@ -302,6 +288,16 @@ static int dusb_write(int dir, uint8_t data)
 	static uint16_t vtl_type;
 	static int cnt;
 	static int first = 1;
+
+	if (reset)
+	{
+		memset(array, 0, sizeof(array));
+		i = cnt = 0;
+		state = first = 1;
+		raw_size = vtl_size = 0;
+		raw_type = vtl_type = 0;
+		return 0;
+	}
 
 	if (logfile == nullptr)
 	{
@@ -436,6 +432,12 @@ int dusb_decomp(const char *filename)
 		return -1;
 	}
 
+	// Every conversion starts at the beginning of the capture, including a
+	// repeated snapshot after an incomplete raw or virtual packet.
+	dusb_write(0, 0, true);
+	ptf = dcf = 0;
+	memset(pkt_type_found, 0, sizeof(pkt_type_found));
+	memset(data_code_found, 0, sizeof(data_code_found));
 	fprintf(logfile, "TI packet decompiler for D-USB, version 1.0\n");
 
 	// skip comments
