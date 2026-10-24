@@ -703,6 +703,15 @@ static void write_var_entry_json(FILE* fp, const VarEntry* ve, const char* kind)
     json_escape_bytes(fp, name_buf, sizeof(name_buf));
     fprintf(fp, R"(","folder":")");
     json_escape_bytes(fp, folder_buf, sizeof(folder_buf));
+    // Display names are UTF-8; transfers need the original calculator bytes.
+    fprintf(fp, R"(","name_hex":")");
+    for (size_t i = 0; i < name_len; ++i) {
+        fprintf(fp, "%02x", (unsigned char)raw_name[i]);
+    }
+    fprintf(fp, R"(","folder_hex":")");
+    for (size_t i = 0; i < folder_len; ++i) {
+        fprintf(fp, "%02x", (unsigned char)raw_folder[i]);
+    }
     fprintf(fp, R"(","type":%u,"type_name":")", ve->type);
     if (type_name && *type_name) {
         json_escape_bytes(fp, type_name, strlen(type_name));
@@ -1793,8 +1802,65 @@ int string_to_calc_model(const char* value) {
     return ticonv_string_to_model(value);
 }
 
+// Listed names must retain their exact bytes: display conversion is not
+// necessarily reversible (tokens, legacy charsets, and TI-UTF-8 on DUSB).
+// A null hex argument denotes new, user-entered UTF-8 text instead.
+static bool copy_calc_name(char* dst, size_t capacity, const char* text,
+                           const char* hex, uint8_t type, bool variable) {
+    memset(dst, 0, capacity);
+    if (hex) {
+        const size_t length = strlen(hex);
+        if ((length & 1) || length / 2 >= capacity) return false;
+        for (size_t i = 0; i < length / 2; ++i) {
+            const int hi = g_ascii_xdigit_value(hex[2 * i]);
+            const int lo = g_ascii_xdigit_value(hex[2 * i + 1]);
+            if (hi < 0 || lo < 0 || (hi == 0 && lo == 0)) return false;
+            dst[i] = static_cast<char>((hi << 4) | lo);
+        }
+        return true;
+    }
+
+    const char* utf8 = text ? text : "";
+    if (!g_utf8_validate(utf8, -1, nullptr)) return false;
+    unsigned short* utf16 = ticonv_utf8_to_utf16(utf8);
+    if (!utf16) return false;
+    char* ti = ticonv_charset_utf16_to_ti(g_calc_model, utf16);
+    ticonv_utf16_free(utf16);
+    if (!ti) return false;
+    // Do not silently rename to '?' when the model cannot encode a character.
+    unsigned short* check_utf16 = ticonv_charset_ti_to_utf16(g_calc_model, ti);
+    char* check_utf8 = check_utf16 ? ticonv_utf16_to_utf8(check_utf16) : nullptr;
+    ticonv_utf16_free(check_utf16);
+    const bool representable = check_utf8 && strcmp(utf8, check_utf8) == 0;
+    ticonv_utf8_free(check_utf8);
+    if (!representable) {
+        ticonv_ti_free(ti);
+        return false;
+    }
+    const bool tokenized = g_calc_model == CALC_TI73 || g_calc_model == CALC_TI82
+        || g_calc_model == CALC_TI83 || g_calc_model == CALC_TI83P
+        || g_calc_model == CALC_TI84P || g_calc_model == CALC_TI84PC;
+    char* name = variable && tokenized ? ticonv_varname_tokenize(g_calc_model, ti, type) : g_strdup(ti);
+    ticonv_ti_free(ti);
+    if (!name) return false;
+    const size_t length = strlen(name);
+    const bool valid = length < capacity && (!*utf8 || length != 0);
+    if (valid) memcpy(dst, name, length);
+    ticonv_varname_free(name);
+    return valid;
+}
+
+static bool set_var_request(VarEntry& request, const char* folder, const char* name,
+                            uint8_t type, const char* folder_hex, const char* name_hex) {
+    request.type = type;
+    return copy_calc_name(request.folder, sizeof(request.folder), folder, folder_hex, 0, false)
+        && copy_calc_name(request.name, sizeof(request.name), name, name_hex, type, true)
+        && request.name[0];
+}
+
 EMSCRIPTEN_KEEPALIVE
-int calc_recv_var(CableHandle* cable_handle, const char* folder, const char* name, uint8_t type, const char* out_dir) {
+int calc_recv_var(CableHandle* cable_handle, const char* folder, const char* name, uint8_t type, const char* out_dir,
+                  const char* folder_hex = nullptr, const char* name_hex = nullptr) {
     if (!cable_handle) {
         printf("ERROR: NULL cable handle provided\n");
         return -1;
@@ -1811,11 +1877,7 @@ int calc_recv_var(CableHandle* cable_handle, const char* folder, const char* nam
     }
 
     VarEntry req{};
-    if (folder && *folder) {
-        strncpy(req.folder, folder, sizeof(req.folder) - 1);
-    }
-    strncpy(req.name, name, sizeof(req.name) - 1);
-    req.type = type;
+    if (!set_var_request(req, folder, name, type, folder_hex, name_hex)) return ERR_WEB_INVALID_ARGUMENT;
 
     char* base = tifiles_build_filename(g_calc_model, &req);
     if (!base) {
@@ -1839,7 +1901,8 @@ int calc_recv_var(CableHandle* cable_handle, const char* folder, const char* nam
 }
 
 EMSCRIPTEN_KEEPALIVE
-int calc_recv_app(CableHandle* cable_handle, const char* name, uint8_t type, const char* out_dir) {
+int calc_recv_app(CableHandle* cable_handle, const char* name, uint8_t type, const char* out_dir,
+                  const char* name_hex = nullptr) {
     if (!cable_handle) {
         printf("ERROR: NULL cable handle provided\n");
         return -1;
@@ -1856,8 +1919,7 @@ int calc_recv_app(CableHandle* cable_handle, const char* name, uint8_t type, con
     }
 
     VarEntry req{};
-    strncpy(req.name, name, sizeof(req.name) - 1);
-    req.type = type;
+    if (!set_var_request(req, "", name, type, "", name_hex)) return ERR_WEB_INVALID_ARGUMENT;
 
     char* base = tifiles_build_filename(g_calc_model, &req);
     if (!base) {
@@ -1881,7 +1943,8 @@ int calc_recv_app(CableHandle* cable_handle, const char* name, uint8_t type, con
 }
 
 EMSCRIPTEN_KEEPALIVE
-int calc_del_var(CableHandle* cable_handle, const char* folder, const char* name, uint8_t type) {
+int calc_del_var(CableHandle* cable_handle, const char* folder, const char* name, uint8_t type,
+                 const char* folder_hex = nullptr, const char* name_hex = nullptr) {
     if (!cable_handle) {
         printf("ERROR: NULL cable handle provided\n");
         return -1;
@@ -1901,11 +1964,7 @@ int calc_del_var(CableHandle* cable_handle, const char* folder, const char* name
     }
 
     VarEntry req{};
-    if (folder && *folder) {
-        strncpy(req.folder, folder, sizeof(req.folder) - 1);
-    }
-    strncpy(req.name, name, sizeof(req.name) - 1);
-    req.type = type;
+    if (!set_var_request(req, folder, name, type, folder_hex, name_hex)) return ERR_WEB_INVALID_ARGUMENT;
 
     return ticalcs_calc_del_var(g_calc_handle, &req);
 }
@@ -1931,13 +1990,13 @@ int calc_new_folder(CableHandle* cable_handle, const char* folder_path) {
     }
 
     VarEntry req{};
-    strncpy(req.folder, folder_path, sizeof(req.folder) - 1);
+    if (!copy_calc_name(req.folder, sizeof(req.folder), folder_path, nullptr, 0, false)) return ERR_WEB_INVALID_ARGUMENT;
 
     return ticalcs_calc_new_fld(g_calc_handle, &req);
 }
 
 EMSCRIPTEN_KEEPALIVE
-int calc_del_folder(CableHandle* cable_handle, const char* folder_path) {
+int calc_del_folder(CableHandle* cable_handle, const char* folder_path, const char* folder_hex = nullptr) {
     if (!cable_handle) {
         printf("ERROR: NULL cable handle provided\n");
         return -1;
@@ -1957,7 +2016,7 @@ int calc_del_folder(CableHandle* cable_handle, const char* folder_path) {
     }
 
     VarEntry req{};
-    strncpy(req.folder, folder_path, sizeof(req.folder) - 1);
+    if (!copy_calc_name(req.folder, sizeof(req.folder), folder_path, folder_hex, 0, false)) return ERR_WEB_INVALID_ARGUMENT;
 
     return ticalcs_calc_del_fld(g_calc_handle, &req);
 }
@@ -1969,7 +2028,9 @@ int calc_rename_var(CableHandle* cable_handle,
                     uint8_t old_type,
                     const char* new_folder,
                     const char* new_name,
-                    uint8_t new_type) {
+                    uint8_t new_type,
+                    const char* old_folder_hex = nullptr,
+                    const char* old_name_hex = nullptr) {
     if (!cable_handle) {
         printf("ERROR: NULL cable handle provided\n");
         return -1;
@@ -1989,24 +2050,20 @@ int calc_rename_var(CableHandle* cable_handle,
     }
 
     VarEntry old_req{};
-    if (old_folder && *old_folder) {
-        strncpy(old_req.folder, old_folder, sizeof(old_req.folder) - 1);
-    }
-    strncpy(old_req.name, old_name, sizeof(old_req.name) - 1);
-    old_req.type = old_type;
+    if (!set_var_request(old_req, old_folder, old_name, old_type, old_folder_hex, old_name_hex)) return ERR_WEB_INVALID_ARGUMENT;
 
     VarEntry new_req{};
-    if (new_folder && *new_folder) {
-        strncpy(new_req.folder, new_folder, sizeof(new_req.folder) - 1);
-    }
-    strncpy(new_req.name, new_name, sizeof(new_req.name) - 1);
-    new_req.type = new_type;
+    // A move keeps the existing name bytes; a rename keeps the folder bytes.
+    const char* new_folder_hex = g_strcmp0(old_folder, new_folder) == 0 ? old_folder_hex : nullptr;
+    const char* new_name_hex = old_type == new_type && g_strcmp0(old_name, new_name) == 0 ? old_name_hex : nullptr;
+    if (!set_var_request(new_req, new_folder, new_name, new_type, new_folder_hex, new_name_hex)) return ERR_WEB_INVALID_ARGUMENT;
 
     return ticalcs_calc_rename_var(g_calc_handle, &old_req, &new_req);
 }
 
 EMSCRIPTEN_KEEPALIVE
-int calc_change_attr(CableHandle* cable_handle, const char* folder, const char* name, uint8_t type, int attr) {
+int calc_change_attr(CableHandle* cable_handle, const char* folder, const char* name, uint8_t type, int attr,
+                     const char* folder_hex = nullptr, const char* name_hex = nullptr) {
     if (!cable_handle) {
         printf("ERROR: NULL cable handle provided\n");
         return -1;
@@ -2022,11 +2079,7 @@ int calc_change_attr(CableHandle* cable_handle, const char* folder, const char* 
     }
 
     VarEntry req{};
-    if (folder && *folder) {
-        strncpy(req.folder, folder, sizeof(req.folder) - 1);
-    }
-    strncpy(req.name, name, sizeof(req.name) - 1);
-    req.type = type;
+    if (!set_var_request(req, folder, name, type, folder_hex, name_hex)) return ERR_WEB_INVALID_ARGUMENT;
 
     return ticalcs_calc_change_attr(g_calc_handle, &req, (FileAttr)attr);
 }
