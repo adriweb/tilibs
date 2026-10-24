@@ -62,6 +62,12 @@
     {
       "name": "win-only",
       "hidden": true,
+      "cacheVariables": {
+        "VCPKG_OVERLAY_PORTS": {
+          "type": "STRING",
+          "value": "${sourceDir}/.cmake/vcpkg_overlay_ports"
+        }
+      },
       "condition": {
         "type": "equals",
         "lhs": "${hostSystemName}",
