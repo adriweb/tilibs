@@ -2,9 +2,15 @@
 #include <assert.h>
 #include <stdlib.h>
 #include <string.h>
+#ifdef _WIN32
+#include <process.h>
+#define getpid _getpid
+#else
 #include <unistd.h>
+#endif
 #include <sys/stat.h>
 #include <glib.h>
+#include <glib/gstdio.h>
 #include <tifiles.h>
 #include "../src/error.h"
 
@@ -121,7 +127,7 @@ static char g_tmpdir[4096];
 static void make_tmpdir(void)
 {
 	snprintf(g_tmpdir, sizeof(g_tmpdir), "tifiles_memreader_test.%d", (int)getpid());
-	if (mkdir(g_tmpdir, 0700) != 0)
+	if (g_mkdir(g_tmpdir, 0700) != 0)
 	{
 		g_tmpdir[0] = '.';
 		g_tmpdir[1] = '\0';
@@ -401,8 +407,10 @@ static void test_tifl_multi_entry(void)
 		int k;
 		for (k = 0; cand[k] != NULL; k++)
 		{
-			if (access(cand[k], R_OK) == 0)
+			FILE *sample = g_fopen(cand[k], "rb");
+			if (sample != NULL)
 			{
+				fclose(sample);
 				assert(tifiles_file_is_os(cand[k]) == 1);
 				break;
 			}
@@ -539,8 +547,10 @@ static void test_equivalence(const char *base)
 
 		for (k = 0; k < 5; k++)
 		{
-			if (access(cand[k], R_OK) == 0)
+			FILE *sample = g_fopen(cand[k], "rb");
+			if (sample != NULL)
 			{
+				fclose(sample);
 				break;
 			}
 		}
