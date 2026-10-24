@@ -6905,6 +6905,8 @@ function renderTableView(entries, filter) {
         if (checkbox) {
             checkbox.dataset.name = entry.name || '';
             checkbox.dataset.folder = entry.folder || '';
+            checkbox.dataset.nameHex = entry.name_hex ?? '';
+            checkbox.dataset.folderHex = entry.folder_hex ?? '';
             checkbox.dataset.folderPath = normalizedFolderPath;
             checkbox.dataset.kind = isFolder ? 'folder' : (entry.kind || '');
             checkbox.dataset.typeName = entry.type_name || '';
@@ -7517,8 +7519,8 @@ function getSelectedVarInputs() {
 }
 
 function buildSelectionKey(input) {
-    const name = input.dataset.name || '';
-    const folder = input.dataset.folder || '';
+    const name = input.dataset.nameHex || input.dataset.name || '';
+    const folder = input.dataset.folderHex || input.dataset.folder || '';
     const type = input.dataset.type || '';
     const kind = input.dataset.kind || '';
     return `${kind}|${folder}|${type}|${name}`;
@@ -7552,6 +7554,8 @@ function buildEntryFromCheckbox(checkbox) {
     return {
         name: checkbox.dataset.name,
         folder: checkbox.dataset.folder,
+        name_hex: checkbox.dataset.nameHex || null,
+        folder_hex: checkbox.dataset.folderHex || null,
         type: Number(checkbox.dataset.type),
         typeName: checkbox.dataset.typeName || '',
         size: Number(checkbox.dataset.size) || 0,
@@ -7568,6 +7572,12 @@ function buildEntryFromCheckbox(checkbox) {
         invalid: checkbox.dataset.invalid === '1',
         numWorksName: checkbox.dataset.numWorksName || ''
     };
+}
+
+function getTiFolderRequestHex(entry) {
+    if (entry.name_hex == null) return null;
+    if (!entry.folder) return entry.name_hex;
+    return entry.folder_hex == null ? null : `${entry.folder_hex}2f${entry.name_hex}`;
 }
 
 function ensureFolderSticky() {
@@ -9163,8 +9173,8 @@ async function performTransfers(plan, module, options) {
                                 module,
                                 'calc_change_attr',
                                 'number',
-                                ['number', 'string', 'string', 'number', 'number'],
-                                [handle, targetFolder, targetName, item.entryType, 0],
+                                ['number', 'string', 'string', 'number', 'number', 'string', 'string'],
+                                [handle, targetFolder, targetName, item.entryType, 0, existing.folder_hex, existing.name_hex],
                                 { timeoutMs: PROGRESS_IDLE_TIMEOUT_MS, useProgress: true, progressLabel: `Updating ${targetName}` }
                             );
                             if (clearAttrResult !== 0) {
@@ -9181,8 +9191,8 @@ async function performTransfers(plan, module, options) {
                             module,
                             'calc_del_var',
                             'number',
-                            ['number', 'string', 'string', 'number'],
-                            [handle, targetFolder, targetName, item.entryType],
+                            ['number', 'string', 'string', 'number', 'string', 'string'],
+                            [handle, targetFolder, targetName, item.entryType, existing.folder_hex, existing.name_hex],
                             { timeoutMs: PROGRESS_IDLE_TIMEOUT_MS, useProgress: true, progressLabel: `Deleting ${targetName}` }
                         );
                         if (deleteResult !== 0) {
@@ -9984,8 +9994,8 @@ async function receiveSelected() {
             }
             const progressLabel = `Receiving ${entry.name}`;
             const result = entry.kind === 'app'
-                ? await ccallAsync(module, 'calc_recv_app', 'number', ['number', 'string', 'number', 'string'], [handle, entry.name, entry.type, '/downloads'], { timeoutMs: PROGRESS_IDLE_TIMEOUT_MS, useProgress: true, progressLabel })
-                : await ccallAsync(module, 'calc_recv_var', 'number', ['number', 'string', 'string', 'number', 'string'], [handle, entry.folder, entry.name, entry.type, '/downloads'], { timeoutMs: PROGRESS_IDLE_TIMEOUT_MS, useProgress: true, progressLabel });
+                ? await ccallAsync(module, 'calc_recv_app', 'number', ['number', 'string', 'number', 'string', 'string'], [handle, entry.name, entry.type, '/downloads', entry.name_hex], { timeoutMs: PROGRESS_IDLE_TIMEOUT_MS, useProgress: true, progressLabel })
+                : await ccallAsync(module, 'calc_recv_var', 'number', ['number', 'string', 'string', 'number', 'string', 'string', 'string'], [handle, entry.folder, entry.name, entry.type, '/downloads', entry.folder_hex, entry.name_hex], { timeoutMs: PROGRESS_IDLE_TIMEOUT_MS, useProgress: true, progressLabel });
             if (result === 0) {
                 await downloadLastReceived(module);
                 log(`Received ${entry.name}.`);
@@ -10003,13 +10013,7 @@ async function receiveSelected() {
 
 async function deleteSelected() {
     const selections = getSelectedVarInputs()
-        .map(input => ({
-            name: input.dataset.name,
-            folder: input.dataset.folder,
-            type: Number(input.dataset.type),
-            isFolder: input.dataset.isFolder === '1',
-            folderPath: input.dataset.folderPath || ''
-        }));
+        .map(buildEntryFromCheckbox);
     if (!selections.length) {
         log('No variables selected.');
         return;
@@ -10032,14 +10036,14 @@ async function deleteSelected() {
         for (const entry of selections) {
             if (entry.isFolder) {
                 const folderPath = entry.folderPath || entry.name;
-                const result = await ccallAsync(module, 'calc_del_folder', 'number', ['number', 'string'], [handle, folderPath], { timeoutMs: PROGRESS_IDLE_TIMEOUT_MS, useProgress: true, progressLabel: `Deleting ${folderPath}` });
+                const result = await ccallAsync(module, 'calc_del_folder', 'number', ['number', 'string', 'string'], [handle, folderPath, getTiFolderRequestHex(entry)], { timeoutMs: PROGRESS_IDLE_TIMEOUT_MS, useProgress: true, progressLabel: `Deleting ${folderPath}` });
                 if (result === 0) {
                     log(`Deleted folder ${folderPath}.`);
                 } else {
                     log(`Failed to delete folder ${folderPath} (${formatErrorResult(module, result)}).`);
                 }
             } else {
-                const result = await ccallAsync(module, 'calc_del_var', 'number', ['number', 'string', 'string', 'number'], [handle, entry.folder, entry.name, entry.type], { timeoutMs: PROGRESS_IDLE_TIMEOUT_MS, useProgress: true, progressLabel: `Deleting ${entry.name}` });
+                const result = await ccallAsync(module, 'calc_del_var', 'number', ['number', 'string', 'string', 'number', 'string', 'string'], [handle, entry.folder, entry.name, entry.type, entry.folder_hex, entry.name_hex], { timeoutMs: PROGRESS_IDLE_TIMEOUT_MS, useProgress: true, progressLabel: `Deleting ${entry.name}` });
                 if (result === 0) {
                     log(`Deleted ${entry.name}.`);
                 } else {
@@ -10132,8 +10136,8 @@ async function renameEntry(entry) {
             module,
             'calc_rename_var',
             'number',
-            ['number', 'string', 'string', 'number', 'string', 'string', 'number'],
-            [handle, oldFolder, currentName, entry.type, newFolder, trimmed, entry.type],
+            ['number', 'string', 'string', 'number', 'string', 'string', 'number', 'string', 'string'],
+            [handle, oldFolder, currentName, entry.type, newFolder, trimmed, entry.type, entry.folder_hex, entry.name_hex],
             { timeoutMs: PROGRESS_IDLE_TIMEOUT_MS, useProgress: true, progressLabel: `Renaming ${currentName}` }
         );
         if (result !== 0) {
@@ -10206,14 +10210,14 @@ async function deleteEntry(entry) {
         const handle = await ensureHandle();
         if (entry.isFolder) {
             const folderPath = entry.folderPath || entry.name;
-            const result = await ccallAsync(module, 'calc_del_folder', 'number', ['number', 'string'], [handle, folderPath], { timeoutMs: PROGRESS_IDLE_TIMEOUT_MS, useProgress: true, progressLabel: `Deleting ${folderPath}` });
+            const result = await ccallAsync(module, 'calc_del_folder', 'number', ['number', 'string', 'string'], [handle, folderPath, getTiFolderRequestHex(entry)], { timeoutMs: PROGRESS_IDLE_TIMEOUT_MS, useProgress: true, progressLabel: `Deleting ${folderPath}` });
             if (result === 0) {
                 log(`Deleted folder ${folderPath}.`);
             } else {
                 log(`Failed to delete folder ${folderPath} (${formatErrorResult(module, result)}).`);
             }
         } else {
-            const result = await ccallAsync(module, 'calc_del_var', 'number', ['number', 'string', 'string', 'number'], [handle, entry.folder, entry.name, entry.type], { timeoutMs: PROGRESS_IDLE_TIMEOUT_MS, useProgress: true, progressLabel: `Deleting ${entry.name}` });
+            const result = await ccallAsync(module, 'calc_del_var', 'number', ['number', 'string', 'string', 'number', 'string', 'string'], [handle, entry.folder, entry.name, entry.type, entry.folder_hex, entry.name_hex], { timeoutMs: PROGRESS_IDLE_TIMEOUT_MS, useProgress: true, progressLabel: `Deleting ${entry.name}` });
             if (result === 0) {
                 log(`Deleted ${entry.name}.`);
             } else {
@@ -10265,8 +10269,8 @@ async function downloadEntry(entry) {
         }
         const progressLabel = `Receiving ${entry.name}`;
         const result = entry.kind === 'app'
-            ? await ccallAsync(module, 'calc_recv_app', 'number', ['number', 'string', 'number', 'string'], [handle, entry.name, entry.type, '/downloads'], { timeoutMs: PROGRESS_IDLE_TIMEOUT_MS, useProgress: true, progressLabel })
-            : await ccallAsync(module, 'calc_recv_var', 'number', ['number', 'string', 'string', 'number', 'string'], [handle, entry.folder, entry.name, entry.type, '/downloads'], { timeoutMs: PROGRESS_IDLE_TIMEOUT_MS, useProgress: true, progressLabel });
+            ? await ccallAsync(module, 'calc_recv_app', 'number', ['number', 'string', 'number', 'string', 'string'], [handle, entry.name, entry.type, '/downloads', entry.name_hex], { timeoutMs: PROGRESS_IDLE_TIMEOUT_MS, useProgress: true, progressLabel })
+            : await ccallAsync(module, 'calc_recv_var', 'number', ['number', 'string', 'string', 'number', 'string', 'string', 'string'], [handle, entry.folder, entry.name, entry.type, '/downloads', entry.folder_hex, entry.name_hex], { timeoutMs: PROGRESS_IDLE_TIMEOUT_MS, useProgress: true, progressLabel });
         if (result === 0) {
             await downloadLastReceived(module);
             log(`Received ${entry.name}.`);
@@ -10714,8 +10718,8 @@ async function previewEntry(entry, actionButton) {
             module,
             'calc_recv_var',
             'number',
-            ['number', 'string', 'string', 'number', 'string'],
-            [handle, entry.folder, entry.name, entry.type, '/previews'],
+            ['number', 'string', 'string', 'number', 'string', 'string', 'string'],
+            [handle, entry.folder, entry.name, entry.type, '/previews', entry.folder_hex, entry.name_hex],
             {
                 timeoutMs: PROGRESS_IDLE_TIMEOUT_MS,
                 useProgress: true,
@@ -10845,8 +10849,8 @@ async function downloadFolderEntriesWithSession(module, handle, folderPath, conf
             module,
             'calc_recv_var',
             'number',
-            ['number', 'string', 'string', 'number', 'string'],
-            [handle, entry.folder, entry.name, entry.type, '/downloads'],
+            ['number', 'string', 'string', 'number', 'string', 'string', 'string'],
+            [handle, entry.folder, entry.name, entry.type, '/downloads', entry.folder_hex, entry.name_hex],
             { timeoutMs: PROGRESS_IDLE_TIMEOUT_MS, useProgress: true, progressLabel: `Receiving ${entry.name}` }
         );
         if (result === 0) {
