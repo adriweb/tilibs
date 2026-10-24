@@ -148,6 +148,7 @@ test:
 	node tests/test_calc_models.js
 	node tests/test_file_picker.js
 	node tests/test_themes.js
+	node tests/test_debug_log.js
 	node tests/test_dirlist_capabilities.js
 	node tests/test_backup_frontend.js
 	node tests/test_silverlink_recovery.js
