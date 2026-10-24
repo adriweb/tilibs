@@ -5,6 +5,50 @@ const timeout = setTimeout(() => { console.error('Variable-name WASM test timed 
 (async () => {
     const module = await createModule({print() {}, printErr() {}});
     await module.ccall('init', 'number', [], [], {async: true});
+    module.ccall('test_var_name_files', null, [], []);
+    // AppVar headers are literal even when a leading lowercase byte coincides
+    // with a built-in token, or the whole name looks like a picture/GDB/string.
+    for (const model of [4, 5, 17, 13, 18, 19, 20, 21, 22, 36]) {
+        module.ccall('test_var_name_setup', 'string',
+            ['number', 'number', 'string', 'string'], [model, 0x15, '41', '']);
+        module.ccall('test_var_name_capture', null, [], []);
+        const handle = module.ccall('test_var_name_handle', 'number', [], []);
+        for (const name of ['atmOS0', 'btmOS0', 'ctmOS0', 'AtmOS0', 'Pic1', 'GDB1', 'Str1', 'abcdefgh']) {
+            const path = `/${name}.8xv`;
+            const info = JSON.parse(module.ccall('file_get_entries_json', 'string', ['string'], [path]));
+            assert.equal(info.entries[0].name, name, `model ${model}: ${path} preview`);
+            const batch = JSON.parse(module.ccall('files_get_entries_json', 'string', ['string'], [path]));
+            assert.deepEqual(batch.files[0].entries, info.entries);
+            for (const [fn, types, args] of [
+                ['send_file_custom', ['number', 'string', 'string', 'number', 'number'], [handle, path, '', 1, 0]],
+                ['send_file_entry_custom', ['number', 'string', 'number', 'number', 'string', 'number', 'number'],
+                    [handle, path, 0, 0, '', 1, 0]]
+            ]) {
+                assert.equal(await module.ccall(fn, 'number', types, args, {async: true}), 4);
+                assert.equal(module.ccall('test_var_name_captured_hex', 'string', ['number'], [0]),
+                    Buffer.from(name).toString('hex'), `model ${model}: ${fn} preserves ${name}`);
+            }
+        }
+        module.ccall('test_var_name_teardown', null, [], []);
+    }
+    console.log('AppVar previews and both send paths preserve literal names across DBUS/USB models.');
+    // File names use the reader's charset, regardless of the connected model.
+    for (const model of [4, 13, 20]) {
+        module.ccall('set_calc_model', null, ['number'], [model]);
+        for (const [path, names] of [['/L1.8xl', ['L₁']], ['/lists.8xg', ['L₁', 'L₂']], ['/lists.tig', ['L₁']]]) {
+            const info = JSON.parse(module.ccall('file_get_entries_json', 'string', ['string'], [path]));
+            assert.deepEqual(info.entries.map(entry => entry.name), names, `model ${model}: ${path}`);
+            const batch = JSON.parse(module.ccall('files_get_entries_json', 'string', ['string'], [path]));
+            assert.deepEqual(batch.files[0].entries, info.entries);
+        }
+    }
+    for (const model of [8, 14]) {
+        module.ccall('set_calc_model', null, ['number'], [model]);
+        const info = JSON.parse(module.ccall('file_get_entries_json', 'string', ['string'], ['/theta.89e']));
+        assert.equal(info.entries[0].name, 'θ');
+        assert.equal(info.entries[0].folder, 'α');
+    }
+    console.log('File metadata preserves tokenized Z80 and TI-89 names across DBUS/USB models, singles, groups and TIGroup.');
     for (const fixture of [
         {model: 3, type: 1, raw: '5d', display: 'L₁'},
         {model: 3, type: 1, raw: '5d01', display: 'L₂'},
