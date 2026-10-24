@@ -158,6 +158,7 @@
   "model": "モデル",
   "free_memory": "空きメモリー",
   "refresh_device_info": "デバイス情報を更新",
+  "device_info_unsupported": "このモデルはデバイス情報を提供しません。",
   "sync_clock": "時計を同期",
   "transfers": "転送",
   "is_ready": "準備状態確認",
