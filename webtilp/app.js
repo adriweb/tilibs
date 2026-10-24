@@ -737,6 +737,7 @@ const I18N_EN = {
     "model": "Model",
     "free_memory": "Free Memory",
     "refresh_device_info": "Refresh Device Info",
+    "device_info_unsupported": "This model doesn’t report device information.",
     "sync_clock": "Sync Clock",
     "transfers": "Transfers",
     "is_ready": "Is Ready",
@@ -3451,6 +3452,7 @@ const els = {
     deviceModel: document.getElementById('deviceModel'),
     memoryInfo: document.getElementById('memoryInfo'),
     deviceInfoList: document.getElementById('deviceInfoList'),
+    deviceInfoNote: document.getElementById('deviceInfoNote'),
     log: document.getElementById('log'),
     brandMark: document.querySelector('.brand-mark'),
     brandBuildInfo: document.getElementById('brandBuildInfo'),
@@ -5118,7 +5120,23 @@ function setNumWorksUiState() {
     updateSelectionActionButtons();
 }
 
+function updateDeviceInfoCapability(tiCapabilitiesKnown = false) {
+    const unsupported = tiCapabilitiesKnown && state.activeFamily === DEVICE_FAMILY_TI
+        && (state.features & FEATURE_FLAGS.OPS_VERSION) === 0;
+    if (els.deviceInfoNote) {
+        els.deviceInfoNote.textContent = t('device_info_unsupported');
+        els.deviceInfoNote.classList.toggle('hidden', !unsupported);
+    }
+    if (els.btnGetInfo) {
+        els.btnGetInfo.classList.toggle('disabled', unsupported);
+        els.btnGetInfo.disabled = unsupported || els.btnGetInfo.classList.contains('loading');
+        els.btnGetInfo.title = unsupported ? t('device_info_unsupported') : '';
+    }
+    return unsupported;
+}
+
 function applyActiveFamilyUiState(options = {}) {
+    updateDeviceInfoCapability(Boolean(options.tiCapabilitiesKnown));
     if (!options.tiCapabilitiesKnown) {
         els.varsPanel?.classList.remove('hidden');
         els.btnBackupDirlist?.classList.add('hidden');
@@ -5923,6 +5941,7 @@ async function updateCapabilities() {
     await ensureCableOpen();
     const features = await ccallAsync(state.module, 'calc_features', 'number', ['number'], [state.handle], { timeoutMs: 8000 });
     state.features = features;
+    updateDeviceInfoCapability(true);
     updateFileInputAccept();
     const hasDirlist = (features & FEATURE_FLAGS.OPS_DIRLIST) !== 0;
     const hasFolder = (features & FEATURE_FLAGS.FTS_FOLDER) !== 0;
@@ -6210,6 +6229,10 @@ async function getDeviceInfo() {
         const module = await initModule();
         const handle = await ensureCableOpen();
         await updateCapabilities();
+        if (updateDeviceInfoCapability(true)) {
+            log(t('device_info_unsupported'));
+            return;
+        }
         const infoText = await ccallAsync(module, 'calc_get_info_string', 'string', ['number'], [handle], { timeoutMs: 12000 });
         const reopenNeeded = module._consume_cable_reopen_flag();
         if (reopenNeeded) {
@@ -6532,6 +6555,7 @@ function updateClockInfoRow(clockInfo, settings, fallbackDate) {
 }
 
 function clearDeviceData() {
+    updateDeviceInfoCapability();
     state.dirlist = [];
     state.backupDirlistLoaded = false;
     state.hpFileSnapshotLoaded = false;
