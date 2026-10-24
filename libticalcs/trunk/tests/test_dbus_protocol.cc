@@ -21,6 +21,7 @@
 static std::vector<uint8_t> incoming, outgoing;
 static size_t received;
 static int receive_failure, send_failure;
+static unsigned int zero_length_writes;
 
 static int cable_recv(CableHandle *, uint8_t *data, uint32_t length)
 {
@@ -34,6 +35,7 @@ static int cable_recv(CableHandle *, uint8_t *data, uint32_t length)
 
 static int cable_send(CableHandle *, uint8_t *data, uint32_t length)
 {
+	if (!length) zero_length_writes++;
 	outgoing.insert(outgoing.end(), data, data + length);
 	return send_failure;
 }
@@ -66,6 +68,7 @@ struct MockCalculator
 		received = 0;
 		receive_failure = 0;
 		send_failure = 0;
+		zero_length_writes = 0;
 		functions.recv = cable_recv;
 		functions.send = cable_send;
 		cable.cable = &functions;
@@ -83,6 +86,35 @@ struct MockCalculator
 		ticalcs_handle_del(handle);
 	}
 };
+
+// Independent packet framing expectations from the TI link guide.
+static void append_wire_packet(std::vector<uint8_t> &wire, uint8_t mid, uint8_t command,
+                               const std::vector<uint8_t> &payload = {})
+{
+	wire.insert(wire.end(), {mid, command, (uint8_t)payload.size(), (uint8_t)(payload.size() >> 8)});
+	if (!payload.empty())
+	{
+		wire.insert(wire.end(), payload.begin(), payload.end());
+		unsigned int sum = 0;
+		for (uint8_t byte : payload) sum += byte;
+		wire.insert(wire.end(), {(uint8_t)sum, (uint8_t)(sum >> 8)});
+	}
+}
+
+static void check_send_chunk_boundaries()
+{
+	for (unsigned int length : {1U, 121U, 122U, 123U, 249U, 250U, 251U, 2554U, 4094U, 65514U, 65536U})
+	{
+		MockCalculator calc(CALC_TI89);
+		std::vector<uint8_t> data(length), expected;
+		for (unsigned int i = 0; i < length; i++) data[i] = (uint8_t)(i * 37 + 0x5b);
+		append_wire_packet(expected, 0x08, 0x15, data);
+		CHECK(dbus_send(calc.handle, 0x08, 0x15, (uint16_t)length, data.data()) == 0);
+		CHECK(outgoing == expected);
+		CHECK(zero_length_writes == 0);
+		CHECK(calc.handle->updat->cnt1 == (int)length + 6);
+	}
+}
 
 static void check_ack_header_word()
 {
@@ -563,6 +595,7 @@ int main()
 {
 	CHECK(ticalcs_library_init() == 1);
 	check_commands();
+	check_send_chunk_boundaries();
 	check_ack_header_word();
 	check_checksum_recovery();
 	check_bad_screenshot(CALC_TI86, 0x86, 0x06, 1024);
