@@ -128,6 +128,7 @@ bool parse_ti_backup_vat(const std::vector<uint8_t>& file, int model,
 #include <emscripten.h>
 #include <libusb.h>
 #include <glib.h>
+#include <glib/gstdio.h>
 #include <archive.h>
 #include <archive_entry.h>
 
@@ -145,8 +146,12 @@ bool parse_ti_backup_vat(const std::vector<uint8_t>& file, int model,
 
 extern "C" int hp_prime_library_init(void);
 extern "C" int hp_prime_library_exit(void);
+// Internal decoders used by libticables when a logging session closes.
+int dbus_decomp(const char* filename, int resync);
+int dusb_decomp(const char* filename);
 
 extern "C" {
+
 
 enum {
     TICALCS_ERR_ABORT = 256,
@@ -209,6 +214,43 @@ static int g_cable_reopen_needed = 0;
 static CalcModel g_last_model_from = CALC_NONE;
 static CalcModel g_last_model_to = CALC_NONE;
 static int g_model_update_pending = 0;
+
+// Remember the protocol in MEMFS as well as native state: retirement can read
+// the completed trace even when Asyncify no longer permits native calls.
+static std::string g_debug_log_path;
+static void select_debug_log_path(CableHandle* handle) {
+    const std::string directory = std::string(g_get_home_dir()) + "/.ticables/";
+    const char* name = handle->model != CABLE_USB ? "ticables-dbus.pkt"
+        : ticalcs_model_supports_dusb(g_calc_model) ? "ticables-dusb.pkt"
+        : "ticables-log.hex"; // Other USB protocols must not be decoded as DUSB.
+    g_debug_log_path = directory + name;
+    g_file_set_contents((directory + "debug-log-path").c_str(), g_debug_log_path.c_str(), -1, nullptr);
+}
+
+EMSCRIPTEN_KEEPALIVE
+const char* get_debug_log_path() {
+    const std::string directory = std::string(g_get_home_dir()) + "/.ticables/";
+    if (g_cable_handle) {
+        select_debug_log_path(g_cable_handle);
+        // Snapshot only after the frontend has acquired the native call slot.
+        // Flush the active logger without closing the cable or restarting it.
+        if (fflush(nullptr) != 0) return "";
+        const std::string base = directory + "ticables-log";
+        if (g_file_test((base + ".hex").c_str(), G_FILE_TEST_IS_REGULAR)
+            && g_debug_log_path != base + ".hex") {
+            // A failed/partial transfer can still produce a useful trace.
+            const int result = g_cable_handle->model == CABLE_USB
+                ? dusb_decomp(base.c_str()) : dbus_decomp(base.c_str(), 0);
+            // The DBUS decoder can report incomplete input while still writing
+            // a useful trace. Only fail if no output was produced.
+            if (result && !g_file_test((base + ".pkt").c_str(), G_FILE_TEST_IS_REGULAR)) return "";
+            if (g_rename((base + ".pkt").c_str(), g_debug_log_path.c_str()) != 0) return "";
+        }
+    }
+    return !g_debug_log_path.empty() && g_file_test(g_debug_log_path.c_str(), G_FILE_TEST_IS_REGULAR)
+        ? g_debug_log_path.c_str() : "";
+}
+
 static CalcUpdate g_update;
 static int g_update_ready = 0;
 static volatile uint32_t g_progress_tick = 0;
@@ -1101,6 +1143,7 @@ int open_cable(CableHandle* handle) {
     }
 
     const int result = ticables_cable_open(handle);
+    if (result == 0) select_debug_log_path(handle);
     printf("Open result: %d\n", result);
     return result;
 }

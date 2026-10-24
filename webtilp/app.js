@@ -771,6 +771,10 @@ const I18N_EN = {
     "download_png": "Download PNG",
     "activity_log": "Activity Log",
     "clear_log": "Clear Log",
+    "debug_log": "Debug log",
+    "debug_log_unavailable": "No debug log is available yet. Connect a calculator and perform an operation first.",
+    "debug_log_downloaded": "Debug log download started.",
+    "debug_log_failed": "Could not download the debug log.",
     "settings_title": "Settings",
     "cable": "Cable",
     "force_cable_hint": "Force cable to skip probing.",
@@ -1388,8 +1392,23 @@ function makeModuleDeadError(cs) {
     return err;
 }
 
+let lastDebugLog = null;
+
+function readDebugLog(module, path) {
+    try {
+        // A retired module may have generated its final trace during teardown.
+        path ||= module.FS.readFile('/home/web_user/.ticables/debug-log-path', {encoding: 'utf8'});
+        const data = module.FS.readFile(path);
+        if (data?.length) return {name: path.split('/').pop(), data};
+    } catch { /* No trace in this session, or teardown has not completed. */ }
+    return null;
+}
+
 function retireModule(module, reason) {
     if (module) {
+        // Native teardown may have generated the trace just before retirement.
+        // Keep bytes rather than retaining an entire retired WASM heap.
+        lastDebugLog = readDebugLog(module) || lastDebugLog;
         getModuleCallState(module).markDead(reason);
     }
 }
@@ -3517,6 +3536,8 @@ const els = {
     btnCancelTransfer: document.getElementById('btnCancelTransfer'),
     btnConfirmTransfer: document.getElementById('btnConfirmTransfer'),
     btnThemeToggle: document.getElementById('btnThemeToggle'),
+    btnDownloadDebugLog: document.getElementById('btnDownloadDebugLog'),
+    debugLogStatus: document.getElementById('debugLogStatus'),
     selectAllVars: document.getElementById('selectAllVars'),
     backupFormatBackup: document.getElementById('backupFormatBackup'),
     backupFormatTigroup: document.getElementById('backupFormatTigroup'),
@@ -3566,6 +3587,8 @@ function updateThemeButton() {
     const current = document.body.dataset.theme || THEMES[0].id;
     const theme = THEMES.find(entry => entry.id === current) || THEMES[0];
     els.btnThemeToggle.textContent = `${t('theme_prefix')}: ${getOptionLabel(theme)}`;
+    els.btnThemeToggle.title = els.btnThemeToggle.textContent;
+    els.btnThemeToggle.ariaLabel = els.btnThemeToggle.textContent;
 }
 
 function cycleTheme() {
@@ -4250,6 +4273,10 @@ async function applyTranslations() {
     setIconLabel(els.btnDownloadScreenshot, 'download', t('download_png'), '⬇️');
     setTextContent(document.getElementById('panelLogTitle'), t('activity_log'));
     setIconLabel(els.btnClearLog, 'x-circle', t('clear_log'), '🧹');
+    setIconLabel(els.btnDownloadDebugLog, 'file-text', t('debug_log'), '📄');
+    const debugLogLabel = `${t('download')}: ${t('debug_log')}`;
+    els.btnDownloadDebugLog?.setAttribute('title', debugLogLabel);
+    els.btnDownloadDebugLog?.setAttribute('aria-label', debugLogLabel);
 
     setTextContent(document.getElementById('settingsTitle'), t('settings_title'));
     setTextContent(document.getElementById('settingCableLabel'), t('cable'));
@@ -4265,6 +4292,10 @@ async function applyTranslations() {
     setTextContent(els.btnClearOfflineCache, t('clear_offline_cache'));
     setIconLabel(els.btnResetSettings, 'rotate-ccw', t('reset_defaults'), '↩️');
     setIconLabel(els.btnSaveSettings, 'save', t('save_settings'), '💾');
+    for (const [button, key] of [[els.btnResetSettings, 'reset_defaults'], [els.btnSaveSettings, 'save_settings']]) {
+        button?.setAttribute('title', t(key));
+        button?.setAttribute('aria-label', t(key));
+    }
 
     setTextContent(document.getElementById('transferTitle'), t('transfer_options'));
     setTextContent(document.getElementById('transferHeaderFile'), t('file'));
@@ -4344,10 +4375,12 @@ function openSettingsModal() {
     seedSettingsForm();
 
     els.settingsModal.classList.remove('hidden');
+    els.settingsModal.setAttribute('aria-hidden', 'false');
 }
 
 function closeSettingsModal() {
     els.settingsModal.classList.add('hidden');
+    els.settingsModal.setAttribute('aria-hidden', 'true');
 }
 
 function populateNewFolderParents() {
@@ -11252,6 +11285,34 @@ async function downloadLastReceived(module, fallbackName) {
     log('No received file found to download.');
 }
 
+async function downloadDebugLog() {
+    setButtonLoading(els.btnDownloadDebugLog, true);
+    let message = 'debug_log_unavailable';
+    try {
+        const module = state.module;
+        let debugLog = null;
+        if (module) {
+            // Queue behind transfers; never interrupt or reopen a cable to log it.
+            const path = !getModuleCallState(module).dead
+                ? await ccallAsync(module, 'get_debug_log_path', 'string', [], []) : '';
+            debugLog = readDebugLog(module, path);
+        }
+        debugLog ||= lastDebugLog;
+        if (debugLog) {
+            lastDebugLog = debugLog;
+            triggerDownload(debugLog.name, debugLog.data);
+            message = 'debug_log_downloaded';
+        }
+    } catch (error) {
+        message = 'debug_log_failed';
+        logError(error, t(message));
+    } finally {
+        setTextContent(els.debugLogStatus, t(message));
+        els.debugLogStatus?.classList.remove('hidden');
+        setButtonLoading(els.btnDownloadDebugLog, false);
+    }
+}
+
 function triggerDownload(filename, data) {
     const blob = new Blob([data], { type: 'application/octet-stream' });
     const link = document.createElement('a');
@@ -11404,6 +11465,7 @@ function bindEvents() {
     }
     els.btnSettings.addEventListener('click', openSettingsModal);
     els.btnCloseSettings.addEventListener('click', closeSettingsModal);
+    els.btnDownloadDebugLog?.addEventListener('click', downloadDebugLog);
     if (els.btnNewFolder) {
         els.btnNewFolder.addEventListener('click', openNewFolderModal);
     }
