@@ -1,0 +1,32 @@
+--- a/libusb/src/windows.c
++++ b/libusb/src/windows.c
+@@ -82,6 +82,7 @@
+ static void _usb_free_dev_list(struct usb_device *dev);
+ static void _usb_deinit(void);
+ 
++#ifndef LIBUSB_STATIC
+ /* DLL main entry point */
+ BOOL WINAPI DllMain(HANDLE module, DWORD reason, LPVOID reserved)
+ {
+@@ -101,6 +102,7 @@
+     }
+     return TRUE;
+ }
++#endif
+ 
+ 
+ static int usb_get_configuration(usb_dev_handle *dev, bool_t cached)
+@@ -891,6 +893,13 @@
+     int i;
+     int ret;
+     char dev_name[LIBUSB_PATH_MAX];
++#ifdef LIBUSB_STATIC
++    static int cleanup_registered = 0;
++
++    /* Static libraries do not receive DLL_PROCESS_DETACH. */
++    if (!cleanup_registered && atexit(_usb_deinit) == 0)
++        cleanup_registered = 1;
++#endif
+ 
+     USBMSG("dll version: %d.%d.%d.%d\n",
+                 VERSION_MAJOR, VERSION_MINOR,

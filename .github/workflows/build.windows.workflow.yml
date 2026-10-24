@@ -15,7 +15,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [windows-2022, windows-2025]
+        os: [windows-2025]
         arch: [x86,x64]
         config: [Release]
 
@@ -53,6 +53,29 @@ jobs:
           VCPKG_DEFAULT_TRIPLET: ${{ matrix.arch }}-windows
           VCPKG_DEFAULT_HOST_TRIPLET: x64-windows-static-release
           VCPKG_FORCE_SYSTEM_BINARIES: 1
+
+      - name: Verify static Windows dependencies
+        shell: pwsh
+        run: |
+          $vswhere = "${env:ProgramFiles(x86)}/Microsoft Visual Studio/Installer/vswhere.exe"
+          $vs = & $vswhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+          $version = (Get-Content "$vs/VC/Auxiliary/Build/Microsoft.VCToolsVersion.default.txt").Trim()
+          $dumpbin = "$vs/VC/Tools/MSVC/$version/bin/Hostx64/x64/dumpbin.exe"
+          $build = "${{ github.workspace }}/tilibs.build/Win-${{ matrix.arch }}"
+          $executables = @(
+            "$build/prefix/bin/tifileutil.exe",
+            "$build/libticables/trunk/tests/Release/torture_ticables.exe",
+            "$build/libticalcs/trunk/tests/Release/torture_ticalcs.exe"
+          )
+          foreach ($exe in $executables) {
+            if (!(Test-Path $exe)) { throw "Missing executable: $exe" }
+            $imports = & $dumpbin /DEPENDENTS $exe
+            if ($LASTEXITCODE) { throw "dumpbin failed for $exe" }
+            $imports | Write-Output
+            if ($imports -match '(?i)\b(libusb0|vcruntime[a-z0-9_]*|msvcp[a-z0-9_]*|msvcr[0-9]+|ucrtbase|api-ms-win-crt-[a-z0-9-]+)\.dll') {
+              throw "Unexpected libusb or shared MSVC runtime dependency in $exe"
+            }
+          }
 
       - name: Upload install folder
         uses: actions/upload-artifact@v4
