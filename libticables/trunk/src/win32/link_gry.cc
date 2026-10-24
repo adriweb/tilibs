@@ -359,23 +359,20 @@ static int gry_timeout(CableHandle *h)
 	return 0;
 }
 
-static int gry_set_device(CableHandle *h, const char * device)
+static int gry_set_extra_options(CableHandle * h, CableExtraOptions * options_ex)
 {
-	if (device != NULL)
-	{
-		char * device2 = strdup(device);
-		if (device2 != NULL)
-		{
-			free(h->device);
-			h->device = device2;
-		}
-		else
-		{
-			ticables_warning(_("unable to set device %s.\n"), device);
-		}
-		return 0;
-	}
+	(void)h, (void)options_ex;
 	return ERR_ILLEGAL_ARG;
+}
+
+static int gry_get_extra_options(CableHandle * h, CableExtraOptions * options_ex)
+{
+	options_ex->version = 1;
+	options_ex->has_parameters = 1;
+	memset((void *)&options_ex->parameters, 0, sizeof(options_ex->parameters));
+	options_ex->parameters.parameters_gry.device = h->device;
+	options_ex->parameters.parameters_gry.address = h->address;
+	return 0;
 }
 
 extern const CableFncts cable_gry = 
@@ -391,6 +388,6 @@ extern const CableFncts cable_gry =
 	&noop_set_red_wire, &noop_set_white_wire,
 	&noop_get_red_wire, &noop_get_white_wire,
 	NULL, NULL,
-	&gry_set_device,
-	NULL
+	NULL,
+	&gry_set_extra_options, &gry_get_extra_options
 };
