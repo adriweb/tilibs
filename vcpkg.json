@@ -25,6 +25,5 @@
       "name": "gettext",
       "features": [ "tools" ]
     }
-  ],
-  "builtin-baseline": "696237761650114ff0fb12e1a73b90ed1537b6d8"
+  ]
 }
