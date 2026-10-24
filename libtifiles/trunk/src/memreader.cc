@@ -27,7 +27,11 @@
 #include <errno.h>
 
 #include <fcntl.h>
+#ifdef _WIN32
+#include <io.h>
+#else
 #include <unistd.h>
+#endif
 #include <sys/stat.h>
 #include <stdint.h>
 
@@ -64,7 +68,7 @@ int TICALL tifiles_mem_reader_create_from_file(TiMemReader *reader, const char *
 	tifiles_mem_reader_init(reader, nullptr, 0);
 
 #if defined(_WIN32)
-	fd = g_open(filename, O_RDONLY | O_BINARY);
+	fd = g_open(filename, O_RDONLY | O_BINARY, 0);
 #else
 	fd = open(filename, O_RDONLY);
 #endif
@@ -101,7 +105,12 @@ int TICALL tifiles_mem_reader_create_from_file(TiMemReader *reader, const char *
 	remaining = to_read;
 	while (remaining > 0)
 	{
+#ifdef _WIN32
+		/* The Windows CRT takes an unsigned count and returns a signed int. */
+		gssize n = _read(fd, p, (unsigned int)MIN(remaining, (size_t)G_MAXINT));
+#else
 		ssize_t n = read(fd, p, remaining);
+#endif
 		if (n < 0)
 		{
 			if (errno == EINTR)
