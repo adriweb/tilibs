@@ -34,14 +34,23 @@ jobs:
         uses: lukka/get-cmake@9388b6042e1c7b834f01bbd0c06739bc321414e5 # latest as of 2025-06-25
 
       - name: Restore artifacts, or setup vcpkg (do not install any package)
-        uses: lukka/run-vcpkg@b3dd708d38df5c856fe1c18dc0d59ab771f93921 # latest as of 2025-06-25
+        uses: lukka/run-vcpkg@5ad8bfa6267ef808f7d48cf4004c879bed752401 # latest as of 2026-10-24
+        with:
+          # Latest vcpkg master as of 2026-10-24.
+          vcpkgGitCommitId: 0c2a9ace1964b818b15f7ae50ba1c42404918a7b
+
+      - name: Cache PCRE2 submodule metadata
+        shell: bash
+        run: python .github/scripts/cache-pcre2-gitlink.py
+        env:
+          GH_TOKEN: ${{ github.token }}
 
       - name: create install folder
         run: |
           mkdir "${{ github.workspace }}/tilibs.build/Win-${{ matrix.arch }}/prefix"
 
       - name: Build and install tilibs ${{ matrix.config }} on Win ${{ matrix.arch }}
-        uses: lukka/run-cmake@67c73a83a46f86c4e0b96b741ac37ff495478c38 # latest as of 2025-06-25
+        uses: lukka/run-cmake@c575fbf7e977dee9e825cfea913263f7c4377960 # latest as of 2026-10-24
         with:
           cmakeListsTxtPath: '${{ github.workspace }}/CMakeLists.txt'
           configurePreset: 'Win-${{ matrix.arch }}'
