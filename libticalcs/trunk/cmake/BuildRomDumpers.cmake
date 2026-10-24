@@ -39,7 +39,10 @@ function(ticalcs_add_z80_rom_dumper output_var dumper source_dir source_file
 
     set(assembler_args)
     foreach(definition ${DUMPER_DEFINES})
-        list(APPEND assembler_args --defsym "${definition}=1")
+        if(NOT definition MATCHES "=")
+            string(APPEND definition "=1")
+        endif()
+        list(APPEND assembler_args --defsym "${definition}")
     endforeach()
     if(DUMPER_MARCH)
         list(APPEND assembler_args "-march=${DUMPER_MARCH}")
@@ -132,13 +135,14 @@ function(ticalcs_add_rom_dumpers target)
         .86p ROMDump rom86.h romDump86 romDumpSize86
         DEFINES TI86 DEPENDS ${ROM_DUMPER_8X_SOURCES})
 
+    # This source uses .if on every model flag, including the inactive ones.
     set(romdump_84p_sources "${romdump_84p_dir}/romdump.z80" "${romdump_84p_dir}/ldscript")
     ticalcs_add_z80_rom_dumper(rom84p dump84p "${romdump_84p_dir}" romdump.z80
         .8xp ROMDUMP rom84p.h romDump84p romDumpSize84p PROTECTED
-        DEFINES TI84P DEPENDS ${romdump_84p_sources})
+        DEFINES TI84P=1 TI84PC=0 TI82A=0 DEPENDS ${romdump_84p_sources})
     ticalcs_add_z80_rom_dumper(rom84pcu dump84pcu "${romdump_84p_dir}" romdump.z80
         .8xp ROMDUMP rom84pcu.h romDump84pcu romDumpSize84pcu PROTECTED
-        DEFINES TI84PC DEPENDS ${romdump_84p_sources})
+        DEFINES TI84P=0 TI84PC=1 TI82A=0 DEPENDS ${romdump_84p_sources})
 
     set(romdump_834pce_sources "${romdump_834pce_dir}/romdump.z80" "${romdump_834pce_dir}/ldscript")
     ticalcs_add_z80_rom_dumper(rom834pceu dump834pceu "${romdump_834pce_dir}" romdump.z80
