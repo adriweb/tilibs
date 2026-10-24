@@ -1260,7 +1260,9 @@ int TICALL ti73_recv_SID(CalcHandle* handle, uint16_t * length, uint8_t * data)
 
 /* ACK: receive acknowledge
   - status [in/out]: if NULL is passed, the function checks that 00 00 has
-  been received. Otherwise, it put in status the received value.
+  been received, except on the TI-82/83/85/86 protocol families where ACK can
+  echo the previous packet's length. Otherwise, it puts the received value
+  in status.
   - int [out]: an error code
 */
 int TICALL tiz80_recv_ACK(CalcHandle* handle, uint16_t * status)
@@ -1277,11 +1279,16 @@ int TICALL tiz80_recv_ACK(CalcHandle* handle, uint16_t * status)
 		return ret;
 	}
 
+	// TI-82/83/85/86 may echo a byte count. CALC_TI83 also covers TI-76.fr and
+	// TI-82 Stats/Stats.fr. Keep existing nonzero-status checks for the
+	// TI-73/83+/84+ protocol family, including the 84+C over a link cable.
+	const bool echoes_length = handle->model == CALC_TI82 || handle->model == CALC_TI83
+	                       || handle->model == CALC_TI85 || handle->model == CALC_TI86;
 	if (status != nullptr)
 	{
 		*status = length;
 	}
-	else if (length != 0x0000) // is an error code ? (=5 when app is rejected)
+	else if (length != 0x0000 && !echoes_length)
 	{
 		return ERR_NACK;
 	}

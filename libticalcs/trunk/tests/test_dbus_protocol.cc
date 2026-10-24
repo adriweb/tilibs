@@ -84,6 +84,41 @@ struct MockCalculator
 	}
 };
 
+static void check_ack_header_word()
+{
+	struct AckModel { CalcModel model; uint8_t mid; bool echoes_length; };
+	const AckModel models[] = {
+		{CALC_TI82, 0x82, true},
+		{CALC_TI83, 0x83, true},
+		{CALC_TI85, 0x85, true},
+		{CALC_TI86, 0x86, true},
+		{CALC_TI73, 0x74, false},
+		{CALC_TI83P, 0x73, false},
+		{CALC_TI84P, 0x73, false},
+		{CALC_TI84PC, 0x73, false},
+	};
+	for (const AckModel &model : models)
+	{
+		// Include captured/documented echoed lengths and Flash rejection status 5.
+		for (uint16_t word : {0, 5, 9, 11, 12, 768})
+		{
+			for (bool read_status : {false, true})
+			{
+				MockCalculator calc(model.model);
+				incoming = {model.mid, DBUS_CMD_ACK, (uint8_t)word, (uint8_t)(word >> 8)};
+				uint16_t status = 0xffff;
+				const int expected = read_status || model.echoes_length || word == 0 ? 0 : ERR_NACK;
+				CHECK(tiz80_recv_ACK(calc.handle, read_status ? &status : nullptr) == expected);
+				if (read_status) CHECK(status == word);
+				CHECK(received == 4 && outgoing.empty());
+			}
+		}
+		MockCalculator calc(model.model);
+		incoming = {model.mid, DBUS_CMD_CTS, 0, 0};
+		CHECK(tiz80_recv_ACK(calc.handle, nullptr) == ERR_INVALID_CMD);
+	}
+}
+
 struct ChecksumModel
 {
 	CalcModel model;
@@ -528,6 +563,7 @@ int main()
 {
 	CHECK(ticalcs_library_init() == 1);
 	check_commands();
+	check_ack_header_word();
 	check_checksum_recovery();
 	check_bad_screenshot(CALC_TI86, 0x86, 0x06, 1024);
 	check_bad_screenshot(CALC_TI83P, 0x73, 0x23, 768);
