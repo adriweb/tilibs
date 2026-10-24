@@ -1,4 +1,8 @@
 #include <stdio.h>
+/* Keep test checks and their setup calls enabled in Release builds. */
+#ifdef NDEBUG
+#undef NDEBUG
+#endif
 #include <assert.h>
 #include <stdlib.h>
 #include <string.h>
