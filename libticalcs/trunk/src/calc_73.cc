@@ -505,7 +505,7 @@ static int		send_backup	(CalcHandle* handle, BackupContent* content)
 			handle->updat->cnt2++;
 			ticalcs_update_pbar(handle);
 
-			ret = SEND_ACK(handle);
+			// The calculator's final data ACK completes the backup transfer.
 		}
 	} while(0);
 

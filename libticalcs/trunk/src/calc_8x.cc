@@ -595,11 +595,9 @@ static int		send_backup	(CalcHandle* handle, BackupContent* content)
 			ticalcs_update_pbar(handle);
 		}
 
-		if (handle->model == CALC_TI83)
-		{
-			ret = SEND_ACK(handle);
-		}
-		else if (handle->model == CALC_TI85)
+		// TI-82/83/86 finish with the calculator's last data ACK. Sending
+		// another ACK can block because the calculator has left receive mode.
+		if (handle->model == CALC_TI85)
 		{
 			ret = SEND_EOT(handle);
 		}
