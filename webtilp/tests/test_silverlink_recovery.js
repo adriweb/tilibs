@@ -112,8 +112,9 @@ function harness(device = new USBDevice(), realTime = false) {
         async connect() { state.reconnected = true; assert.equal(device.bytes.length, 0, 'reconnect sees a drained cable'); }
     });
     vm.runInContext('const silverLinkTransports = new WeakMap();', context);
+    vm.runInContext("let lastDebugLog = null;", context);
     for (const name of ['installSilverLinkTransport', 'recoverSilverLinkOperation', 'getModuleCallState',
-        'makeModuleDeadError', 'retireModule', 'withTimeout', 'withProgressTimeout', 'watchAbandonedCcall',
+        'makeModuleDeadError', 'readDebugLog', 'retireModule', 'withTimeout', 'withProgressTimeout', 'watchAbandonedCcall',
         'isFatalWasmRuntimeError', 'handleFatalWasmRuntimeError', 'ccallAsync', 'nukeConnection']) {
         vm.runInContext(extract(name), context);
     }
