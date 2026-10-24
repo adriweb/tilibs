@@ -168,6 +168,7 @@
   "screenshot": "截图",
   "activity_log": "活动日志",
   "refresh_device_info": "刷新设备信息",
+  "device_info_unsupported": "此型号不提供设备信息。",
   "sync_clock": "同步时钟",
   "send_selected_files": "发送所选文件",
   "make_backup": "创建备份",

@@ -158,6 +158,7 @@
   "model": "Modell",
   "free_memory": "Freier Speicher",
   "refresh_device_info": "Geräteinfo aktualisieren",
+  "device_info_unsupported": "Dieses Modell stellt keine Geräteinformationen bereit.",
   "sync_clock": "Uhr synchronisieren",
   "transfers": "Übertragungen",
   "is_ready": "Bereit",
