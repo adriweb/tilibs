@@ -1,5 +1,10 @@
 cmake_minimum_required(VERSION 3.12)
 
+# Honor CMAKE_MSVC_RUNTIME_LIBRARY instead of CMake's default /MD flags.
+if(POLICY CMP0091)
+    cmake_policy(SET CMP0091 NEW)
+endif()
+
 ############################
 # CMake support for tilibs #
 ############################
