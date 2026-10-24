@@ -101,6 +101,105 @@ static void append_wire_packet(std::vector<uint8_t> &wire, uint8_t mid, uint8_t 
 	}
 }
 
+// Independent packet expectations from the TI link guide: a three-part
+// backup ends with the calculator's final DATA ACK, with no further PC ACK.
+static void check_send_backup(BackupContent *content, bool final_ack_timeout = false)
+{
+	const CalcModel model = content->model;
+	const bool classic = model == CALC_TI82 || model == CALC_TI83 || model == CALC_TI85 || model == CALC_TI86;
+	const uint8_t mid = model == CALC_TI83 ? 0x83 : model == CALC_TI82 ? 0x82
+	    : model == CALC_TI85 ? 0x85 : model == CALC_TI86 ? 0x86 : model == CALC_TI73 ? 0x74 : 0x73;
+	const uint8_t host = model == CALC_TI83 ? 0x03 : model == CALC_TI82 ? 0x02
+	    : model == CALC_TI85 ? 0x05 : model == CALC_TI86 ? 0x06 : model == CALC_TI73 ? 0x07 : 0x23;
+	MockCalculator calc(model);
+	const uint16_t address = model == CALC_TI86 ? content->data_length4 : content->mem_address;
+	const uint8_t type = model == CALC_TI86 ? TI85_BKUP : content->type;
+	const std::vector<uint8_t> header = {
+	    (uint8_t)content->data_length1, (uint8_t)(content->data_length1 >> 8), type,
+	    (uint8_t)content->data_length2, (uint8_t)(content->data_length2 >> 8),
+	    (uint8_t)content->data_length3, (uint8_t)(content->data_length3 >> 8),
+	    (uint8_t)address, (uint8_t)(address >> 8)};
+	incoming = {mid, 0x56, (uint8_t)(classic ? 9 : 0), 0, mid, 0x09, 0, 0};
+	std::vector<uint8_t> expected;
+	append_wire_packet(expected, host, !classic || model == CALC_TI83 ? 0xc9 : 0x06, header);
+	append_wire_packet(expected, host, 0x56);
+	const uint16_t lengths[] = {content->data_length1, content->data_length2, content->data_length3, content->data_length4};
+	uint8_t *const parts[] = {content->data_part1, content->data_part2, content->data_part3, content->data_part4};
+	for (unsigned int i = 0; i < (model == CALC_TI86 ? 4U : 3U); i++)
+	{
+		if (!lengths[i]) continue;
+		append_wire_packet(expected, host, 0x15, std::vector<uint8_t>(parts[i], parts[i] + lengths[i]));
+		if (final_ack_timeout && i == (model == CALC_TI86 ? 3U : 2U))
+			receive_failure = ERROR_READ_TIMEOUT;
+		else
+			incoming.insert(incoming.end(), {mid, 0x56, (uint8_t)(classic ? lengths[i] : 0),
+			    (uint8_t)(classic ? lengths[i] >> 8 : 0)});
+	}
+	if (model == CALC_TI85 && !final_ack_timeout) append_wire_packet(expected, host, 0x92);
+	CHECK(ticalcs_calc_send_backup(calc.handle, content) == (final_ack_timeout ? ERROR_READ_TIMEOUT : 0));
+	CHECK(received == incoming.size());
+	CHECK(outgoing == expected);
+	CHECK(zero_length_writes == 0);
+	CHECK(calc.handle->busy == 0);
+	// The next transfer must start with no stale protocol bytes, including
+	// after a missing final ACK (which must still be reported as an error).
+	receive_failure = 0;
+	packet(mid, 0x56);
+	if (model == CALC_TI83)
+	{
+		const std::vector<uint8_t> data(768, 0x5a);
+		packet(mid, 0x15, data);
+		CalcScreenCoord screen = {};
+		screen.format = SCREEN_FULL;
+		uint8_t *bitmap = nullptr;
+		CHECK(ticalcs_calc_recv_screen(calc.handle, &screen, &bitmap) == 0);
+		CHECK(bitmap && memcmp(bitmap, data.data(), data.size()) == 0);
+		ticalcs_free_screen(bitmap);
+		append_wire_packet(expected, host, 0x6d);
+		append_wire_packet(expected, host, 0x56);
+	}
+	else CHECK(tiz80_recv_ACK(calc.handle, nullptr) == 0);
+	CHECK(received == incoming.size() && outgoing == expected);
+}
+
+static void check_send_backup_models()
+{
+	for (CalcModel model : {CALC_TI82, CALC_TI83, CALC_TI85, CALC_TI86,
+	    CALC_TI73, CALC_TI83P, CALC_TI84P, CALC_TI84PC})
+	{
+		BackupContent *content = tifiles_content_create_backup(model);
+		content->type = model == CALC_TI86 ? TI86_BKUP : model == CALC_TI85 ? TI85_BKUP
+		    : model == CALC_TI82 ? TI82_BKUP : TI83_BKUP;
+		// The physical TI-83 capture has a 250-byte last block, whose framed
+		// packet occupies exactly two 128-byte cable writes.
+		content->data_length1 = 3520;
+		content->data_length2 = 152;
+		content->data_length3 = 250;
+		content->mem_address = 0x9327;
+		content->data_part1 = (uint8_t *)g_malloc0(content->data_length1);
+		content->data_part2 = (uint8_t *)g_malloc0(content->data_length2);
+		content->data_part3 = (uint8_t *)g_malloc0(content->data_length3);
+		if (model == CALC_TI86)
+		{
+			content->data_length4 = 17;
+			content->data_part4 = (uint8_t *)g_malloc0(content->data_length4);
+		}
+		check_send_backup(content);
+		check_send_backup(content, true);
+		if (model == CALC_TI86)
+		{
+			// ROM 1.2 through 1.6 also accept backups without section 3;
+			// section 4 still supplies the final DATA/ACK, with no PC ACK.
+			content->data_length3 = 0;
+			g_free(content->data_part3);
+			content->data_part3 = nullptr;
+			check_send_backup(content);
+			check_send_backup(content, true);
+		}
+		tifiles_content_delete_backup(content);
+	}
+}
+
 static void check_send_chunk_boundaries()
 {
 	for (unsigned int length : {1U, 121U, 122U, 123U, 249U, 250U, 251U, 2554U, 4094U, 65514U, 65536U})
@@ -591,11 +690,22 @@ static void check_commands()
 	CHECK(DBUS_CMD_RTS == 0xc9 && DBUS_CMD_RDY == 0x68 && DBUS_CMD_REQ == 0xa2);
 }
 
-int main()
+int main(int argc, char **argv)
 {
 	CHECK(ticalcs_library_init() == 1);
 	check_commands();
+	check_send_backup_models();
 	check_send_chunk_boundaries();
+	// Optional real backup fixtures exercise the production file parser too.
+	for (int i = 1; i < argc; i++)
+	{
+		BackupContent *content = tifiles_content_create_backup(CALC_NONE);
+		CHECK(tifiles_file_read_backup(argv[i], content) == 0);
+		CHECK(content->checksum == content->stored_checksum);
+		check_send_backup(content);
+		check_send_backup(content, true);
+		tifiles_content_delete_backup(content);
+	}
 	check_ack_header_word();
 	check_checksum_recovery();
 	check_bad_screenshot(CALC_TI86, 0x86, 0x06, 1024);
