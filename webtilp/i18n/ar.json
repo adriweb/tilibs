@@ -158,6 +158,7 @@
   "model": "الطراز",
   "free_memory": "الذاكرة الحرة",
   "refresh_device_info": "تحديث معلومات الجهاز",
+  "device_info_unsupported": "هذا الطراز لا يوفّر معلومات الجهاز.",
   "sync_clock": "مزامنة الساعة",
   "transfers": "النقل",
   "is_ready": "جاهز",

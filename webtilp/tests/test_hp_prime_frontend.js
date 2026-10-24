@@ -86,6 +86,7 @@ async function testFamilyUiState() {
         state,
         els,
         DEVICE_FAMILY_TI: 'ti',
+        FEATURE_FLAGS: { OPS_VERSION: 1 << 10 },
         DEVICE_FAMILY_HP_PRIME: 'hp-prime',
         DEVICE_FAMILY_NUMWORKS: 'numworks',
         KEYMAP_CONFIG_HP_PRIME: { listId: 'hp-prime-keys', entries: [] },
@@ -114,7 +115,7 @@ async function testFamilyUiState() {
         'isHPPrimeActive', 'isNumWorksActive', 'resetFamilySpecificUiText',
         'buildFileInputAccept', 'updateFileInputAccept',
         'setTiUiState', 'setHPPrimeUiState', 'setNumWorksUiState',
-        'applyActiveFamilyUiState'
+        'updateDeviceInfoCapability', 'applyActiveFamilyUiState'
     ]) {
         vm.runInContext(extractFunction(name), context);
     }

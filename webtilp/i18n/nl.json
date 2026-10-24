@@ -158,6 +158,7 @@
   "model": "Model",
   "free_memory": "Vrij geheugen",
   "refresh_device_info": "Apparaatinfo vernieuwen",
+  "device_info_unsupported": "Dit model verstrekt geen apparaatinformatie.",
   "sync_clock": "Klok synchroniseren",
   "transfers": "Overdrachten",
   "is_ready": "Gereed",

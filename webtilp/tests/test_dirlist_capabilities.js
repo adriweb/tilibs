@@ -36,9 +36,11 @@ function element() {
 const els = Object.fromEntries([
     'varsPanel', 'btnRefreshDirlist', 'btnIsReady', 'btnScreenshot',
     'btnReceiveBackup', 'btnNewFolder', 'btnSyncClock', 'btnDumpRom',
-    'btnBackupDirlist', 'backupDirlistNote'
+    'btnBackupDirlist', 'backupDirlistNote', 'btnGetInfo', 'deviceInfoNote'
 ].map(name => [name, element()]));
 let features = 0;
+let language = 'en';
+let infoRequests = 0;
 let modelId = 0;
 let consent = true;
 let receives = 0;
@@ -53,12 +55,12 @@ let capabilityReads = 0;
 let listings = 0;
 let rendered = 0;
 const state = {
-    handle: 1, features: 0, dirlist: [], dirlistPromptPromise: null,
+    activeFamily: 'ti', handle: 1, features: 0, dirlist: [], dirlistPromptPromise: null,
     operationEpoch: 0, backupDirlistLoaded: false,
     module: { FS: { readFile: path => path === '/last_recv_path.txt' ? '/dirlist-backup.bin' : '{"vars":[],"apps":[]}', unlink(path) {unlinked.push(path);} } }
 };
 const context = vm.createContext({
-    state, els,
+    state, els, DEVICE_FAMILY_TI: 'ti',
     document: { getElementById: () => null },
     isHPPrimeActive: () => false, isHPLegacyActive: () => false,
     isNumWorksActive: () => false, isCasioActive: () => false,
@@ -68,6 +70,7 @@ const context = vm.createContext({
     ensureCableOpen: async () => 1, ensureHandle: async () => 1,
     initModule: async () => state.module, authorizeDevice: async () => {},
     async ccallAsync(_module, name) {
+        if (name === 'calc_get_info_string') { infoRequests++; return ''; }
         if (name === 'calc_features') { capabilityReads++; return features; }
         if (name === 'calc_recv_backup') { receives++; if (disconnectedDuringReceive) state.operationEpoch++; return receiveResult; }
         if (name === 'calc_backup_dirlist_json') { parses++; return parseResult; }
@@ -75,6 +78,7 @@ const context = vm.createContext({
         listings++;
         return 0;
     },
+    isTi92Selected: () => false, promptCableMismatchResolution: () => false,
     updateKeyControlsState() {}, clearKeyMapDataList() {},
     getActiveKeyMapConfig: () => null,
     updateNspireOsButtons() {}, updateSelectionActionButtons() {},
@@ -83,7 +87,7 @@ const context = vm.createContext({
     setCasioUiState() {}, setHPLegacyUiState() {},
     renderDirlist() { rendered++; },
     log() {}, logError(error) { throw error; },
-    t: value => value, confirm() { confirms++; return consent; },
+    t: value => `${language}:${value}`, confirm() { confirms++; return consent; },
     ensureSilverlinkModelSelected: () => true,
     isCeBundleFile: () => false,
     buildTransferPlan: async () => [{ path: '/file.82p', fileClass: 'var' }],
@@ -92,8 +96,8 @@ const context = vm.createContext({
 });
 vm.runInContext(app.slice(app.indexOf('const FEATURE_FLAGS ='), app.indexOf('const TIG_MODE ='))
     + '\nglobalThis.flags = FEATURE_FLAGS;', context);
-for (const name of ['setButtonLoading', 'applyActiveFamilyUiState', 'updateCapabilities',
-    'formatVariableDisplayName', 'refreshBackupDirlist', 'refreshDirlist', 'ensureDirlistLoadedWithPrompt', 'processIncomingTransfers']) {
+for (const name of ['setButtonLoading', 'updateDeviceInfoCapability', 'applyActiveFamilyUiState', 'updateCapabilities',
+    'getDeviceInfo', 'formatVariableDisplayName', 'refreshBackupDirlist', 'refreshDirlist', 'ensureDirlistLoadedWithPrompt', 'processIncomingTransfers']) {
     vm.runInContext(extractFunction(name), context);
 }
 
@@ -111,6 +115,16 @@ async function main() {
         state.backupDirlistLoaded = false;
         await context.updateCapabilities();
         assert.equal(els.varsPanel.classList.contains('hidden'), !supported, model);
+        assert.equal(els.deviceInfoNote.classList.contains('hidden'), false, `${model} has no VER`);
+        assert.equal(els.btnGetInfo.disabled, true);
+        await context.getDeviceInfo();
+        assert.equal(infoRequests, 0, 'unsupported models never call the native info operation');
+        assert.equal(els.btnGetInfo.disabled, true, 'loading cleanup preserves capability state');
+        language = 'fr';
+        context.applyActiveFamilyUiState({ tiCapabilitiesKnown: true });
+        assert.equal(els.deviceInfoNote.textContent, 'fr:device_info_unsupported');
+        assert.equal(els.btnGetInfo.title, els.deviceInfoNote.textContent);
+        language = 'en';
         assert.equal(els.btnRefreshDirlist.disabled, false, model);
         assert.equal(els.btnReceiveBackup.disabled, false, 'native backup remains available');
         context.applyActiveFamilyUiState({ tiCapabilitiesKnown: true });
@@ -176,7 +190,23 @@ async function main() {
 
         context.applyActiveFamilyUiState();
         assert.equal(els.varsPanel.classList.contains('hidden'), false, 'next family starts with a visible panel');
+        assert.equal(els.deviceInfoNote.classList.contains('hidden'), true, 'unknown capabilities clear the message');
+        assert.equal(els.btnGetInfo.disabled, false, 'a new connection can request info');
     }
+    features = context.flags.OPS_VERSION;
+    state.module._consume_cable_reopen_flag = () => 0;
+    await context.getDeviceInfo();
+    assert.equal(infoRequests, 1, 'supported TI models still request info');
+    assert.equal(els.deviceInfoNote.classList.contains('hidden'), true, 'a transient empty response is not unsupported');
+    assert.equal(els.btnGetInfo.disabled, false, 'supported models can retry');
+    state.features = 0;
+    for (const family of ['hp-prime', 'hp-legacy', 'numworks', 'casio', 'sharp']) {
+        state.activeFamily = family;
+        context.updateDeviceInfoCapability(true);
+        assert.equal(els.deviceInfoNote.classList.contains('hidden'), true, `${family} uses its own backend`);
+        assert.equal(els.btnGetInfo.disabled, false);
+    }
+    state.activeFamily = 'ti';
     modelId = 2;
     features = 0;
     const unsupportedReceives = receives;
