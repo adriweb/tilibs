@@ -158,6 +158,7 @@
   "model": "مدل",
   "free_memory": "حافظه آزاد",
   "refresh_device_info": "بروزرسانی اطلاعات دستگاه",
+  "device_info_unsupported": "این مدل اطلاعات دستگاه را گزارش نمی‌کند.",
   "sync_clock": "همگام‌سازی ساعت",
   "transfers": "انتقال‌ها",
   "is_ready": "آماده",
