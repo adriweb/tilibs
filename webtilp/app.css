@@ -1356,6 +1356,68 @@ a {
     flex-wrap: wrap;
 }
 
+/* Settings actions stay on one row in every theme and language. */
+#settingsModal .modal-card {
+    display: flex;
+    flex-direction: column;
+    max-height: calc(100dvh - 48px);
+}
+
+#settingsModal .modal-body {
+    min-height: 0;
+    overflow-y: auto;
+}
+
+#settingsModal .modal-header,
+#settingsModal .modal-footer {
+    flex-shrink: 0;
+}
+
+#settingsModal .settings-footer,
+#settingsModal .settings-footer .modal-footer-actions {
+    flex-wrap: nowrap;
+    gap: 8px;
+}
+
+#settingsModal .settings-footer > .btn,
+#settingsModal .settings-footer .modal-footer-actions,
+#settingsModal .settings-footer .modal-footer-actions .btn {
+    flex-shrink: 1;
+    min-width: 0;
+}
+
+#settingsModal .settings-footer .btn {
+    display: block;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+@media (max-width: 700px) {
+    #settingsModal .settings-footer > .theme-toggle {
+        flex: 1 1 0;
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+
+    #settingsModal .settings-footer .btn:not(.theme-toggle) {
+        flex-shrink: 0;
+        font-size: 0;
+        padding-inline: 10px;
+        min-width: 36px;
+        min-height: 36px;
+    }
+
+    #settingsModal .settings-footer .btn:not(.theme-toggle) .theme-icon {
+        font-size: 16px;
+    }
+
+    #settingsModal .settings-footer .modal-footer-actions {
+        flex-shrink: 0;
+    }
+}
+
 #backupNote {
     white-space: pre-line;
 }
