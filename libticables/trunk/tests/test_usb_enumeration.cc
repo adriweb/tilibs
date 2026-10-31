@@ -1,4 +1,4 @@
-// Exercise the real enumeration code with deterministic libusb ownership.
+// Exercise real enumeration and bulk writes with deterministic libusb mocks.
 // Unused transport functions are discarded by this target's linker flags.
 #include <stdint.h>
 #include <stdio.h>
@@ -39,6 +39,23 @@ static int list_error;
 static int lists_allocated;
 static int lists_freed;
 static bool serial_available;
+static std::vector<int> bulk_lengths;
+static int bulk_error_call;
+static int bulk_error;
+
+static int test_bulk_transfer(libusb_device_handle *, unsigned char endpoint,
+                             unsigned char *, int length, int *transferred, unsigned int)
+{
+	CHECK(endpoint == 0x01);
+	bulk_lengths.push_back(length);
+	if ((int)bulk_lengths.size() == bulk_error_call)
+	{
+		*transferred = 0;
+		return bulk_error;
+	}
+	*transferred = length;
+	return 0;
+}
 
 static libusb_device *test_ref_device(libusb_device *device)
 {
@@ -108,7 +125,22 @@ static int test_get_device_descriptor(libusb_device *device, libusb_device_descr
 #define libusb_get_device_list test_get_device_list
 #define libusb_free_device_list test_free_device_list
 #define libusb_get_device_descriptor test_get_device_descriptor
+#define libusb_bulk_transfer test_bulk_transfer
 #include "../src/linux/link_usb1.cc"
+
+// These macro names refer to fields in usb_struct inside the backend.
+#undef max_ps_out
+
+int evo_serial_is_open(const EvoSerial *)
+{
+	return 0;
+}
+
+int evo_serial_send(CableHandle *, EvoSerial *, uint8_t *, uint32_t)
+{
+	CHECK(false); // All transport cases below must use bulk USB.
+	return ERR_WRITE_ERROR;
+}
 
 int evo_serial_find_path(char *, size_t, const USBCableInfo *)
 {
@@ -227,6 +259,50 @@ static void check_list_error_and_serial_fallback(void)
 	serial_available = false;
 }
 
+static void check_nspire_bulk_termination(void)
+{
+	// Reported NNSE failure: 142940 = 99 * 1439 + 479 file bytes.
+	// The final chunk plus command (1), extended NavNet header (20), and
+	// NNSE header (12) is exactly 512 bytes, requiring a terminating ZLP.
+	usb_struct device = {};
+	device.handle = reinterpret_cast<libusb_device_handle *>(1);
+	device.out_endpoint = 0x01;
+	CableHandle cable = {};
+	cable.priv2 = &device;
+	cable.timeout = 10;
+	uint8_t data[1472] = {};
+	for (const uint16_t pid : {PID_NSPIRE, PID_NSPIRE_CRADLE, PID_NSPIRE_CXII, PID_TI84P, PID_TI84EVO})
+	{
+		tigl_devices[0].pid = pid;
+		for (const int packet_size : {64, 512})
+		{
+			device.max_ps_out = packet_size;
+			for (const int length : {1, 63, 64, 65, 479, 480, 511, 512, 513, 1024, 1472})
+			{
+				bulk_lengths.clear();
+				CHECK(send_block(&cable, data, length) == 0);
+				const bool nspire = pid == PID_NSPIRE || pid == PID_NSPIRE_CRADLE || pid == PID_NSPIRE_CXII;
+				const bool needs_zlp = nspire && length % packet_size == 0;
+				CHECK(bulk_lengths.size() == (needs_zlp ? 2 : 1));
+				CHECK(bulk_lengths[0] == length);
+				if (needs_zlp) CHECK(bulk_lengths[1] == 0);
+			}
+		}
+	}
+	// Failures to terminate a full-sized write must reach the caller.
+	tigl_devices[0].pid = PID_NSPIRE_CXII;
+	device.max_ps_out = 512;
+	bulk_error_call = 2;
+	for (const int error : {LIBUSB_ERROR_TIMEOUT, LIBUSB_ERROR_IO})
+	{
+		bulk_lengths.clear();
+		bulk_error = error;
+		CHECK(send_block(&cable, data, 512) == (error == LIBUSB_ERROR_TIMEOUT ? ERR_WRITE_TIMEOUT : ERR_WRITE_ERROR));
+		CHECK(bulk_lengths == std::vector<int>({512, 0}));
+	}
+	bulk_error_call = 0;
+}
+
 int main(void)
 {
 	check_empty_list();
@@ -234,5 +310,6 @@ int main(void)
 	check_device_limit();
 	check_descriptor_error();
 	check_list_error_and_serial_fallback();
+	check_nspire_bulk_termination();
 	return 0;
 }
