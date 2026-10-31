@@ -346,6 +346,7 @@ int hex_block_write(FILE *f, uint16_t size, uint16_t addr, uint8_t type, uint8_t
 	// write end block
 	if(!size && !addr && !type && !data && !page)
 	{
+		old_flag = 0x80; // A subsequent container starts in its default section.
 		return hex_packet_write(f, 0, 0x0000, HEX_EOF, nullptr);
 	}
 

@@ -14,3 +14,5 @@ EXTRA_DIST = LOGO build
 
 pkgconfigdir = $(libdir)/pkgconfig
 pkgconfig_DATA = tifiles2.pc
+
+EXTRA_DIST += docs/ti86u.md

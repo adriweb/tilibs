@@ -32,3 +32,8 @@ dist-hook:
 		$(distdir)/test/ti92
 
 TESTS = torture_tifiles test_evo_files test_ti73_types
+
+noinst_PROGRAMS += test_ti86_os
+test_ti86_os_SOURCES = test_ti86_os.cc
+test_ti86_os_LDADD = $(top_builddir)/src/libtifiles2.la @GLIB_LIBS@ @TICONV_LIBS@
+TESTS += test_ti86_os
