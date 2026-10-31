@@ -284,7 +284,7 @@ const TIXX_DATA TI86_CONST[TI86_MAXTYPES + 1] =
 	{"", "86?", "Unknown", N_("Unknown")},
 	{"", "86?", "Unknown", N_("Unknown")},
 	{"", "86?", "Unknown", N_("Unknown")},
-	{"", "86?", "Unknown", N_("Unknown")},
+	{"AMS", "86u", "OS upgrade", N_("OS upgrade")},
 	{"", "86?", "Unknown", N_("Unknown")},
 	{"", "86?", "Unknown", N_("Unknown")},
 	{"", "86?", "Unknown", N_("Unknown")},
