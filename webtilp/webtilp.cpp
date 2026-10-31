@@ -2378,8 +2378,9 @@ static void get_file_metadata_json(const char* filename, const char** class_name
         const int ret = tifiles_file_read_flash(filename, content);
         if (ret == 0) {
             append_flash_entry_json(entries_json_out, content, nullptr, -1, fclass);
+            tifiles_content_delete_flash(content);
         }
-        tifiles_content_delete_flash(content);
+        // tifiles_file_read_flash owns and frees content on failure.
         return;
     }
 
