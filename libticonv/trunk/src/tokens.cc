@@ -45,6 +45,19 @@
 
 //---
 
+static bool is_literal_appvar(CalcModel model, unsigned char type)
+{
+	if (model == CALC_TI73)
+	{
+		return type == 0x1A;
+	}
+	return type == 0x15 && (model == CALC_TI83P || model == CALC_TI84P
+		|| model == CALC_TI84PC || model == CALC_TI84P_USB
+		|| model == CALC_TI84PC_USB || model == CALC_TI83PCE_USB
+		|| model == CALC_TI84PCE_USB || model == CALC_TI82A_USB
+		|| model == CALC_TI84PT_USB || model == CALC_TI82AEP_USB);
+}
+
 static char *detokenize_vartype(CalcModel model, const char *src, unsigned char type)
 {
 	char *dst;
@@ -166,6 +179,13 @@ static char *detokenize_vartype(CalcModel model, const char *src, unsigned char 
 // beware: raw varname is not always NUL-terminated
 static char *detokenize_varname(CalcModel model, const char *src, unsigned char type)
 {
+	// AppVar names are literal, even when their first byte is a name token
+	// (e.g. 'a' == 0x61, the GDB prefix). Headers need not be NUL-terminated.
+	if (is_literal_appvar(model, type))
+	{
+		return g_strndup(src, 8);
+	}
+
 	int i;
 	unsigned int tok1 = src[0] & 0xff;
 	unsigned int tok2 = src[1] & 0xff;
@@ -630,7 +650,8 @@ char* TICALL ticonv_varname_tokenize(CalcModel model, const char *src_, unsigned
 		return nullptr;
 	}
 
-	if (ticonv_model_is_tievo(model))
+	// Literal AppVars named Pic1, GDB1, Window, etc. must not become tokens.
+	if (ticonv_model_is_tievo(model) || is_literal_appvar(model, type))
 	{
 		return g_strdup(src_);
 	}
