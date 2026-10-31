@@ -7,6 +7,7 @@ add_executable(torture_tifiles torture_tifiles.c)
 add_executable(test_tifiles_2 test_tifiles_2.cc)
 add_executable(test_evo_files test_evo_files.cc)
 add_executable(test_ti73_types test_ti73_types.cc)
+add_executable(test_ti86_os test_ti86_os.cc)
 
 pkg_check_modules(glib REQUIRED IMPORTED_TARGET glib-2.0)
 pkg_check_modules(LibArchive REQUIRED IMPORTED_TARGET libarchive)
@@ -15,7 +16,7 @@ if(USE_ICONV)
     add_compile_definitions(USE_ICONV)
 endif()
 
-foreach(tar torture_tifiles test_tifiles_2 test_evo_files test_ti73_types)
+foreach(tar torture_tifiles test_tifiles_2 test_evo_files test_ti73_types test_ti86_os)
     if(Iconv_FOUND AND NOT Iconv_IS_BUILT_IN)
         target_include_directories(${tar} PRIVATE ${Iconv_INCLUDE_DIRS})
         target_link_libraries(${tar} PRIVATE ${Iconv_LIBRARIES})
@@ -33,7 +34,8 @@ add_custom_target(tifiles2_check
 	COMMAND "$<TARGET_FILE:torture_tifiles>"
 	COMMAND "$<TARGET_FILE:test_evo_files>"
 	COMMAND "$<TARGET_FILE:test_ti73_types>"
-	DEPENDS torture_tifiles test_evo_files test_ti73_types
+	COMMAND "$<TARGET_FILE:test_ti86_os>"
+	DEPENDS torture_tifiles test_evo_files test_ti73_types test_ti86_os
 	COMMENT "Run the tifiles2 torture tests"
 	EXCLUDE_FROM_ALL
 )

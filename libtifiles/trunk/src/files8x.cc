@@ -609,6 +609,130 @@ static int get_native_app_name(const FlashContent *content, char *buffer, uint32
 	return 0;
 }
 
+// Community TI86U 1.0 profile. Keep this bounded parser separate from the legacy
+// TI-HEX reader: that reader ignores per-record address gaps and payload bounds.
+static int ti86_hex_digit(uint8_t c)
+{
+	if (c >= '0' && c <= '9') return c - '0';
+	if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+	if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+	return -1;
+}
+
+static int ti86_read_os(FILE *f, const uint8_t *header, Ti8xFlash *content)
+{
+	const unsigned int name_length = header[16];
+	if (content->model != CALC_TI86 ||
+	    (content->model_dst != CALC_NONE && content->model_dst != CALC_TI86) ||
+	    memcmp(header, "**TIFL**\1\0\1\210\0\0\0\0", 16) ||
+	    name_length == 0 || name_length > 8 ||
+	    header[48] != DEVICE_TYPE_86 || header[49] != TI86_AMS)
+	{
+		return ERR_INVALID_FILE;
+	}
+	bool digit = false;
+	for (unsigned int i = 0; i < name_length; i++)
+	{
+		const uint8_t c = header[17 + i];
+		if (c >= '0' && c <= '9') digit = true;
+		else if (c == '.' && digit) digit = false;
+		else return ERR_INVALID_FILE;
+	}
+	if (!digit) return ERR_INVALID_FILE;
+	for (unsigned int i = 17 + name_length; i < 48; i++)
+		if (header[i]) return ERR_INVALID_FILE;
+	for (unsigned int i = 50; i < 74; i++)
+		if (header[i]) return ERR_INVALID_FILE;
+	const uint32_t payload_size = (uint32_t)header[74] | ((uint32_t)header[75] << 8) |
+	                             ((uint32_t)header[76] << 16) | ((uint32_t)header[77] << 24);
+	if (payload_size == 0 || payload_size > 4U * 1024 * 1024 || fseek(f, 0, SEEK_END)) return ERR_INVALID_FILE;
+	if (ftell(f) != (long)(78 + payload_size) || fseek(f, 78, SEEK_SET)) return ERR_INVALID_FILE;
+	uint8_t *text = (uint8_t *)g_malloc(payload_size);
+	if (fread(text, 1, payload_size, f) != payload_size)
+	{
+		g_free(text);
+		return ERR_FILE_IO;
+	}
+	// Allocate only complete page objects: the standard error cleanup expects
+	// every slot below num_pages to be initialized.
+	content->pages = (FlashPage **)g_malloc0(16 * sizeof(FlashPage *));
+	for (unsigned int i = 0; i < 16; i++)
+	{
+		FlashPage *p = (FlashPage *)g_malloc0(sizeof(FlashPage));
+		p->data = (uint8_t *)g_malloc(0x4000);
+		p->addr = 0x4000;
+		p->page = i;
+		p->flag = 0x80;
+		p->size = 0x4000;
+		content->pages[content->num_pages++] = p;
+	}
+	int page = -1;
+	unsigned int offset = 0, seen = 0;
+	bool ended = false;
+	uint32_t pos = 0;
+	int result = ERR_INVALID_FILE;
+	while (pos < payload_size)
+	{
+		const uint32_t start = pos;
+		while (pos < payload_size && text[pos] != '\r' && text[pos] != '\n') pos++;
+		const uint32_t length = pos - start;
+		if (ended || length < 11 || length > 75 || !(length & 1) || text[start] != ':') break;
+		uint8_t record[37];
+		unsigned int sum = 0;
+		const unsigned int bytes = (length - 1) / 2;
+		bool valid = true;
+		for (unsigned int i = 0; i < bytes; i++)
+		{
+			const int hi = ti86_hex_digit(text[start + 1 + 2*i]);
+			const int lo = ti86_hex_digit(text[start + 2 + 2*i]);
+			if (hi < 0 || lo < 0) { valid = false; break; }
+			record[i] = (hi << 4) | lo;
+			sum += record[i];
+		}
+		if (!valid || (sum & 255) || record[0] + 5U != bytes) break;
+		const unsigned int size = record[0];
+		const unsigned int address = (record[1] << 8) | record[2];
+		if (record[3] == 2)
+		{
+			if (size != 2 || address != 0 || (page >= 0 && offset != 0x4000)) break;
+			page = (record[4] << 8) | record[5];
+			if (page >= 16 || (seen & (1U << page))) break;
+			seen |= 1U << page;
+			offset = 0;
+		}
+		else if (record[3] == 0)
+		{
+			if (page < 0 || !size || address != 0x4000 + offset || offset + size > 0x4000) break;
+			memcpy(content->pages[page]->data + offset, record + 4, size);
+			offset += size;
+		}
+		else if (record[3] == 1)
+		{
+			if (size || address || seen != 0xffff || offset != 0x4000) break;
+			ended = true;
+		}
+		else break;
+		if (pos < payload_size)
+		{
+			const uint8_t separator = text[pos++];
+			if (separator == '\r' && pos < payload_size && text[pos] == '\n') pos++;
+		}
+		if (ended && pos == payload_size) result = 0;
+	}
+	g_free(text);
+	if (result) return result;
+	content->model_dst = CALC_TI86;
+	content->revision_major = 1;
+	content->flags = 1;
+	content->object_type = 0x88;
+	memcpy(content->name, header + 17, name_length);
+	content->name[name_length] = 0;
+	content->device_type = DEVICE_TYPE_86;
+	content->data_type = TI86_AMS;
+	content->data_length = 0x40000;
+	return 0;
+}
+
 /**
  * ti8x_file_read_flash:
  * @filename: name of flash file to open.
@@ -648,6 +772,23 @@ int ti8x_file_read_flash(const char *filename, Ti8xFlash *head)
 		tifiles_info("Unable to open this file: %s", filename);
 		ret = ERR_FILE_OPEN;
 		goto tfrf2;
+	}
+
+	// Route the TI-86 community profile before the permissive legacy reader.
+	// Both the extension/model and the owner must agree; other models keep
+	// their existing container path, including historical multi-object files.
+	{
+		uint8_t header[78] = {};
+		const size_t count = fread(header, 1, sizeof(header), f);
+		rewind(f);
+		head->model = tifiles_file_get_model(filename);
+		if (head->model == CALC_TI86 || (count == sizeof(header) && header[48] == DEVICE_TYPE_86))
+		{
+			ret = count == sizeof(header) ? ti86_read_os(f, header, head) : ERR_INVALID_FILE;
+			fclose(f);
+			if (ret) tifiles_content_delete_flash(head);
+			return ret;
+		}
 	}
 
 	for (content = head;; content = content->next) 

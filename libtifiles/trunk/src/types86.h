@@ -54,5 +54,7 @@
 #define TI86_ZRCL  0x1B
 #define TI86_BKUP  0x1D
 #define TI86_UNKN  0x1E
+// File-container OS type; the native ROM updater descriptor uses 0x16.
+#define TI86_AMS   0x23
 
 #endif

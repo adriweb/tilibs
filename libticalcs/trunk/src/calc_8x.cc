@@ -88,6 +88,105 @@
 #define TI86_ROWS  64
 #define TI86_COLS  128
 
+// The development ROM's native updater speaks as TI-85 (85h), unlike the
+// ordinary TI-86 link. ACK/CTS carry header words but no following payload.
+static int ti86_os_reply(CalcHandle *handle, uint8_t expected, uint16_t word)
+{
+	uint8_t mid = 0, cmd = 0;
+	uint16_t length = 0;
+	const int ret = dbus_recv_header(handle, &mid, &cmd, &length);
+	if (ret) return ret;
+	if (mid != DBUS_MID_TI85_PC) return ERR_INVALID_PACKET;
+	if (cmd == DBUS_CMD_ERR || cmd == DBUS_CMD_ERR2)
+	{
+		// CHK waits for ACK before unwinding. Use the updater's host MID,
+		// preserving the checksum failure even if recovery itself fails.
+		if (cmd == DBUS_CMD_ERR) dbus_send(handle, DBUS_MID_PC_TI85, DBUS_CMD_ACK, 0, nullptr);
+		return ERR_CHECKSUM;
+	}
+	return cmd == expected && length == word ? 0 : ERR_INVALID_PACKET;
+}
+
+static int ti86_os_block(CalcHandle *handle, uint16_t address, uint8_t page, const uint8_t *data)
+{
+	if (handle->updat->cancel) return ERR_ABORT;
+	// uint32 size=256, native type=16h, byte5=4, CPU address, page, byte9=0.
+	// Only type, address and page are interpreted by the known receivers.
+	uint8_t descriptor[10] = {0, 1, 0, 0, 0x16, 4, LSB(address), MSB(address), page, 0};
+	int ret = dbus_send(handle, DBUS_MID_PC_TI85, DBUS_CMD_VAR, sizeof(descriptor), descriptor);
+	if (!ret) ret = ti86_os_reply(handle, DBUS_CMD_ACK, 10);
+	if (!ret) ret = ti86_os_reply(handle, DBUS_CMD_CTS, 10);
+	if (!ret) ret = dbus_send(handle, DBUS_MID_PC_TI85, DBUS_CMD_ACK, 0, nullptr);
+	if (!ret) ret = dbus_send(handle, DBUS_MID_PC_TI85, DBUS_CMD_XDP, 256, const_cast<uint8_t *>(data));
+	if (!ret) ret = ti86_os_reply(handle, DBUS_CMD_ACK, 256);
+	if (!ret)
+	{
+		handle->updat->cnt2++;
+		handle->updat->pbar();
+	}
+	return ret;
+}
+
+static int send_os_86(CalcHandle *handle, FlashContent *content)
+{
+	// Validate the complete in-memory object before the first cable operation,
+	// including objects supplied directly rather than through the file reader.
+	if (handle->model != CALC_TI86 || content->model != CALC_TI86 || content->model_dst != CALC_TI86 ||
+	    content->device_type != DEVICE_TYPE_86 || content->data_type != TI86_AMS || content->hw_id ||
+	    content->num_pages != 16 || !content->pages || content->data_length != 0x40000 ||
+	    content->data_part || content->next)
+	{
+		return ERR_INVALID_PARAMETER;
+	}
+	const FlashPage *pages[16] = {};
+	for (unsigned int i = 0; i < 16; i++)
+	{
+		const FlashPage *p = content->pages[i];
+		if (!p || !p->data || p->page >= 16 || pages[p->page] ||
+		    p->addr != 0x4000 || p->size != 0x4000 || p->flag != 0x80)
+		{
+			return ERR_INVALID_PARAMETER;
+		}
+		pages[p->page] = p;
+	}
+	// Reconstructed RAM tail, not original TI code. See ti86_os_finalizer.asm.
+	// It preserves HL around the native C087 programmer (which advances HL
+	// one extra byte while polling), then programs the staged page and resets.
+	static const uint8_t finalizer[] = {
+		0xf3, 0x31, 0x00, 0xf0, 0x21, 0x00, 0x80, 0x11, 0x00, 0x40, 0xfd, 0x21,
+		0x40, 0x00, 0xfd, 0xe5, 0xe5, 0x0e, 0x0f, 0xcd, 0x87, 0xc0, 0xe1, 0x24,
+		0xfd, 0xe1, 0xfd, 0x2b, 0xfd, 0xe5, 0xc1, 0x78, 0xb1, 0x20, 0xeb, 0xaf,
+		0xd3, 0x06, 0xc7
+	};
+	handle->updat->cnt2 = 0;
+	handle->updat->max2 = 1026;
+	int ret = 0;
+	// Never overwrite the executing receiver directly: this strategy handles
+	// all six known receiver layouts, even when the target has no receiver.
+	for (unsigned int page = 0; page < 16 && !ret; page++)
+	{
+		for (unsigned int offset = 0; offset < 0x4000 && !ret; offset += 256)
+		{
+			ret = ti86_os_block(handle, (page == 15 ? 0x8000 : 0x4000) + offset,
+			                   page, pages[page]->data + offset);
+		}
+	}
+	uint8_t tail[256] = {};
+	memcpy(tail, finalizer, sizeof(finalizer));
+	if (!ret) ret = ti86_os_block(handle, 0xc600, 15, tail);
+	for (unsigned int i = 0; i < sizeof(tail); i += 2)
+	{
+		tail[i] = 0x00;
+		tail[i+1] = 0xc6;
+	}
+	if (!ret) ret = ti86_os_block(handle, 0xfb00, 15, tail);
+	// The last ACK precedes programming. Give the RAM finalizer time to finish
+	// before the frontend starts another operation. There is no final EOT:
+	// the finalizer resets, rather than returning to the overwritten receiver.
+	if (!ret) PAUSE(1000);
+	return ret;
+}
+
 static int		is_ready	(CalcHandle* handle)
 {
 	uint16_t status;
@@ -1686,7 +1785,7 @@ extern const CalcFncts calc_86 =
 	"TI86",
 	"TI-86",
 	"TI-86",
-	OPS_KEYS | OPS_SCREEN | OPS_DIRLIST | OPS_BACKUP | OPS_VARS | OPS_ROMDUMP | /*OPS_LABEQUIPMENTDATA |*/
+	OPS_OS | OPS_KEYS | OPS_SCREEN | OPS_DIRLIST | OPS_BACKUP | OPS_VARS | OPS_ROMDUMP | /*OPS_LABEQUIPMENTDATA |*/
 	FTS_SILENT | FTS_MEMFREE | FTS_BACKUP,
 	PRODUCT_ID_NONE,
 	{"",     /* is_ready */
@@ -1737,7 +1836,7 @@ extern const CalcFncts calc_86 =
 	&noop_recv_var_ns,
 	&noop_send_flash,
 	&noop_recv_flash,
-	&noop_send_os,
+	&send_os_86,
 	&noop_recv_idlist,
 	&dump_rom_1,
 	&dump_rom_2,
