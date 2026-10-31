@@ -57,6 +57,76 @@ static void charset_functions_unit_test(void)
     assert(ti[2] == 0);
 }
 
+static void appvar_varname_unit_test(void)
+{
+    const CalcModel models[] = {
+        CALC_TI73, CALC_TI83P, CALC_TI84P, CALC_TI84PC,
+        CALC_TI84P_USB, CALC_TI84PC_USB, CALC_TI83PCE_USB,
+        CALC_TI84PCE_USB, CALC_TI82A_USB, CALC_TI84PT_USB, CALC_TI82AEP_USB
+    };
+    const char *names[] = {
+        "atmOS0", "AtmOS0", "Pic1", "GDB1", "Str1", "Image1",
+        "Window", "RclWin", "TblSet", "ABCDEFGH"
+    };
+    size_t m, n;
+    for (m = 0; m < sizeof(models) / sizeof(models[0]); ++m)
+    {
+        const unsigned char type = models[m] == CALC_TI73 ? 0x1A : 0x15;
+        for (n = 0; n < sizeof(names) / sizeof(names[0]) + 26; ++n)
+        {
+            char lowercase[9] = "a1234567";
+            const char *name;
+            char *converted;
+            if (n < sizeof(names) / sizeof(names[0]))
+                name = names[n];
+            else
+            {
+                lowercase[0] += n - sizeof(names) / sizeof(names[0]);
+                name = lowercase;
+            }
+            converted = ticonv_varname_detokenize(models[m], name, type);
+            assert(converted != NULL && !strcmp(converted, name));
+            ticonv_varname_free(converted);
+            converted = ticonv_varname_tokenize(models[m], name, type);
+            assert(converted != NULL && !strcmp(converted, name));
+            ticonv_varname_free(converted);
+            converted = ticonv_varname_to_utf8(models[m], name, type);
+            assert(converted != NULL && !strcmp(converted, name));
+            ticonv_utf8_free(converted);
+            converted = ticonv_varname_from_tifile(models[m], name, type);
+            assert(converted != NULL && !strcmp(converted, name));
+            ticonv_ti_free(converted);
+            converted = ticonv_varname_to_tifile(models[m], name, type);
+            assert(converted != NULL && !strcmp(converted, name));
+            ticonv_varname_free(converted);
+        }
+    }
+    /* File headers can use all eight bytes without a NUL terminator. */
+    {
+        const char raw[8] = { 'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h' };
+        char *converted = ticonv_varname_detokenize(CALC_TI83P, raw, 0x15);
+        assert(converted != NULL && !strcmp(converted, "abcdefgh"));
+        ticonv_varname_free(converted);
+    }
+    /* These are still tokens when the variable really is a GDB or picture. */
+    {
+        const char gdb[9] = { 0x61, 0x01 };
+        const char pic[9] = { 0x60, 0x01 };
+        char *converted = ticonv_varname_detokenize(CALC_TI83P, gdb, 0x08);
+        assert(converted != NULL && !strcmp(converted, "GDB2"));
+        ticonv_varname_free(converted);
+        converted = ticonv_varname_tokenize(CALC_TI83P, "GDB2", 0x08);
+        assert(converted != NULL && !strcmp(converted, gdb));
+        ticonv_varname_free(converted);
+        converted = ticonv_varname_detokenize(CALC_TI84PC, pic, 0x07);
+        assert(converted != NULL && !strcmp(converted, "Pic2"));
+        ticonv_varname_free(converted);
+        converted = ticonv_varname_tokenize(CALC_TI84PC, "Pic2", 0x07);
+        assert(converted != NULL && !strcmp(converted, pic));
+        ticonv_varname_free(converted);
+    }
+}
+
 static void evo_varname_unit_test(void)
 {
     char raw_pic[9] = { 'P', 'i', 'c', '1', 0, 0, 0, 0, 0 };
@@ -228,6 +298,7 @@ int main(int argc, char **argv)
     PRINTF(ticonv_utf16_to_ti89tusb, PTR, (void *)0x12345678, NULL);
 
     charset_functions_unit_test();
+    appvar_varname_unit_test();
     evo_varname_unit_test();
 
     return 0;
