@@ -176,10 +176,15 @@ test-var-names-wasm:
 	$(EMCC) $(CXXFLAGS) tests/test_var_names_wasm.cpp hp_prime_bridge.cpp hp_prime_app.cpp $(INCLUDES) $(LIBS) -o "$$test_dir/var_names.js" $(EMCCFLAGS); \
 	node tests/test_var_names_wasm.cjs "$$test_dir/var_names.js"
 
+test-ti86-os-wasm:
+	@set -e; test_dir=$$(mktemp -d); trap 'rm -rf "$$test_dir"' EXIT; \
+	$(EMCC) $(CXXFLAGS) tests/test_ti86_os_wasm.cpp hp_prime_bridge.cpp hp_prime_app.cpp $(INCLUDES) $(LIBS) -o "$$test_dir/ti86_os.js" $(EMCCFLAGS); \
+	node tests/test_ti86_os_wasm.cjs "$$test_dir/ti86_os.js"
+
 test-silverlink-wasm: $(TARGET)
 	node tests/test_silverlink_recovery.js $(TARGET)
 
 clean:
 	rm -f $(TARGET) webtilp.wasm webtilp.worker.js sw.js version.json $(APP_JS_BUNDLE) $(NUMWORKS_JS_BUNDLE) $(BUILD_PROFILE_CSS) $(PYTHON_CONVERTER_ASSETS)
 
-.PHONY: all dev prod prepare_dev prepare_prod prepare_python_converters test test-python-bytecode-wasm test-var-send-wasm test-var-names-wasm clean stamp
+.PHONY: all dev prod prepare_dev prepare_prod prepare_python_converters test test-python-bytecode-wasm test-var-send-wasm test-var-names-wasm test-ti86-os-wasm clean stamp

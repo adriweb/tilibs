@@ -26,7 +26,7 @@ vm.runInContext([
 // Model the native bridge for frontend lifecycle and conversion checks.
 const nativeExtensions = new Map([
     [2, '82p,82y,82b,82g'], [3, '83p,83y,83b,83g'],
-    [4, '8xp,8xv,8xy,8xg,8xk,8xu'], [18, '8xp,8ci,8ca,8cg,8ck,8cu'],
+    [7, '86p,86k,86b,86g,86u'], [4, '8xp,8xv,8xy,8xg,8xk,8xu'], [18, '8xp,8ci,8ca,8cg,8ck,8cu'],
     [19, '8xp,8xv,8ci,8ca,8pu,8ek'], [20, '8xp,8xv,8ci,8ca,8eu,8ek'],
     [28, 'tns,tco'], [32, 'tns,tco2'], [48, '8xp2,8xpy2,8mp2,84b2,84pk2']
 ]);
@@ -54,6 +54,10 @@ for (const name of ['program.82p', 'program.82P', 'backup.82B']) assert.ok(accep
 assert.ok(!accepts('program.8xp'));
 assert.ok(!accepts('readme.txt'));
 assert.ok(!accepts('program.py'));
+select(7);
+for (const name of ['os.86u', 'os.86U', 'constant.86k']) assert.ok(accepts(name), name);
+assert.ok(!accepts('os.8xu'));
+assert.ok(!context.isLegacyTivarsConversionCandidate('OS.86U'));
 state.settings.calcModel = '20';
 select(0);
 assert.ok(accepts('demo.Py'), 'use explicitly configured model before identification');
@@ -152,6 +156,7 @@ async function checkNative() {
     };
     includes(2, ['82p', '82y', '82b', '82g', 'tig'], ['8xp', '8xu']);
     includes(6, ['85p', '85s', '85b', '85g']);
+    includes(7, ['86p', '86k', '86b', '86g', '86u'], ['8xu', '8xk']);
     includes(13, ['8xp', '8xy', '8xg', '8xk', '8xu'], ['8ci']);
     includes(18, ['8xp', '8ci', '8ca', '8cg', '8cu']);
     includes(19, ['8xp', '8ci', '8pu', '8ek'], ['8eu']);

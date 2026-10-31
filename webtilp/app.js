@@ -1904,7 +1904,7 @@ const PYTHON_CONVERSION_EVO = 2;
 const PYTHON_CONVERSION_NSPIRE_CXII = 3;
 const LEGACY_TIVARS_EXTENSION_RE = /^8(?:2|3|x|c)[a-z]$/i;
 const LEGACY_TIVARS_FLASH_EXTENSIONS = new Set([
-    '82u', '8xu', '8cu', '8eu', '8pu', '8yu',
+    '82u', '86u', '8xu', '8cu', '8eu', '8pu', '8yu',
     '8xk', '8ck', '8ek', '8xq', '8cq'
 ]);
 
