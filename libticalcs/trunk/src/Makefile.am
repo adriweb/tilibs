@@ -4,6 +4,9 @@ AM_CFLAGS = -Wall -W
 
 SUBDIRS = romdump_8x romdump_84p_usb romdump_834pce_usb romdump_9x
 
+# Reconstructed source for the TI-86 OS sender RAM finalizer.
+EXTRA_DIST = ti86_os_finalizer.asm
+
 # libraries and files to compile and install
 lib_LTLIBRARIES = libticalcs2.la
 libticalcsincludedir = $(includedir)/tilp2
@@ -48,7 +51,7 @@ libticalcs2_la_SOURCES = *.h \
 if OS_WIN32
   libticalcs2_la_DEPENDENCIES = ../build/mingw/ticalcs2-rc.o
   libticalcs2_la_LDFLAGS += -Wl,../build/mingw/ticalcs2-rc.o -Wl,--output-def,libticalcs2.def
-  EXTRA_DIST = libticalcs2.def
+  EXTRA_DIST += libticalcs2.def
 endif
 
 
