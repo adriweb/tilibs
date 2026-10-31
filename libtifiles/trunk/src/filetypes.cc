@@ -448,7 +448,7 @@ const char * TICALL tifiles_fext_of_flash_os(CalcModel model)
 		case CALC_TI85:
 			return nullptr;
 		case CALC_TI86:
-			return nullptr;
+			return "86u";
 #endif
 #ifndef DISABLE_TI9X
 		case CALC_TI89:
@@ -1250,6 +1250,9 @@ int TICALL tifiles_model_to_dev_type(CalcModel model)
 {
 	switch (model) {
 #ifndef DISABLE_TI8X
+	case CALC_TI86:
+		return DEVICE_TYPE_86;
+
 	case CALC_TI73:
 		return DEVICE_TYPE_73;
 
@@ -1288,7 +1291,6 @@ int TICALL tifiles_model_to_dev_type(CalcModel model)
 	case CALC_TI82:
 	case CALC_TI83:
 	case CALC_TI85:
-	case CALC_TI86:
 	case CALC_TI92:
 	case CALC_NSPIRE:
 	case CALC_TI80:
