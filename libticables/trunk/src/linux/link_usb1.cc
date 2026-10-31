@@ -963,10 +963,12 @@ static int send_block(CableHandle *h, uint8_t *data, int length)
 			return ERR_WRITE_ERROR;
 		}
 
-		// FIXME do Nspire CX II calculators also need this ?
-		if ((tigl_devices[h->address].pid == PID_NSPIRE || tigl_devices[h->address].pid == PID_NSPIRE_CRADLE) && length % max_ps_out == 0)
+		// All Nspire transports, including CX II NNSE, need a short USB
+		// packet to terminate writes ending on an endpoint packet boundary.
+		if ((tigl_devices[h->address].pid == PID_NSPIRE || tigl_devices[h->address].pid == PID_NSPIRE_CRADLE
+		     || tigl_devices[h->address].pid == PID_NSPIRE_CXII) && length % max_ps_out == 0)
 		{
-			ticables_info("XXX triggering an extra bulk write");
+			ticables_info("terminating Nspire bulk write with a zero-length packet");
 			ret = bulk_write_with_stall_recovery(h, uOutEnd, (unsigned char*)data, 0, &tmp, to);
 
 			if (ret == LIBUSB_ERROR_TIMEOUT)
