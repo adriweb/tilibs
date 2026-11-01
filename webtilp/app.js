@@ -1414,15 +1414,21 @@ function retireModule(module, reason) {
     }
 }
 
-// WebUSB has no transfer timeout. libusb's WebUSB cancellation is a no-op,
-// so a Promise.race alone would let a late transfer touch freed native state.
-// Closing the USBDevice cancels the browser I/O; wait for it to settle before
-// returning an error to libusb. Scope this to the SilverLink (0451:e001).
-const silverLinkTransports = new WeakMap();
-function installSilverLinkTransport(device) {
-    if (device?.vendorId !== 0x0451 || device.productId !== PID_SILVERLINK) return null;
-    if (silverLinkTransports.has(device)) return silverLinkTransports.get(device);
-    const raw = Object.fromEntries(['transferIn', 'transferOut'].map(name => [name, device[name].bind(device)]));
+// WebUSB has no transfer timeout, and libusb's WebUSB cancellation is a no-op.
+// A rejected wrapper promise delivers exactly one completion to libusb; late
+// browser results stay in JS. Copy DirectLink OUT data so outstanding browser
+// I/O cannot retain a native buffer after the deadline. Close/drain still owns
+// the module's call slot until browser I/O settles (close can itself be slow).
+// Cover SilverLink and TI-84 Plus DirectLink.
+// Other calculator families retain their own transport/recovery behavior.
+const tiUsbTransports = new WeakMap();
+function installTiUsbTransport(device) {
+    if (device?.vendorId !== 0x0451
+        || (device.productId !== PID_SILVERLINK && !TI84P_FAMILY_PIDS.has(device.productId))) return null;
+    const isSilverLink = device.productId === PID_SILVERLINK;
+    const label = isSilverLink ? 'SilverLink' : 'DirectLink';
+    if (tiUsbTransports.has(device)) return tiUsbTransports.get(device);
+    const raw = Object.fromEntries(['transferIn', 'transferOut', 'clearHalt'].map(name => [name, device[name].bind(device)]));
     const pending = new Set();
     let poisoned = false;
     let aborting = null;
@@ -1449,8 +1455,19 @@ function installSilverLinkTransport(device) {
         })().finally(() => { aborting = null; });
         return aborting;
     };
+    const abortTransfer = async () => {
+        const stopped = abort();
+        if (isSilverLink) await stopped;
+        else stopped.catch(error => console.warn('[WebTILP] DirectLink USB close failed', error));
+    };
     const run = async (name, args, timeoutMs = 1100) => {
         capture();
+        if (!isSilverLink && name === 'transferOut') {
+            const data = args[1];
+            const bytes = ArrayBuffer.isView(data)
+                ? new Uint8Array(data.buffer, data.byteOffset, data.byteLength) : new Uint8Array(data);
+            args = [args[0], bytes.slice()];
+        }
         const transfer = Promise.resolve().then(() => raw[name](...args));
         pending.add(transfer);
         // Both handlers consume rejection and remove the pending browser I/O.
@@ -1463,27 +1480,33 @@ function installSilverLinkTransport(device) {
                 timer = setTimeout(() => resolve(expired), timeoutMs);
             })]);
             if (result === expired) {
-                await abort();
-                throw new DOMException('SilverLink transfer timed out after 1.1 seconds.', 'TimeoutError');
+                await abortTransfer();
+                throw new DOMException(`${label} transfer timed out after ${timeoutMs} ms.`, 'TimeoutError');
             }
             return result;
         } finally {
             clearTimeout(timer);
         }
     };
-    for (const name of Object.keys(raw)) {
+    for (const name of ['transferIn', 'transferOut']) {
         device[name] = async (...args) => {
-            if (poisoned) throw new DOMException('SilverLink needs buffer recovery.', 'NetworkError');
+            if (poisoned) throw new DOMException(`${label} needs buffer recovery.`, 'NetworkError');
             try {
                 const waitingForBackup = name === 'transferIn' && transport.module?.__manualBackupWaiting;
-                const result = await run(name, args, waitingForBackup ? null : 1100);
+                const nativeTimeoutMs = transport.module?.__cableTimeoutMs || 5000;
+                const configuredTimeoutMs = transport.module?.__configuredCableTimeoutMs || 5000;
+                // Flash erase/program waits temporarily extend the native timeout.
+                // Keep ordinary SilverLink I/O short, but honor those extensions.
+                const extendedWait = nativeTimeoutMs > configuredTimeoutMs;
+                const timeoutMs = isSilverLink && !extendedWait ? 1100 : nativeTimeoutMs;
+                const result = await run(name, args, waitingForBackup ? null : timeoutMs);
                 if (name === 'transferIn' && result.data?.byteLength && transport.module) {
                     transport.module.__manualBackupWaiting = false;
                 }
-                if (result.status !== 'ok') await abort();
+                if (result.status !== 'ok') await abortTransfer();
                 return result;
             } catch (error) {
-                await abort();
+                await abortTransfer();
                 throw error;
             }
         };
@@ -1510,40 +1533,47 @@ function installSilverLinkTransport(device) {
                 return; // No claimed pipes, so no protocol transfer could run.
             }
             await reopen();
-            // Some browser/driver combinations cannot reset a SilverLink.
-            // Recovery depends on closing pending I/O and draining the pipes;
-            // a USB bus reset is only a best-effort step, not the buffer flush.
-            try {
-                await device.reset();
-            } catch (error) {
-                console.warn('[WebTILP] SilverLink USB reset failed; reopening and draining the cable', error);
+            // A CE can disconnect/re-enumerate on reset, losing WebUSB permission
+            // because it has no USB serial number. DirectLink recovers its pipes
+            // without a bus reset. Keep SilverLink's best-effort reset behavior.
+            if (isSilverLink) {
+                try {
+                    await device.reset();
+                } catch (error) {
+                    console.warn(`[WebTILP] ${label} USB reset failed; reopening and draining the cable`, error);
+                }
+                // Even a failed reset may release interface claims.
+                await reopen();
             }
-            // Even a failed reset may release claims. Reopen must succeed before
-            // endpoint cleanup can run, and drain failures keep the cable poisoned.
-            await reopen();
+            // Drain failures keep the cable poisoned.
             for (const iface of interfaces) {
                 for (const ep of iface.alternate.endpoints.filter(ep => ep.type === 'bulk')) {
-                    await device.clearHalt(ep.direction, ep.endpointNumber);
+                    // Closing can leave DirectLink's endpoint state unusable
+                    // even when the cancelled transfer never reported a stall.
+                    await run('clearHalt', [ep.direction, ep.endpointNumber], isSilverLink ? 1000 : 5000);
                     if (ep.direction !== 'in') continue;
                     // Drain to a quiet pipe, with a finite byte/time budget.
                     let drained = 0;
                     const deadline = Date.now() + 1100;
                     while (true) {
                         if (drained >= 65536 || Date.now() >= deadline) {
-                            throw new Error('SilverLink buffer did not become quiet; reconnect the cable.');
+                            throw new Error(`${label} buffer did not become quiet; reconnect the cable.`);
                         }
                         let result;
                         try {
                             result = await run('transferIn', [ep.endpointNumber, ep.packetSize], 100);
                         } catch (error) {
-                            if (error.name === 'TimeoutError') break;
+                            if (error.name === 'TimeoutError') {
+                                await abort();
+                                break;
+                            }
                             throw error;
                         }
                         if (result.status === 'stall') {
-                            await device.clearHalt('in', ep.endpointNumber);
+                            await run('clearHalt', ['in', ep.endpointNumber], isSilverLink ? 1000 : 5000);
                             break;
                         }
-                        if (result.status !== 'ok') throw new Error(`SilverLink drain failed (${result.status}).`);
+                        if (result.status !== 'ok') throw new Error(`${label} drain failed (${result.status}).`);
                         if (!result.data?.byteLength) break;
                         drained += result.data.byteLength;
                     }
@@ -1555,27 +1585,34 @@ function installSilverLinkTransport(device) {
             await device.close();
             poisoned = false;
         })().finally(async () => {
-            try { if (device.opened) await device.close(); }
+            try {
+                if (aborting) await aborting;
+                if (device.opened) await device.close();
+            }
             finally { recovering = null; }
         });
         return recovering;
     };
-    const transport = { abort, recover, module: null, get needsRecovery() { return poisoned; } };
-    silverLinkTransports.set(device, transport);
+    const transport = { abort, recover, module: null, isDirectLink: !isSilverLink,
+        get needsRecovery() { return poisoned; } };
+    tiUsbTransports.set(device, transport);
     return transport;
 }
 
-async function recoverSilverLinkOperation(module, name, returnType, value, handle) {
-    const device = module.__silverLinkDevice || state.authorizedDevice;
-    const transport = silverLinkTransports.get(device);
+async function recoverTiUsbOperation(module, name, returnType, value, handle) {
+    const device = module.__tiUsbDevice || state.authorizedDevice;
+    const transport = tiUsbTransports.get(device);
     const protocolCall = /^(calc_(recv_|send_|dump_|del_|new_|rename_|change_|screenshot|dirlist_json|get_clock_json|sync_clock)|send_file_(entry_)?custom$|finish_var_send$|is_ready$)/.test(name);
     const failed = (returnType === 'number' && protocolCall && value !== 0)
         || (name === 'calc_get_info_string' && !value);
     if (!transport || !failed) return value;
     // Still own the Asyncify slot here. Native close discards libticables' rBuf;
     // USB recovery discards the hardware pipe. Preserve the original error.
-    await module.ccall('close_cable', 'number', ['number'], [handle], { async: true });
     if (state.module === module) state.cableOpen = false;
+    // WebUSB rejects overlapping close calls. Let the deadline's browser close
+    // finish before libusb closes its handle, or its open/close chain is poisoned.
+    if (transport.isDirectLink) await transport.abort();
+    await module.ccall('close_cable', 'number', ['number'], [handle], { async: true });
     await transport.recover();
     return value;
 }
@@ -1747,7 +1784,15 @@ async function ccallAsync(module, name, returnType, argTypes, args, options = {}
         }
         entered = true;
         let settled = false;
-        const underlying = Promise.resolve(result).then(value => recoverSilverLinkOperation(module, name, returnType, value, args[0]));
+        const native = Promise.resolve(result);
+        const underlying = native.then(value => recoverTiUsbOperation(module, name, returnType, value, args[0]));
+        // DirectLink close/recovery can outlive the configured packet deadline
+        // on macOS. Report the native failure promptly, retaining this FIFO slot
+        // until cleanup finishes so subsequent native calls cannot overtake it.
+        const visible = native.then(value => {
+            const transport = tiUsbTransports.get(module.__tiUsbDevice || state.authorizedDevice);
+            return transport?.isDirectLink && transport.needsRecovery ? value : underlying;
+        });
         underlying.then(
             () => { settled = true; release(); },
             () => { settled = true; release(); }
@@ -1759,7 +1804,7 @@ async function ccallAsync(module, name, returnType, argTypes, args, options = {}
         };
         if (!useProgress) {
             try {
-                const value = await withTimeout(underlying, name, timeoutMs);
+                const value = await withTimeout(visible, name, timeoutMs);
                 throwIfCancelled();
                 return value;
             } catch (err) {
@@ -1774,7 +1819,7 @@ async function ccallAsync(module, name, returnType, argTypes, args, options = {}
         }
         startProgress(progressLabel);
         try {
-            const value = await withProgressTimeout(underlying, progressLabel, timeoutMs);
+            const value = await withProgressTimeout(visible, progressLabel, timeoutMs);
             throwIfCancelled();
             return value;
         } catch (err) {
@@ -3925,11 +3970,11 @@ async function applyWebUsbDeviceCableHint(module, device) {
     if (!device || !module) {
         return;
     }
-    const silverLink = installSilverLinkTransport(device);
-    if (silverLink) {
-        if (silverLink.needsRecovery) await silverLink.recover();
-        silverLink.module = module;
-        module.__silverLinkDevice = device;
+    const transport = installTiUsbTransport(device);
+    if (transport) {
+        if (transport.needsRecovery) await transport.recover();
+        transport.module = module;
+        module.__tiUsbDevice = device;
     }
     if (isSerialDevice(device)) {
         bindSerialPortToModule(module, device);
@@ -5920,6 +5965,19 @@ async function ensureCableOpen() {
     const handle = await ensureHandle();
     if (!handle) {
         throw new Error('No cable handle available');
+    }
+    const transport = tiUsbTransports.get(module.__tiUsbDevice || state.authorizedDevice);
+    if (transport?.needsRecovery) {
+        await getModuleCallState(module).tail;
+        if (transport.needsRecovery) {
+            // Also handle a timeout issued through raw module.ccall().
+            if (state.cableOpen) {
+                state.cableOpen = false;
+                await transport.abort();
+                await ccallAsync(module, 'close_cable', 'number', ['number'], [handle]);
+            }
+            await transport.recover();
+        }
     }
     if (state.cableOpen) {
         return handle;
@@ -11363,17 +11421,17 @@ async function nukeConnection(tryReconnect = true) {
         setButtonLoading(els.btnNuke, true);
     }
     clearActiveOperations('Operation cancelled by emergency reset.');
-    const silverLink = silverLinkTransports.get(state.authorizedDevice);
-    const module = state.module || silverLink?.module;
+    const transport = tiUsbTransports.get(state.authorizedDevice);
+    const module = state.module || transport?.module;
     let nativeIdle = true;
-    if (silverLink) {
+    if (transport) {
         try {
             // Closing cancels browser I/O before touching the native handles.
-            await withTimeout(silverLink.abort(), 'Cancelling SilverLink I/O', 3000);
-            if (module) await withTimeout(getModuleCallState(module).tail, 'Waiting for SilverLink I/O', 3000);
+            await withTimeout(transport.abort(), 'Cancelling TI USB I/O', 3000);
+            if (module) await withTimeout(getModuleCallState(module).tail, 'Waiting for TI USB I/O', 3000);
         } catch (error) {
             nativeIdle = false;
-            console.warn('[WebTILP] SilverLink I/O did not stop; retiring the module without native teardown', error);
+            console.warn('[WebTILP] TI USB I/O did not stop; retiring the module without native teardown', error);
         }
     }
     const wasHPPrime = isHPPrimeActive();
@@ -11392,7 +11450,7 @@ async function nukeConnection(tryReconnect = true) {
             console.warn('[WebTILP] Failed to close the NumWorks WebUSB session cleanly', err);
         }
     }
-    if (!silverLink && !wasHPPrime && !wasNumWorks) {
+    if (!transport && !wasHPPrime && !wasNumWorks) {
         try { await state.authorizedDevice?.reset(); } catch (e) {}
     }
     if (isNspireActive()) {
@@ -11402,7 +11460,7 @@ async function nukeConnection(tryReconnect = true) {
         if (state.module && nativeIdle && !wasHPPrime && !wasNumWorks) {
             try {
                 retireModule(state.module, 'emergency reset');
-                if (silverLink) {
+                if (transport) {
                     await state.module.ccall('notify_usb_disconnect', null, [], [], { async: true });
                 } else {
                     state.module._notify_usb_disconnect();
@@ -11433,14 +11491,14 @@ async function nukeConnection(tryReconnect = true) {
         log('Device disconnected.');
     }
     try {
-        if (silverLink) {
-            if (!nativeIdle) throw new Error('SilverLink I/O is still pending; reconnect the cable before retrying.');
-            await silverLink.recover();
+        if (transport) {
+            if (!nativeIdle) throw new Error('TI USB I/O is still pending; reconnect the cable before retrying.');
+            await transport.recover();
         }
         tryReconnect && await connect();
     } catch (err) {
         console.warn('Failed to reconnect automatically, just do it manually.', err);
-        if (silverLink) logError(err, 'SilverLink recovery failed');
+        if (transport) logError(err, 'TI USB recovery failed');
     } finally {
         state.nukeInProgress = false;
         if (els.btnNuke) setButtonLoading(els.btnNuke, false);
