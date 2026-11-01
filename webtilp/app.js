@@ -726,6 +726,7 @@ const I18N_EN = {
     "numworks_script_renamed": "Renamed {old}.py to {name}.py.",
     "numworks_script_deleted": "Deleted {name}.py from NumWorks storage.",
     "numworks_download_failed": "NumWorks download failed",
+    "rm_loader_settings_hint": "Connect opens the native RM OS loader over WebSerial (19200 baud, 8O2), independently of the TI cable setting. Hold OPTN + EXP at power-on; close FA-124 first.",
     "connect_calculator": "Connect Calculator",
     "welcome_title": "Welcome to WebTILP!",
     "welcome_text": "Plug in your calculator, then click \"Connect Calculator\"; WebTILP will detect its family automatically.",
@@ -1864,6 +1865,8 @@ const DIRECTLINK_CALC_VALUES = new Set([13, 14, 15, 18, 19, 20, 21, 22, 23, 24, 
 
 const CALC_MODEL_OPTIONS = [
     { value: 'auto', label: 'Auto' },
+    { value: 'casio-rm7000', label: 'Casio RM-7000 (native OS loader)' },
+    { value: 'casio-rm9000', label: 'Casio RM-9000 (native OS loader)' },
     { value: 1, label: 'TI-73' },
     { value: 2, label: 'TI-82' },
     { value: 3, label: 'TI-83' },
@@ -4232,16 +4235,20 @@ function sortCalcOptions(options) {
 
 function getCalcOptionsForCable(cableModel) {
     if (String(cableModel) === CABLE_SILVERLINK || String(cableModel) === CABLE_GRAYLINK) {
-        return sortCalcOptions(CALC_MODEL_OPTIONS.filter(option => option.value === 'auto' || SILVERLINK_CALC_VALUES.has(Number(option.value))));
+        return sortCalcOptions(CALC_MODEL_OPTIONS.filter(option => option.value === 'auto' || ['casio-rm7000', 'casio-rm9000'].includes(option.value) || SILVERLINK_CALC_VALUES.has(Number(option.value))));
     }
     if (String(cableModel) === CABLE_DIRECTLINK) {
-        return sortCalcOptions(CALC_MODEL_OPTIONS.filter(option => option.value === 'auto' || DIRECTLINK_CALC_VALUES.has(Number(option.value))));
+        return sortCalcOptions(CALC_MODEL_OPTIONS.filter(option => option.value === 'auto' || ['casio-rm7000', 'casio-rm9000'].includes(option.value) || DIRECTLINK_CALC_VALUES.has(Number(option.value))));
     }
     return sortCalcOptions(CALC_MODEL_OPTIONS);
 }
 
 function updateCalcHint(cableModel) {
     if (!els.settingCalcHint) {
+        return;
+    }
+    if (['casio-rm7000', 'casio-rm9000'].includes(els.settingCalcModel?.value)) {
+        els.settingCalcHint.textContent = t('rm_loader_settings_hint');
         return;
     }
     if (String(cableModel) === CABLE_SILVERLINK) {
@@ -5777,6 +5784,8 @@ async function connectHPPrime(forcePrompt = true, discoveryUsbDevice = null) {
 }
 
 async function autoConnectIfAuthorized() {
+    // Native RM bootloaders are explicit WebSerial sessions, never auto-probed.
+    if (['casio-rm7000', 'casio-rm9000'].includes(state.settings?.calcModel)) return;
     if (!hasAnySupportedTransport()) {
         return;
     }
@@ -6156,6 +6165,10 @@ async function connectTI(forcePrompt = true, selectedUsbDevice = null) {
 }
 
 async function connect() {
+    if (['casio-rm7000', 'casio-rm9000'].includes(state.settings?.calcModel)) {
+        window.location.href = 'rm-loader.html';
+        return;
+    }
     if (state.connectInProgress) {
         return;
     }
@@ -11574,15 +11587,18 @@ function bindEvents() {
         const selected = els.settingCalcModel.value;
         const options = getCalcOptionsForCable(els.settingCableModel.value);
         populateSelect(els.settingCalcModel, options);
-        updateCalcHint(els.settingCableModel.value);
         if (options.some(option => String(option.value) === selected)) {
             els.settingCalcModel.value = selected;
         } else {
             els.settingCalcModel.value = options.find(option => option.value !== 'auto')?.value ?? 'auto';
         }
+        updateCalcHint(els.settingCableModel.value);
         updateSourceConversionSettingAvailability();
     });
-    els.settingCalcModel.addEventListener('change', updateSourceConversionSettingAvailability);
+    els.settingCalcModel.addEventListener('change', () => {
+        updateCalcHint(els.settingCableModel.value);
+        updateSourceConversionSettingAvailability();
+    });
     els.settingsModal.addEventListener('click', event => {
         if (event.target === els.settingsModal) {
             closeSettingsModal();
