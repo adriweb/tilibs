@@ -54,12 +54,16 @@ class USBDevice {
     }
     async clearHalt(direction, endpoint) { this.calls.push(`halt:${direction}:${endpoint}`); }
     async close() {
+        if (this.closing) throw new DOMException('A device-state change is in progress', 'InvalidStateError');
+        this.closing = true;
         this.calls.push('close'); this.opened = false;
         this.configuration.interfaces[0].claimed = false;
+        if (this.closeGate) await this.closeGate;
         await new Promise(resolve => setImmediate(resolve));
         for (const reject of this.waiting) reject(new DOMException('Transfer cancelled by close', 'AbortError'));
         this.waiting.clear();
         this.readPending = null;
+        this.closing = false;
     }
     transferIn(endpoint, length) {
         this.calls.push('read');
@@ -86,6 +90,7 @@ class USBDevice {
     }
     transferOut(endpoint, bytes) {
         this.calls.push('write');
+        this.retainedWrite = bytes;
         this.writes.push([...bytes]);
         if (this.holdWrites) return new Promise((_, reject) => this.waiting.add(reject));
         return Promise.resolve({ status: 'ok', bytesWritten: bytes.byteLength });
@@ -95,12 +100,16 @@ class USBDevice {
 function harness(device = new USBDevice(), realTime = false) {
     const state = { authorizedDevice: device, operationEpoch: 0, handle: 42, activeFamily: 'ti', lastCcallTs: 0, cableOpen: true };
     const logs = [];
+    const deadlines = [];
     const context = vm.createContext({
         state, DOMException, Date, Promise, Set, WeakMap,
-        setTimeout: (fn, ms) => setTimeout(fn, realTime ? ms : Math.max(1, ms / 100)), clearTimeout,
+        setTimeout: (fn, ms) => {
+            deadlines.push(ms);
+            return setTimeout(fn, realTime ? ms : Math.max(1, ms / 100));
+        }, clearTimeout,
         sleep: ms => new Promise(resolve => setTimeout(resolve, ms / 100)),
         CCALL_TIMEOUT_MS: 8000, CCALL_MIN_GAP_MS: 0, SUSPENDED_CCALL_GRACE_MS: 3000,
-        PID_SILVERLINK: 0xe001, DEVICE_FAMILY_TI: 'ti', DEVICE_FAMILY_SHARP: 'sharp',
+        PID_SILVERLINK: 0xe001, TI84P_FAMILY_PIDS: new Set([0xe003, 0xe008]), DEVICE_FAMILY_TI: 'ti', DEVICE_FAMILY_SHARP: 'sharp',
         console: { log() {}, warn(...args) { logs.push(args); }, error(...args) { logs.push(args); } },
         els: {}, setButtonLoading() {},
         clearActiveOperations() { state.operationEpoch++; },
@@ -111,18 +120,95 @@ function harness(device = new USBDevice(), realTime = false) {
         startProgress() {}, stopProgress() {}, readProgressTick: () => null, refreshProgressDetails() {},
         async connect() { state.reconnected = true; assert.equal(device.bytes.length, 0, 'reconnect sees a drained cable'); }
     });
-    vm.runInContext('const silverLinkTransports = new WeakMap();', context);
+    vm.runInContext('const tiUsbTransports = new WeakMap();', context);
     vm.runInContext("let lastDebugLog = null;", context);
-    for (const name of ['installSilverLinkTransport', 'recoverSilverLinkOperation', 'getModuleCallState',
+    for (const name of ['installTiUsbTransport', 'recoverTiUsbOperation', 'getModuleCallState',
         'makeModuleDeadError', 'readDebugLog', 'retireModule', 'withTimeout', 'withProgressTimeout', 'watchAbandonedCcall',
         'isFatalWasmRuntimeError', 'handleFatalWasmRuntimeError', 'ccallAsync', 'nukeConnection']) {
         vm.runInContext(extract(name), context);
     }
-    const transport = context.installSilverLinkTransport(device);
-    return { device, state, context, transport, logs };
+    const transport = context.installTiUsbTransport(device);
+    return { device, state, context, transport, logs, deadlines };
 }
 
 async function main() {
+    for (const configuredTimeout of [5000, 20000, 60000]) {
+        const h = harness();
+        h.transport.module = { __configuredCableTimeoutMs: configuredTimeout, __cableTimeoutMs: 360000 };
+        const cts = h.device.transferIn(1, 64);
+        const feed = setTimeout(() => h.device.feed([0x98, 9, 0, 0]), 35);
+        try {
+            assert.deepEqual([...new Uint8Array((await cts).data.buffer)], [0x98, 9, 0, 0]);
+        } finally { clearTimeout(feed); }
+        assert.equal(h.deadlines.at(-1), 360000, 'SilverLink honors the native Flash wait extension');
+        assert.equal(h.transport.needsRecovery, false);
+        h.transport.module.__cableTimeoutMs = configuredTimeout;
+        await assert.rejects(h.device.transferIn(1, 64), { name: 'TimeoutError' });
+        assert.equal(h.deadlines.at(-1), 1100, 'ordinary SilverLink reads retain their short deadline');
+    }
+    {
+        const device = new USBDevice(); device.productId = 0xe008;
+        let finishClose;
+        device.closeGate = new Promise(resolve => { finishClose = resolve; });
+        const h = harness(device);
+        const calls = [];
+        const module = h.state.module = h.transport.module = { __cableTimeoutMs: 50, async ccall(name) {
+            calls.push(name);
+            if (name === 'is_ready') {
+                try { await device.transferIn(1, 64); } catch (_) { return 3; }
+            }
+            if (name === 'close_cable') { await device.close(); return 0; }
+            assert.equal(name, 'open_cable');
+            assert.equal(device.waiting.size, 0);
+            assert.equal(h.transport.needsRecovery, false);
+            return 0;
+        } };
+        assert.equal(await h.context.ccallAsync(module, 'is_ready', 'number', ['number'], [42]), 3,
+            'a slow browser close does not delay the native error');
+        assert.equal(h.state.cableOpen, false, 'a retry must reopen the cable after cleanup');
+        assert.equal(device.waiting.size, 1, 'the browser can still be cancelling its old read');
+        const next = h.context.ccallAsync(module, 'open_cable', 'number', ['number'], [42]);
+        await new Promise(resolve => setImmediate(resolve));
+        assert.deepEqual(calls, ['is_ready'], 'native close and queued calls wait for the browser close');
+        finishClose();
+        assert.equal(await next, 0);
+    }
+    for (const productId of [0xe003, 0xe008]) {
+        const device = new USBDevice();
+        device.productId = productId;
+        const h = harness(device, true);
+        const module = h.transport.module = { __cableTimeoutMs: 60 };
+        const started = Date.now();
+        await assert.rejects(device.transferIn(1, 64), { name: 'TimeoutError' });
+        assert.ok(Date.now() - started >= 50, 'DirectLink uses the configured deadline');
+        await h.transport.abort();
+        assert.equal(device.waiting.size, 0, 'recovery settles outstanding browser reads');
+        assert.equal(h.transport.needsRecovery, true);
+        device.bytes.push(0xaa, 0xbb); // A stale response must not reach the next command.
+        await h.transport.recover();
+        assert.equal(device.bytes.length, 0);
+        assert.ok(!device.calls.includes('reset'), 'DirectLink recovery must not re-enumerate a CE without a USB serial number');
+        assert.ok(device.calls.includes('halt:in:1') && device.calls.includes('halt:out:1'),
+            'DirectLink recovery clears endpoint state after a cancelled transfer');
+        await device.open(); await device.claimInterface(0);
+        module.__cableTimeoutMs = 120; // Temporary/native timeout changes apply to subsequent I/O.
+        device.holdWrites = true;
+        const writeStarted = Date.now();
+        const nativeBytes = new Uint8Array([1]);
+        // The browser is allowed to retain the submitted BufferSource while
+        // its transfer is pending, even after the native call has timed out.
+        await assert.rejects(device.transferOut(1, nativeBytes), { name: 'TimeoutError' });
+        nativeBytes[0] = 99;
+        assert.deepEqual([...device.retainedWrite], [1], 'late browser writes cannot observe recycled native bytes');
+        assert.ok(Date.now() - writeStarted >= 100, 'updated timeout also applies to writes');
+        await h.transport.abort();
+        assert.equal(device.waiting.size, 0);
+        device.holdWrites = false;
+        await h.transport.recover();
+        await device.open(); await device.claimInterface(0);
+        device.feed([42]);
+        assert.equal((await device.transferIn(1, 64)).data.getUint8(0), 42);
+    }
     {
         const h = harness(new USBDevice(), true);
         const started = Date.now();
@@ -211,19 +297,21 @@ async function main() {
         await assert.rejects(h.device.transferOut(1, new Uint8Array([1])), /needs buffer recovery/);
     }
     {
-        const device = new USBDevice(); device.productId = 0xe003;
+        const device = new USBDevice(); device.productId = 0xe004;
         const original = device.transferIn;
         const h = harness(device);
         assert.equal(h.transport, null);
-        assert.equal(device.transferIn, original, 'DirectLink USB transport is unchanged');
+        assert.equal(device.transferIn, original, 'other calculator families retain their transport');
     }
-    console.log('SilverLink deadlines, native/USB buffer recovery, FIFO and bomb cancellation tests passed');
+    console.log('TI USB deadlines, native/USB buffer recovery, FIFO and bomb cancellation tests passed');
 }
 
-async function wasmHarness(path, model, failReset) {
-    const h = harness(new USBDevice(), true);
+async function wasmHarness(path, model, failReset, productId = 0xe001) {
+    const device = new USBDevice();
+    device.productId = productId;
+    const h = harness(device, true);
     h.device.failReset = failReset;
-    const descriptor = [18, 1, 0x10, 1, 0, 0, 0, 8, 0x51, 4, 1, 0xe0, 0, 1, 1, 2, 3, 1];
+    const descriptor = [18, 1, 0x10, 1, 0, 0, 0, 8, 0x51, 4, productId & 255, productId >> 8, 0, 1, 1, 2, 3, 1];
     const configuration = [9, 2, 32, 0, 1, 1, 0, 0x80, 50, 9, 4, 0, 0, 2, 0xff, 0, 0, 0,
         7, 5, 0x81, 2, 64, 0, 0, 7, 5, 1, 2, 64, 0, 0];
     h.device.controlTransferIn = async (setup, length) => {
@@ -242,14 +330,54 @@ async function wasmHarness(path, model, failReset) {
     } });
     const module = h.state.module = await require(require('node:path').resolve(path))();
     await module.ccall('init', 'number', [], [], { async: true });
-    module._set_cable_model(4); module._set_force_cable(1);
+    module._set_cable_model(productId === 0xe001 ? 4 : 5); module._set_force_cable(1);
     module._set_calc_model(model); module._set_force_calc(1);
-    module.__silverLinkDevice = h.device;
+    module.__tiUsbDevice = h.device;
     h.transport.module = module;
     h.state.handle = await module.ccall('create_handle', 'number', [], [], { async: true });
     assert.ok(h.state.handle);
     assert.equal(await module.ccall('open_cable', 'number', ['number'], [h.state.handle], { async: true }), 0);
     return { ...h, module, writes: h.device.writes };
+}
+
+async function testDirectLinkWasm(path) {
+    const h = await wasmHarness(path, 20, false, 0xe008); // TI-84 Plus CE USB.
+    const { module } = h;
+    // A complete DUSB buffer allocation, raw ACK and mode-set response.
+    const readyReply = [0, 0, 0, 4, 2, 0, 0, 3, 255,
+        0, 0, 0, 2, 5, 224, 0,
+        0, 0, 0, 10, 4, 0, 0, 0, 4, 0, 18, 0, 0, 7, 208];
+    const ready = () => module.ccall('is_ready', 'number', ['number'], [h.state.handle], { async: true });
+    h.device.feed(readyReply);
+    assert.equal(await ready(), 0);
+    for (const timeout of [3, 5]) {
+        module._set_cable_timeout(timeout);
+        assert.equal(module.__cableTimeoutMs, timeout * 100, 'native setter synchronizes browser deadline');
+        const started = Date.now();
+        const result = await ready();
+        assert.notEqual(result, 0, 'raw ccall returns an error instead of suspending forever');
+        // DUSB_MODE_NORMAL advertises 2000 ms, so GREET temporarily raises
+        // shorter caller timeouts. ensure_calc_ready then waits 4 * 200 ms
+        // between retries after the transport is poisoned.
+        const packetTimeoutMs = Math.max(timeout * 100, 2000);
+        const elapsed = Date.now() - started;
+        assert.ok(elapsed >= packetTimeoutMs, `GREET honors its packet deadline: ${elapsed} ms`);
+        assert.ok(elapsed < packetTimeoutMs + 2000,
+            `packet deadline plus bounded native retries and scheduling margin: ${elapsed} ms`);
+        assert.equal(module.__cableTimeoutMs, timeout * 100, 'GREET restores the caller timeout after failure');
+        assert.equal(h.device.waiting.size, 0);
+        assert.equal(h.transport.needsRecovery, true);
+        await h.context.recoverTiUsbOperation(module, 'is_ready', 'number', result, h.state.handle);
+        assert.equal(h.transport.needsRecovery, false);
+        assert.equal(await module.ccall('open_cable', 'number', ['number'], [h.state.handle], { async: true }), 0);
+        h.device.feed(readyReply);
+        assert.equal(await ready(), 0, 'readiness succeeds after native and USB recovery');
+    }
+    assert.notEqual(await h.context.ccallAsync(module, 'is_ready', 'number', ['number'], [h.state.handle]), 0);
+    await h.context.getModuleCallState(module).tail;
+    assert.equal(h.transport.needsRecovery, false, 'UI wrapper automatically recovers a failed readiness operation');
+    assert.equal(h.context.getModuleCallState(module).dead, false);
+    console.log('Compiled WASM/libusb DirectLink deadlines, raw readiness timeout and recovery passed');
 }
 
 async function test83PlusWasm(path) {
@@ -296,6 +424,75 @@ async function test83PlusWasm(path) {
     assert.equal(await h.context.ccallAsync(module, 'is_ready', 'number', ['number'], [h.state.handle]), 0);
     assert.deepEqual(writes, [[0x23, 0x68, 0, 0]], 'explicit Is Ready still sends RDC after recovery');
     console.log('Compiled WASM/libusb TI-83+ screenshot exception, info/transfer readiness gates and recovery passed');
+}
+
+async function test89ScreenshotWasm(path) {
+    const h = await wasmHarness(path, 8, false); // TI-89 over SilverLink.
+    const data = Uint8Array.from({ length: 3840 }, (_, i) => i & 255);
+    const checksum = data.reduce((sum, byte) => sum + byte, 0) & 65535;
+    for (const badChecksum of [true, false]) {
+        h.device.feed([0x98, 0x56, 0, 0, 0x98, 0x15, 0, 15,
+            ...data, checksum & 255, (checksum >> 8) ^ (badChecksum ? 1 : 0)]);
+        assert.equal(await h.context.ccallAsync(h.module, 'calc_screenshot', 'number',
+            ['number'], [h.state.handle]), 0, 'TI-89 screenshot accepts its unreliable checksum');
+        assert.deepEqual(h.writes.splice(0), [[8, 0x6d, 0, 0], [8, 0x56, 0, 0]],
+            'screenshot finishes with ACK and no checksum-abort or cable recovery');
+        const file = Buffer.from(h.module.FS.readFile('/screenshot.bin'));
+        assert.equal(file.readUInt32LE(0), 160);
+        assert.equal(file.readUInt32LE(4), 100);
+        assert.equal(file.length, 8 + 160 * 100 * 3);
+        for (let y = 0; y < 100; y++) {
+            for (let x = 0; x < 160; x++) {
+                const value = data[y * 30 + (x >> 3)] & (128 >> (x & 7)) ? 0 : 255;
+                const offset = 8 + (y * 160 + x) * 3;
+                assert.deepEqual([...file.subarray(offset, offset + 3)], [value, value, value]);
+            }
+        }
+        assert.equal(h.transport.needsRecovery, false);
+        assert.equal(h.device.bytes.length, 0);
+    }
+    console.log('Compiled WASM/libusb TI-89 screenshot checksum compatibility, ACK and RGB cropping passed');
+}
+
+async function test89FlashWaitWasm(path) {
+    const h = await wasmHarness(path, 8, false);
+    h.module._set_cable_timeout(600); // The frontend's OS-entry timeout.
+    assert.equal(h.module.__configuredCableTimeoutMs, 60000);
+    const data = Buffer.alloc(128, 0x5a);
+    data[0] = 0x80;
+    const image = Buffer.alloc(78 + data.length);
+    image.write('**TIFL**');
+    image[8] = 2; image[12] = 0x28; image[13] = 3;
+    image.writeUInt16LE(0x0320, 14);
+    image[16] = 8; image.write('basecode', 17);
+    image[48] = 0x98; image[49] = 0x23; image[73] = 3;
+    image.writeUInt32LE(data.length, 74);
+    data.copy(image, 78);
+    h.module.FS.writeFile('/flash-wait.89u', image);
+    h.device.feed([0x98, 0x56, 0, 0]);
+    const sending = h.context.ccallAsync(h.module, 'send_file_custom', 'number',
+        ['number', 'string', 'string', 'number', 'number'], [h.state.handle, '/flash-wait.89u', '', -1, 0],
+        { timeoutMs: 5000, useProgress: true });
+    while (!h.device.waiting.size) await new Promise(resolve => setTimeout(resolve, 10));
+    assert.equal(h.module.__cableTimeoutMs, 360000, '68k Flash sender extends the native wait');
+    await new Promise(resolve => setTimeout(resolve, 1300));
+    assert.equal(h.transport.needsRecovery, false, 'Flash CTS can exceed the ordinary 1.1-second deadline');
+    h.device.feed([0x98, 9, 0, 0, 0x98, 0x56, 0, 0, 0x98, 0x56, 0, 0]);
+    assert.equal(await sending, 0);
+    assert.equal(h.module.__cableTimeoutMs, 60000, 'Flash sender restores the caller timeout');
+    assert.equal(h.module.__configuredCableTimeoutMs, 60000, 'temporary waits do not change the configured timeout');
+    const wire = Buffer.concat(h.writes.map(bytes => Buffer.from(bytes)));
+    const commands = [];
+    for (let offset = 0; offset < wire.length;) {
+        const command = wire[offset + 1];
+        const length = wire.readUInt16LE(offset + 2);
+        commands.push(command);
+        if (command === 0x15) assert.deepEqual(wire.subarray(offset + 4, offset + 4 + length), data);
+        offset += 4 + (length ? length + 2 : 0);
+        assert.ok(offset <= wire.length);
+    }
+    assert.deepEqual(commands, [0xc9, 0x56, 0x15, 0x92], 'OS header/data are sent once, without replay or abort');
+    console.log('Compiled WASM/libusb TI-89 Flash CTS wait, timeout restoration and OS data passed');
 }
 
 async function testWasm(path, failReset) {
@@ -430,6 +627,9 @@ async function testManualRestoreWasm(path, model) {
 (async () => {
     await main();
     if (process.argv[2]) {
+        await test89ScreenshotWasm(process.argv[2]);
+        await test89FlashWaitWasm(process.argv[2]);
+        await testDirectLinkWasm(process.argv[2]);
         await test83PlusWasm(process.argv[2]);
         for (const model of [2, 6, 7]) await testManualRestoreWasm(process.argv[2], model);
         for (const failReset of [false, true]) await testWasm(process.argv[2], failReset);
