@@ -1067,6 +1067,8 @@ EMSCRIPTEN_KEEPALIVE
 void set_cable_timeout(int timeout) {
     if (timeout > 0) {
         g_cable_timeout = timeout;
+        // Synchronize browser deadlines for raw ccall users and temporary timeouts.
+        EM_ASM({ Module.__cableTimeoutMs = $0; }, timeout * 100);
         if (g_cable_handle) {
             ticables_options_set_timeout(g_cable_handle, g_cable_timeout);
         }
