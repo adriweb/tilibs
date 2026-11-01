@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>WebTILP — Casio RM-7000/9000</title>
+    <link rel="icon" href="favicon.ico">
+    <link rel="stylesheet" href="app.css">
+    <link rel="stylesheet" href="rm_loader.css">
+    <script defer src="rm_loader_backend.js"></script>
+    <script defer src="rm_loader_ui.js"></script>
+</head>
+<body class="rm-loader">
+    <header class="topbar">
+        <div class="brand">
+            <div class="brand-mark"><span>Web<br>TILP</span></div>
+            <div><div class="brand-title">WebTILP</div><div class="brand-subtitle">Casio RM-7000 / RM-9000 · Flash Memory</div></div>
+        </div>
+        <div class="actions">
+            <label class="rm-language"><span data-rm-text="language">Language</span><select id="rmLanguage" class="form-input"><option value="en">English</option><option value="fr">Français</option></select></label>
+            <a class="btn ghost" href="webtilp.html" id="rmBack" data-rm-text="back">Back to WebTILP</a>
+        </div>
+    </header>
+    <main class="layout">
+        <section class="panel wide">
+            <div class="panel-header"><h1 data-rm-text="title">RM native loader — OS transfer</h1></div>
+            <div class="panel-body">
+                <p data-rm-text="instructions">Hold OPTN + EXP while powering on to open Flash Memory. Use the Casio USB-to-2.5 mm serial cable, and close FA-124 first.</p>
+                <p class="note" data-rm-text="scope">Transfers the PROGRAM/OS only. The native LOADER is not included. The serial cable is not used to identify the installed PROGRAM or calculator model.</p>
+                <p class="note hidden" id="rmSelectModel" data-rm-text="selectModel">First select Casio RM-7000 or RM-9000 (native OS loader) in WebTILP Settings, then click Connect Calculator.</p>
+                <p class="note" id="rmSelectedModel"></p>
+                <p class="note hidden" id="rmUnsupported" data-rm-text="unsupported">WebSerial requires desktop Chrome or Edge over HTTPS or localhost, or the Web'nTILP desktop app.</p>
+                <div class="rm-controls">
+                    <button class="btn primary" id="rmConnect" type="button" data-rm-text="connect">Connect serial cable</button>
+                    <button class="btn danger" id="rmDisconnect" type="button" disabled data-rm-text="disconnect">Disconnect / cancel transfer</button>
+                    <span id="rmCable" class="note">19200 baud · 8O2</span>
+                </div>
+            </div>
+        </section>
+        <section class="panel">
+            <div class="panel-header"><h2 data-rm-text="sendTitle">Send OS to calculator</h2></div>
+            <div class="panel-body rm-stack">
+                <p data-rm-text="sendHint">On the calculator, choose Download [1], then confirm with [EXE]. Select an 896 KiB RM installation .bin. WebTILP checks the file before transmitting only the declared PROGRAM.</p>
+                <label for="rmFile" data-rm-text="fileLabel">Installation file (.bin)</label>
+                <input id="rmFile" type="file" accept=".bin,.BIN">
+                <p id="rmImage" class="note" data-rm-text="noFile">No installation file selected.</p>
+                <button class="btn primary" id="rmSend" type="button" disabled data-rm-text="send">Send OS — calculator: Download [1] → EXE</button>
+            </div>
+        </section>
+        <section class="panel">
+            <div class="panel-header"><h2 data-rm-text="receiveTitle">Receive OS from calculator</h2></div>
+            <div class="panel-body rm-stack">
+                <p data-rm-text="receiveHint">Start reception here first, then choose Upload [2] on the calculator and confirm with [EXE]. The received PROGRAM and its header are rebuilt into an installable .bin.</p>
+                <button class="btn primary" id="rmReceive" type="button" disabled data-rm-text="receive">Receive OS — then calculator: Upload [2] → EXE</button>
+                <p id="rmReceived" class="note" data-rm-text="noReceived">No complete OS received yet.</p>
+                <div class="rm-controls">
+                    <button class="btn ghost" id="rmSave" type="button" disabled data-rm-text="save">Save received OS (.bin)</button>
+                    <button class="btn ghost" id="rmMetadata" type="button" disabled data-rm-text="metadata">Save header / transfer details</button>
+                </div>
+            </div>
+        </section>
+        <section class="panel wide">
+            <div class="panel-header"><h2 data-rm-text="transferTitle">Transfer status</h2><button class="btn subtle" id="rmLogSave" type="button" data-rm-text="saveLog">Save diagnostic log</button></div>
+            <div class="panel-body rm-stack">
+                <p id="rmStatus" role="status" aria-live="polite" data-rm-text="idle">Connect the serial cable to begin.</p>
+                <progress id="rmProgress" max="1" value="0" aria-label="PROGRAM transfer"></progress>
+                <p id="rmCount" class="note"></p>
+                <p class="note" data-rm-text="recovery">After a transfer or an error the port closes. Before retrying, return to the Flash Memory menu and reconnect. Cancelling a send may leave an incomplete PROGRAM; reinstall a known-good .bin using Download [1], then [EXE].</p>
+                <pre id="rmLog" tabindex="0" aria-label="Transfer log"></pre>
+            </div>
+        </section>
+    </main>
+</body>
+</html>
