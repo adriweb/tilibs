@@ -1,0 +1,20 @@
+.rm-loader .layout { max-width: 1180px; margin-inline: auto; }
+.rm-loader h1 { font-size: 20px; margin: 0; }
+.rm-loader .panel-body p { margin-top: 0; line-height: 1.55; }
+.rm-loader .rm-stack { display: flex; flex-direction: column; gap: 14px; }
+.rm-loader .rm-stack p { margin: 0; }
+.rm-controls { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; }
+.rm-language { display: flex; align-items: center; gap: 8px; }
+.rm-loader a.btn { text-decoration: none; }
+.rm-loader input[type="file"] { max-width: 100%; color: var(--text); }
+.rm-loader progress { width: 100%; height: 12px; accent-color: var(--accent); }
+.rm-loader #rmStatus { font-weight: 600; overflow-wrap: anywhere; }
+.rm-loader #rmLog { margin: 0; max-height: 240px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; color: var(--muted); }
+.rm-loader .rm-error { color: var(--danger); }
+.rm-loader #rmImage, .rm-loader #rmReceived { overflow-wrap: anywhere; }
+@media (max-width: 640px) {
+    .rm-loader .topbar { align-items: flex-start; }
+    .rm-loader .actions { flex-wrap: wrap; }
+    .rm-loader .brand-subtitle { white-space: normal; }
+    .rm-loader .rm-stack > .btn { white-space: normal; }
+}

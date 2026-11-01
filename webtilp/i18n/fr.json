@@ -315,6 +315,7 @@
   "transfer_all_ram": "Tout en RAM",
   "transfer_all_archive": "Tout en Archive",
   "close": "Fermer",
+  "rm_loader_settings_hint": "Connexion ouvre le loader système natif RM via WebSerial (19200 bauds, 8O2), indépendamment du réglage du câble TI. Maintenez OPTN + EXP à l’allumage ; fermez FA-124 au préalable.",
   "list_from_backup": "Lister depuis une sauvegarde…",
   "confirm_backup_dirlist": "Cette calculatrice ne peut pas lister directement ses variables. Recevoir une sauvegarde complète et lire sa table de variables à la place ? Cela peut prendre un moment. Après confirmation, envoyez une sauvegarde (Backup) depuis le menu LINK de la calculatrice.",
   "backup_dirlist_note": "Liste en lecture seule issue d'une sauvegarde. Actualiser la liste reçoit une nouvelle sauvegarde ; les variables ne peuvent pas être reçues individuellement depuis cette vue.",
