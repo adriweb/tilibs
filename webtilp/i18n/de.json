@@ -315,6 +315,7 @@
   "transfer_all_ram": "Alle in RAM",
   "transfer_all_archive": "Alle ins Archiv",
   "close": "Schließen",
+  "rm_loader_settings_hint": "Connect opens the native RM OS loader over WebSerial (19200 baud, 8O2), independently of the TI cable setting. Hold OPTN + EXP at power-on; close FA-124 first.",
   "list_from_backup": "Aus Sicherung auflisten…",
   "confirm_backup_dirlist": "Dieser Rechner kann Variablen nicht direkt auflisten. Stattdessen eine vollständige Sicherung empfangen und ihre Variablentabelle lesen? Dies kann etwas dauern. Senden Sie nach der Bestätigung ein Backup über das LINK-Menü des Rechners.",
   "backup_dirlist_note": "Schreibgeschützte Liste aus einer Sicherung. Liste aktualisieren empfängt eine neue Sicherung; einzelne Variablen können in dieser Ansicht nicht empfangen werden.",
