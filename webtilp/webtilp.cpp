@@ -1067,6 +1067,8 @@ EMSCRIPTEN_KEEPALIVE
 void set_cable_timeout(int timeout) {
     if (timeout > 0) {
         g_cable_timeout = timeout;
+        // Synchronize browser deadlines for raw ccall users and temporary timeouts.
+        EM_ASM({ Module.__configuredCableTimeoutMs = Module.__cableTimeoutMs = $0; }, timeout * 100);
         if (g_cable_handle) {
             ticables_options_set_timeout(g_cable_handle, g_cable_timeout);
         }
@@ -1315,7 +1317,7 @@ int calc_screenshot(CableHandle* cable_handle) {
         return ready_result;
     }
 
-    CalcScreenCoord sc;
+    CalcScreenCoord sc = { SCREEN_FULL, 0, 0, 0, 0, CALC_PIXFMT_MONO };
     uint8_t* bitmap = nullptr;
 
     printf("Receiving screenshot from calculator...\n");
