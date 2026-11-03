@@ -167,6 +167,7 @@ jobs:
           make -C webtilp -j"$(nproc)" -o prepare_python_converters "$profile"
           make -C webtilp test
           make -C webtilp test-python-bytecode-wasm
+          make -C webtilp test-preview-wasm
           make -C webtilp test-var-names-wasm
           node webtilp/tests/test_debug_log_wasm.cjs webtilp/webtilp.js
           node webtilp/tests/test_wasm_startup.cjs

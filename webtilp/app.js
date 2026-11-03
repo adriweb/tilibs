@@ -10873,8 +10873,23 @@ async function previewEntry(entry, actionButton) {
             options = new tivars.options_t();
             options.set('prettify', 1);
             options.set('reindent', 0);
-            const isTIBasic = isTIBasicPreviewEntry(entry, modelId);
+            let isTIBasic = isTIBasicPreviewEntry(entry, modelId);
             let language = usesTIBasicPreviewSyntax(entry, modelId) ? 'basic-z80' : '';
+            let readable;
+            if (isTIBasic && !EVO_PYTHON_CALC_MODELS.has(modelId)) {
+                // Legacy program types also contain native code. Ask for its
+                // header metadata before attempting a BASIC source preview.
+                options.set('metadata', 1);
+                const metadata = JSON.parse(variable.getReadableContent(options));
+                options.set('metadata', 0);
+                if (metadata.isAssembly) {
+                    readable = JSON.stringify(metadata, null, 2);
+                    isTIBasic = false;
+                    language = 'json';
+                } else {
+                    readable = metadata.code;
+                }
+            }
             if (!language && EVO_PYTHON_CALC_MODELS.has(modelId) && Number(entry.type) === 15) {
                 language = 'python';
             } else if (!language && Number(entry.type) === 0x15) {
@@ -10890,7 +10905,7 @@ async function previewEntry(entry, actionButton) {
                     options.set('metadata', 0);
                 }
             }
-            const readable = variable.getReadableContent(options);
+            readable ??= variable.getReadableContent(options);
             closePreviewModal();
             previewSession = {
                 entry,
