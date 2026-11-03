@@ -170,6 +170,9 @@ $(TARGET): $(SRC) $(LIBS) $(PREJS)
 test-python-bytecode-wasm:
 	node tests/test_python_bytecode.cjs --wasm
 
+test-preview-wasm:
+	node tests/test_preview_wasm.cjs
+
 test-var-send-wasm:
 	@set -e; test_dir=$$(mktemp -d); trap 'rm -rf "$$test_dir"' EXIT; \
 	$(EMCC) $(CXXFLAGS) tests/test_var_send_wasm.cpp hp_prime_bridge.cpp hp_prime_app.cpp $(INCLUDES) $(LIBS) -o "$$test_dir/var_send.js" $(EMCCFLAGS); \
@@ -191,4 +194,4 @@ test-silverlink-wasm: $(TARGET)
 clean:
 	rm -f $(TARGET) webtilp.wasm webtilp.worker.js sw.js version.json $(APP_JS_BUNDLE) $(NUMWORKS_JS_BUNDLE) $(BUILD_PROFILE_CSS) $(PYTHON_CONVERTER_ASSETS)
 
-.PHONY: all dev prod prepare_dev prepare_prod prepare_python_converters test test-python-bytecode-wasm test-var-send-wasm test-var-names-wasm test-ti86-os-wasm clean stamp
+.PHONY: all dev prod prepare_dev prepare_prod prepare_python_converters test test-python-bytecode-wasm test-preview-wasm test-var-send-wasm test-var-names-wasm test-ti86-os-wasm clean stamp
