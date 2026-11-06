@@ -9,11 +9,11 @@ function item(name, extra = {}) {
     return { path: `/${name}.82p`, file: {name, size: 12}, fileClass: 'single', entryName: name,
         entryType: 5, defaultLocation: 'ram', locationMask: 1, ...extra };
 }
-async function run(model, plan, {finishResult = 0, sendResult = 0, rejectSend = false, decline = false} = {}) {
+async function run(model, plan, {finishResult = 0, sendResult = 0, rawResult = 0, rejectSend = false, decline = false} = {}) {
     const calls = [];
     const state = {settings: {}, dirlist: decline ? [{name: 'SKIP'}] : []};
     const context = vm.createContext({
-        state, console, Number, Error,
+        state, console, Number, Error, TICALCS_EVO_ERROR: 510,
         ensureCableOpen: async () => 1, getActiveCalcModelId: () => model,
         isVarFileClass: type => ['single', 'group', 'regular', 'tigroup'].includes(type),
         confirmEvoOsModelMismatch: () => true,
@@ -35,10 +35,21 @@ async function run(model, plan, {finishResult = 0, sendResult = 0, rejectSend = 
     });
     vm.runInContext(source, context);
     let result, error;
-    try { result = await context.performTransfers(plan, {}, {}); } catch (err) { error = err; }
+    try { result = await context.performTransfers(plan, {_get_raw_protocol_code: () => rawResult}, {}); } catch (err) { error = err; }
     return {calls, result, error};
 }
 async function main() {
+    for (const model of [2, 3, 6, 7, 13, 50]) {
+        for (const failure of [
+            {sendResult: 256}, {sendResult: 355, rawResult: 0xCCCC},
+            {sendResult: 356, rawResult: 0xCCCD}, {sendResult: 510, rawResult: 0x434E},
+            {sendResult: 510, rawResult: 0x5155}
+        ]) {
+            const cancelled = await run(model, [item('ONE'), item('TWO')], failure);
+            assert.equal(cancelled.error?.silent, true);
+            assert.equal(cancelled.calls.length, 1, 'calculator cancellation stops the batch without another item or EOT');
+        }
+    }
     for (const model of [2, 6]) {
         for (const plan of [
             [item('ONE')],
