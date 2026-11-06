@@ -769,6 +769,11 @@ static const char* dusb_error_code_to_name(uint16_t code)
 	return "Unknown";
 }
 
+int TICALL dusb_error_code_to_error(uint16_t code)
+{
+	return ERR_CALC_ERROR2 + err_code(code);
+}
+
 static bool dusb_error_code_is_protocol(uint16_t code)
 {
 	switch (code)
@@ -793,7 +798,8 @@ static int dusb_handle_error_packet(CalcHandle *handle, const DUSBVirtualPacket 
 
 	if (raw == 0xCCCC || raw == 0xCCCD)
 	{
-		ticalcs_warning("%s: DUSB cancel packet received?! code=0x%04X", context, raw);
+		ticalcs_info("%s: DUSB transfer cancelled on calculator: 0x%04X", context, raw);
+		handle->priv.dusb_needs_mode_set = 1;
 	}
 	else
 	{
@@ -806,7 +812,7 @@ static int dusb_handle_error_packet(CalcHandle *handle, const DUSBVirtualPacket 
 		}
 	}
 
-	return ERR_CALC_ERROR2 + err_code(raw);
+	return dusb_error_code_to_error(raw);
 }
 
 static int dusb_cmd_resync_if_needed(CalcHandle *handle)
