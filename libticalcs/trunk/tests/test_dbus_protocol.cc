@@ -240,7 +240,7 @@ static void check_dbus_flash_gc()
 		content.data_length = sizeof(data);
 		content.pages = pages;
 		const int result = ticalcs_calc_send_app(calc.handle, &content);
-		CHECK(result == (status == 3 ? ERR_VAR_REJECTED : status < 0 ? ERROR_READ_TIMEOUT : 0));
+		CHECK(result == (status == 3 ? ERR_DBUS_ERROR : status < 0 ? ERROR_READ_TIMEOUT : 0));
 		CHECK(received == incoming.size());
 		CHECK(calc.cable.timeout == 50);
 		CHECK(std::find(receive_timeouts.begin(), receive_timeouts.end(), 3600) != receive_timeouts.end());
@@ -276,6 +276,45 @@ static void check_dusb_cancellation()
 		MockCalculator calc(CALC_TI84PCE_USB);
 		incoming = {0, 0, 0, 2, 5, (uint8_t)(raw >> 8), (uint8_t)raw};
 		CHECK(dusb_recv_acknowledge(calc.handle) == (raw == 0xe000 ? 0 : ERR_INVALID_PACKET));
+	}
+}
+
+static void check_transfer_error_details()
+{
+	{
+		MockCalculator calc(CALC_TI84PCE_USB);
+		dusb_packet(DUSB_VPKT_ERROR, {0, 0x37});
+		const int result = dusb_cmd_r_data_ack(calc.handle);
+		uint16_t raw = 0;
+		char *message = nullptr;
+		CHECK(ticalcs_error_get_raw_protocol_code(result, &raw) == 0 && raw == 0x37);
+		CHECK(ticalcs_error_get(result, &message) == 0 && strstr(message, "overlaps"));
+		g_free(message);
+		CHECK(dusb_error_code_to_error(0xcccc) == 355 && dusb_error_code_to_error(0xcccd) == 356);
+	}
+	for (CalcModel model : {CALC_TI73, CALC_TI83P, CALC_TI84P, CALC_TI84PC}) {
+		for (uint8_t code : {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 20, 21, 22,
+		                    30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 97, 98, 99, 0xfe}) {
+			for (bool cts : {false, true}) {
+				MockCalculator calc(model);
+				packet(model == CALC_TI73 ? 0x74 : 0x73, DBUS_CMD_SKP, {0, 0, code, 0, 0});
+				const int result = cts ? tiz80_recv_CTS(calc.handle, 0) : tiz80_recv_ACK(calc.handle, nullptr);
+				uint16_t raw = 0;
+				char *message = nullptr;
+				CHECK(result == ERR_DBUS_ERROR);
+				CHECK(ticalcs_error_get_raw_protocol_code(result, &raw) == 0 && raw == code);
+				CHECK(ticalcs_error_get(result, &message) == 0 && strstr(message, "DBUS EOR"));
+				CHECK((strstr(message, "Unknown") != nullptr) == (code == 0xfe));
+				g_free(message);
+				CHECK(received == incoming.size());
+				CHECK(outgoing == std::vector<uint8_t>({uint8_t(model == CALC_TI73 ? 0x07 : 0x23), DBUS_CMD_ACK, 0, 0}));
+			}
+		}
+	}
+	{
+		MockCalculator calc(CALC_TI83P);
+		packet(0x73, DBUS_CMD_SKP, {2}); // Ordinary one-byte SKP is not a Flash EOR.
+		CHECK(tiz80_recv_CTS(calc.handle, 0) == ERR_VAR_REJECTED && outgoing.empty());
 	}
 }
 
@@ -887,6 +926,7 @@ int main(int argc, char **argv)
 	check_dusb_gc_waits();
 	check_dusb_greet_recovery();
 	check_dusb_cancellation();
+	check_transfer_error_details();
 	check_dbus_flash_gc();
 	CHECK(ticalcs_library_init() == 1);
 	check_commands();
