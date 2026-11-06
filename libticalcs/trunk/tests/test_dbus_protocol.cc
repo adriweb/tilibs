@@ -417,6 +417,51 @@ static void check_68k_flash_waits()
 	}
 }
 
+static void check_ti86_rts_retry()
+{
+	for (int scenario = 0; scenario < 11; scenario++) {
+		MockCalculator calc(scenario == 6 ? CALC_TI83 : CALC_TI86);
+		const uint8_t mid = scenario == 6 ? 0x83 : 0x86;
+		if (scenario == 0 || scenario == 1 || scenario == 6) packet(mid, DBUS_CMD_ERR);
+		if (scenario == 1) packet(mid, DBUS_CMD_ERR);
+		if (scenario == 7) packet(mid, DBUS_CMD_ERR2);
+		if (scenario == 8 || scenario == 9) {
+			packet(mid, DBUS_CMD_VAR, {1});
+			if (scenario == 8) incoming.back() ^= 1;
+		}
+		if (scenario == 10) packet(0x85, DBUS_CMD_ERR);
+		if (scenario == 2 || scenario == 5) receive_failure = scenario == 2 ? ERROR_READ_TIMEOUT : ERR_ABORT;
+		if (scenario == 0 || scenario == 3 || scenario == 4) {
+			packet(mid, DBUS_CMD_ACK);
+			if (scenario == 4) packet(mid, DBUS_CMD_SKP, {DBUS_REJ_MEMORY});
+			else {
+				packet(mid, DBUS_CMD_CTS);
+				packet(mid, scenario == 3 ? DBUS_CMD_ERR : DBUS_CMD_ACK);
+			}
+		}
+		uint8_t data[3] = {1, 2, 3};
+		VarEntry entry{};
+		strcpy(entry.name, "TEST");
+		entry.type = TI86_PRGM;
+		entry.size = sizeof(data);
+		entry.data = data;
+		VarEntry *entries[] = {&entry};
+		FileContent content{};
+		content.model = calc.handle->model;
+		content.num_entries = 1;
+		content.entries = entries;
+		const int result = ticalcs_calc_send_var(calc.handle, MODE_NORMAL, &content);
+		CHECK(result == (scenario == 0 ? 0 : scenario == 2 ? ERROR_READ_TIMEOUT
+		    : scenario == 4 ? ERR_OUT_OF_MEMORY : scenario == 5 ? ERR_ABORT
+		    : scenario == 9 ? ERR_INVALID_CMD : ERR_CHECKSUM));
+		CHECK(received == incoming.size());
+		const auto commands = sent_dbus_commands();
+		CHECK(std::count(commands.begin(), commands.end(), DBUS_CMD_RTS) == (scenario < 2 ? 2 : 1));
+		CHECK(std::count(commands.begin(), commands.end(), DBUS_CMD_XDP) == (scenario == 0 || scenario == 3 ? 1 : 0));
+		CHECK(std::count(commands.begin(), commands.end(), DBUS_CMD_EOT) == (scenario == 0 ? 1 : 0));
+	}
+}
+
 // Independent packet framing expectations from the TI link guide.
 static void append_wire_packet(std::vector<uint8_t> &wire, uint8_t mid, uint8_t command,
                                const std::vector<uint8_t> &payload = {})
@@ -1027,6 +1072,7 @@ int main(int argc, char **argv)
 	check_dusb_cancellation();
 	check_transfer_error_details();
 	check_68k_flash_waits();
+	check_ti86_rts_retry();
 	check_dbus_flash_gc();
 	CHECK(ticalcs_library_init() == 1);
 	check_commands();
