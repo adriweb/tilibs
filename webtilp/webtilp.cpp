@@ -157,6 +157,7 @@ enum {
     TICALCS_ERR_ABORT = 256,
     TICALCS_ERR_NOT_READY = 257,
     TICALCS_ERR_BUSY = 269,
+    TICALCS_ERR_EVO = 510,
     TICABLES_ERR_READ_ERROR = 3,
     TICABLES_ERR_READ_TIMEOUT = 4,
     TICABLES_ERR_WRITE_ERROR = 5,
@@ -2788,6 +2789,86 @@ int finish_var_send(CableHandle* cable_handle) {
     return ticalcs_calc_send_var(g_calc_handle, MODE_SEND_LAST_VAR, &content);
 }
 
+static constexpr uint16_t EVO_RESULT_BUSY = 0x425a; // BZ
+static constexpr uint16_t EVO_RESULT_DEFRAG = 0x4452; // DR
+
+static bool evo_result_is(int result, uint16_t raw)
+{
+    return result == TICALCS_ERR_EVO && get_raw_protocol_code(result) == raw;
+}
+
+static int wait_after_defrag(gint64 deadline)
+{
+    g_calc_ready = 0;
+    struct RestoreState {
+        unsigned int timeout = ticables_get_timeout(g_calc_handle->cable);
+        std::string label = g_update.text;
+        ~RestoreState() {
+            ticables_options_set_timeout(g_calc_handle->cable, timeout);
+            snprintf(g_update.text, sizeof(g_update.text), "%s", label.c_str());
+            update_progress_tick();
+        }
+    } restore;
+    // Probe with a short packet timeout while GC owns the link. The caller's
+    // transfer timeout is restored before resending the rejected variable.
+    ticables_options_set_timeout(g_calc_handle->cable, 10);
+    snprintf(g_update.text, sizeof(g_update.text), "Waiting for garbage collection...");
+    while (g_get_monotonic_time() < deadline) {
+        if (g_update.cancel) return TICALCS_ERR_ABORT;
+        update_progress_tick();
+        emscripten_sleep(2000);
+        if (g_update.cancel) return TICALCS_ERR_ABORT;
+        if (g_get_monotonic_time() >= deadline) break;
+        const int result = ticalcs_calc_isready(g_calc_handle);
+        if (g_update.cancel) return TICALCS_ERR_ABORT;
+        if (!result) {
+            if (g_get_monotonic_time() >= deadline) break;
+            g_calc_ready = 1;
+            return 0;
+        }
+        if (result != TICALCS_ERR_BUSY && result != TICALCS_ERR_NOT_READY
+            && result != TICABLES_ERR_READ_TIMEOUT && !evo_result_is(result, EVO_RESULT_BUSY)
+            && !evo_result_is(result, EVO_RESULT_DEFRAG)) {
+            return result;
+        }
+    }
+    return TICABLES_ERR_READ_TIMEOUT;
+}
+
+static int send_vars_with_gc_retry(CalcMode mode, FileContent* content)
+{
+    if (!ticonv_model_is_tievo(g_calc_model)) {
+        return ticalcs_calc_send_var(g_calc_handle, mode, content);
+    }
+    for (unsigned int i = 0; i < content->num_entries; i++) {
+        // Keep completed entries out of retries, including whole group files.
+        FileContent single = *content;
+        single.num_entries = 1;
+        single.entries = &content->entries[i];
+        gint64 deadline = 0;
+        unsigned int defrag_replies = 0;
+        for (;;) {
+            const int result = ticalcs_calc_send_var(g_calc_handle, mode, &single);
+            if (!result) break;
+            if (evo_result_is(result, EVO_RESULT_DEFRAG)) {
+                g_calc_ready = 0;
+                if (++defrag_replies > 2) return result;
+                if (defrag_replies == 1) {
+                    deadline = g_get_monotonic_time() + 180 * G_TIME_SPAN_SECOND;
+                }
+                printf("Calculator initiated defragmentation; waiting before resending %s\n", single.entries[0]->name);
+            } else if (!defrag_replies || !evo_result_is(result, EVO_RESULT_BUSY)) {
+                return result;
+            }
+            // The system-attributes probe can succeed while the upload still
+            // returns BZ. Keep polling and retrying within the same deadline.
+            const int ready = wait_after_defrag(deadline);
+            if (ready) return ready;
+        }
+    }
+    return 0;
+}
+
 EMSCRIPTEN_KEEPALIVE
 int send_file_custom(CableHandle* cable_handle, const char* filename, const char* folder, int location, int defer_eot) {
     if (!filename || !*filename) {
@@ -2878,7 +2959,7 @@ int send_file_custom(CableHandle* cable_handle, const char* filename, const char
             apply_var_entry_overrides(ve, folder, location);
         }
 
-        result = ticalcs_calc_send_var(g_calc_handle, var_send_mode(defer_eot), content);
+        result = send_vars_with_gc_retry(var_send_mode(defer_eot), content);
         tifiles_content_delete_regular(content);
     }
 
@@ -2943,7 +3024,7 @@ int send_file_entry_custom(CableHandle* cable_handle, const char* filename, int 
                 return ERR_WEB_OUT_OF_MEMORY;
             }
             apply_var_entry_overrides(single->entries[0], folder, location);
-            result = ticalcs_calc_send_var(g_calc_handle, var_send_mode(defer_eot), single);
+            result = send_vars_with_gc_retry(var_send_mode(defer_eot), single);
             tifiles_content_delete_regular(single);
         }
 
@@ -2969,7 +3050,7 @@ int send_file_entry_custom(CableHandle* cable_handle, const char* filename, int 
         }
 
         apply_var_entry_overrides(single->entries[0], folder, location);
-        result = ticalcs_calc_send_var(g_calc_handle, var_send_mode(defer_eot), single);
+        result = send_vars_with_gc_retry(var_send_mode(defer_eot), single);
         tifiles_content_delete_regular(single);
         tifiles_content_delete_regular(content);
     }
