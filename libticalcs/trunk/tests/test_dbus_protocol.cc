@@ -9,6 +9,7 @@
 #include "../src/ticalcs.h"
 #include "../src/dbus_pkt.h"
 #include "../src/cmdz80.h"
+#include "../src/cmd68k.h"
 #include "../src/error.h"
 #include "../src/dusb_cmd.h"
 #include "../src/dusb_vpkt.h"
@@ -315,6 +316,104 @@ static void check_transfer_error_details()
 		MockCalculator calc(CALC_TI83P);
 		packet(0x73, DBUS_CMD_SKP, {2}); // Ordinary one-byte SKP is not a Flash EOR.
 		CHECK(tiz80_recv_CTS(calc.handle, 0) == ERR_VAR_REJECTED && outgoing.empty());
+	}
+}
+
+static std::vector<uint8_t> sent_dbus_commands()
+{
+	std::vector<uint8_t> commands;
+	for (size_t off = 0; off < outgoing.size();) {
+		CHECK(outgoing.size() - off >= 4);
+		commands.push_back(outgoing[off + 1]);
+		const unsigned int size = outgoing[off + 2] | (unsigned(outgoing[off + 3]) << 8);
+		off += 4 + (size ? size + 2 : 0);
+		CHECK(off <= outgoing.size());
+	}
+	return commands;
+}
+
+static void check_68k_flash_waits()
+{
+	for (CalcModel model : {CALC_TI89, CALC_TI89T, CALC_TI92P, CALC_V200}) {
+		const uint8_t mid = (model == CALC_TI89 || model == CALC_TI89T) ? 0x98 : 0x88;
+		for (bool archived : {false, true}) {
+			for (int failure : {0, 1, 2, 3, 4, 5}) {
+				MockCalculator calc(model);
+				for (int phase = 1; phase <= 4; phase++) {
+					if (failure == 5 && phase == 2) { receive_failure = ERROR_READ_TIMEOUT; break; }
+					if (failure == phase) { packet(mid, DBUS_CMD_SKP, {0, 0, 12}); break; }
+					packet(mid, phase == 2 ? DBUS_CMD_CTS : DBUS_CMD_ACK);
+				}
+				uint8_t data[3] = {1, 2, 3};
+				VarEntry entry{};
+				strcpy(entry.name, "TEST");
+				entry.type = TI89_PRGM;
+				entry.attr = archived ? ATTRB_ARCHIVED : ATTRB_NONE;
+				entry.size = sizeof(data);
+				entry.data = data;
+				VarEntry *entries[] = {&entry};
+				FileContent content{};
+				content.model = model;
+				content.num_entries = 1;
+				content.entries = entries;
+				const int result = ticalcs_calc_send_var(calc.handle, MODE_NORMAL, &content);
+				CHECK(result == (!failure ? 0 : failure == 5 ? ERROR_READ_TIMEOUT : ERR_DBUS_ERROR));
+				CHECK(received == incoming.size() && calc.cable.timeout == 50);
+				for (unsigned int timeout : receive_timeouts) CHECK(timeout == (archived ? 3600u : 50u));
+				std::vector<uint8_t> expected = {DBUS_CMD_RTS};
+				if (failure != 1 && failure != 2 && failure != 5) {
+					expected.push_back(DBUS_CMD_ACK);
+					expected.push_back(DBUS_CMD_XDP);
+					if (failure != 3) expected.push_back(DBUS_CMD_EOT);
+				}
+				if (failure >= 1 && failure <= 4) expected.push_back(DBUS_CMD_ACK);
+				CHECK(sent_dbus_commands() == expected);
+			}
+		}
+		for (int failure : {0, 1, 2, 3, 4, 5}) {
+			MockCalculator calc(model);
+			for (int phase = 1; phase <= 4; phase++) {
+				if (failure == 5 && phase == 3) { receive_failure = ERROR_READ_TIMEOUT; break; }
+				if (failure == phase) { packet(mid, DBUS_CMD_SKP, {0, 0, 12}); break; }
+				packet(mid, phase == 2 ? DBUS_CMD_CTS : DBUS_CMD_ACK);
+			}
+			uint8_t data[128] = {};
+			FlashContent content{};
+			content.model = model;
+			content.data_type = TI89_APPL;
+			strcpy(content.name, "TEST");
+			content.data_length = sizeof(data);
+			content.data_part = data;
+			const int result = ticalcs_calc_send_app(calc.handle, &content);
+			CHECK(result == (!failure ? 0 : failure == 5 ? ERROR_READ_TIMEOUT : ERR_DBUS_ERROR));
+			CHECK(received == incoming.size() && calc.cable.timeout == 50);
+			for (unsigned int timeout : receive_timeouts) CHECK(timeout == 3600);
+			std::vector<uint8_t> expected = {DBUS_CMD_RTS};
+			if (failure != 1 && failure != 2) {
+				expected.push_back(DBUS_CMD_ACK);
+				expected.push_back(DBUS_CMD_XDP);
+				if (failure != 3 && failure != 5) expected.push_back(DBUS_CMD_EOT);
+			}
+			if (failure >= 1 && failure <= 4) expected.push_back(DBUS_CMD_ACK);
+			CHECK(sent_dbus_commands() == expected);
+		}
+	}
+	for (bool cts : {false, true}) {
+		for (uint8_t code : {3, 0x25, 0x1e, 0x21, 7, 0x24, 8, 0xfe}) {
+			MockCalculator calc(CALC_TI89);
+			packet(0x98, DBUS_CMD_SKP, {0, 0, code});
+			const int result = cts ? ti89_recv_CTS(calc.handle) : ti89_recv_ACK(calc.handle, nullptr);
+			uint16_t raw = 0;
+			CHECK(ticalcs_error_get_raw_protocol_code(result, &raw) == 0 && raw == code);
+			CHECK(sent_dbus_commands() == std::vector<uint8_t>({DBUS_CMD_ACK}));
+			CHECK(code == 0xfe ? result == ERR_DBUS_ERROR : result > ERR_CALC_ERROR1 && result <= ERR_CALC_ERROR1 + 7);
+		}
+	}
+	for (const auto &payload : std::vector<std::vector<uint8_t>>{{1}, {0, 12}}) {
+		MockCalculator calc(CALC_TI89);
+		packet(0x98, DBUS_CMD_SKP, payload);
+		CHECK(ti89_recv_ACK(calc.handle, nullptr) == ERR_INVALID_PACKET);
+		CHECK(outgoing.empty());
 	}
 }
 
@@ -928,6 +1027,7 @@ int main(int argc, char **argv)
 	check_dusb_greet_recovery();
 	check_dusb_cancellation();
 	check_transfer_error_details();
+	check_68k_flash_waits();
 	check_dbus_flash_gc();
 	check_commands();
 	check_send_backup_models();
