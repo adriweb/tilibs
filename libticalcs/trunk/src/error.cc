@@ -75,6 +75,53 @@ static const EvoResultInfo evo_results[] = {
 static thread_local int evo_result_index = -1;
 static thread_local char evo_result_wire[3] = { 0, 0, 0 };
 
+struct DBUSResultInfo
+{
+	uint8_t code;
+	const char *description;
+};
+
+// TI's DBUSException.DBUS_ERROR_CODE table. Keep the older TI-68k index
+// mappings below: several reason bytes have different legacy meanings.
+static const DBUSResultInfo dbus_results[] = {
+	{ 1, _("Transfer cancelled or memory full") },
+	{ 2, _("Duplicate name") },
+	{ 3, _("Memory full or data unavailable") },
+	{ 4, _("Invalid certificate") },
+	{ 5, _("Calculator is busy") },
+	{ 6, _("Invalid certificate") },
+	{ 7, _("No certificate present") },
+	{ 8, _("Bad signature") },
+	{ 9, _("Certificate expired") },
+	{ 10, _("Certificate cannot be replaced") },
+	{ 11, _("Bad load address") },
+	{ 12, _("Battery too low for Flash operation") },
+	{ 20, _("Frame or transfer too large") },
+	{ 21, _("Error erasing Flash") },
+	{ 22, _("Error writing Flash") },
+	{ 30, _("Variable is locked") },
+	{ 31, _("Variable is archived") },
+	{ 32, _("Illegal data type") },
+	{ 33, _("Data type mismatch") },
+	{ 34, _("Folder is not empty") },
+	{ 35, _("Unable to delete") },
+	{ 36, _("OS update not allowed") },
+	{ 37, _("Unable to overwrite data object") },
+	{ 38, _("Cannot overwrite reserved system object") },
+	{ 39, _("Invalid or oversized name") },
+	{ 97, _("Calculator model mismatch") },
+	{ 98, _("Bad file format") },
+	{ 99, _("Battery low") },
+};
+static thread_local int dbus_result_code = -1;
+
+int ticalcs_dbus_error_set(uint8_t code)
+{
+	dbus_result_code = code;
+	ticalcs_warning("TI->PC: DBUS EOR (0x%02X)", code);
+	return ERR_DBUS_ERROR;
+}
+
 int ticalcs_evo_error_set(const uint8_t *data, size_t data_len)
 {
 	evo_result_index = -1;
@@ -176,7 +223,9 @@ static const char *dusb_error_messages[] = {
 	_("Msg: unable to allocate packet."),
 	_("Msg: short send/receive."),
 	_("Msg: failed to communicate."),
-	_("Msg: device has been disconnected.")
+	_("Msg: device has been disconnected."),
+	// Append new codes to preserve existing numeric error mappings.
+	_("Msg: new OS overlaps Flash application space.")
 };
 
 /**
@@ -226,6 +275,22 @@ int TICALL ticalcs_error_get(int number, char **message)
 			*message = g_strdup(
 				_("Msg: TI-Evo Kermit returned an error without a two-letter result code."));
 		}
+		return 0;
+	}
+
+	if (number == ERR_DBUS_ERROR)
+	{
+		const char *description = _("Unknown rejection reason");
+		for (const auto &result : dbus_results)
+		{
+			if (result.code == dbus_result_code)
+			{
+				description = result.description;
+				break;
+			}
+		}
+		*message = dbus_result_code < 0 ? g_strdup(_("Msg: hand-held returned a DBUS error."))
+		    : g_strdup_printf(_("Msg: DBUS EOR 0x%02X (%s)."), dbus_result_code, description);
 		return 0;
 	}
 
@@ -592,7 +657,12 @@ int TICALL ticalcs_error_get_raw_protocol_code(int number, uint16_t *code)
 	VALIDATE_NONNULL(code);
 
 	uint16_t raw = 0;
-	if (number == ERR_EVO_ERROR && evo_result_wire[0] != 0)
+	if (number == ERR_DBUS_ERROR && dbus_result_code >= 0)
+	{
+		*code = (uint16_t)dbus_result_code;
+		return 0;
+	}
+	else if (number == ERR_EVO_ERROR && evo_result_wire[0] != 0)
 	{
 		raw = (uint16_t)(((uint16_t)(uint8_t)evo_result_wire[0] << 8) |
 		                 (uint16_t)(uint8_t)evo_result_wire[1]);

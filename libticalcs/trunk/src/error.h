@@ -82,6 +82,7 @@ typedef enum
 // --- 380 to 429 are reserved for hand-held status (DBUS)
 
 	ERR_CALC_ERROR1 = 380,	// Hand-held returned an error code
+	ERR_DBUS_ERROR = 429,	// Detailed EOR result retained per thread
 
 // --- 430 to 509 are reserved for hand-held status (NSpire)
 
@@ -98,5 +99,8 @@ typedef enum
 // Retain an Evo Kermit E-packet result for the normal error display APIs and
 // return the libticalcs error code that the caller should propagate.
 TICALCS_TESTABLE int ticalcs_evo_error_set(const uint8_t *data, size_t data_len);
+
+// Flash EOR reasons differ from the historical TI-68k error index table.
+TICALCS_TESTABLE int ticalcs_dbus_error_set(uint8_t code);
 
 #endif
