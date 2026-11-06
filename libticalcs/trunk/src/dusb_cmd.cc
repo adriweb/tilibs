@@ -818,21 +818,8 @@ static int dusb_cmd_resync_if_needed(CalcHandle *handle)
 		return 0;
 	}
 
-	ticalcs_info("    renegotiating DUSB mode (using NORMAL) after protocol error");
-	retval = dusb_cmd_s_mode_set(handle, DUSB_MODE_NORMAL);
-	if (!retval)
-	{
-		retval = dusb_cmd_r_mode_ack(handle);
-	}
-	if (retval)
-	{
-		ticalcs_info("    normal mode failed, retrying with BASIC mode");
-		retval = dusb_cmd_s_mode_set(handle, DUSB_MODE_BASIC);
-		if (!retval)
-		{
-			retval = dusb_cmd_r_mode_ack(handle);
-		}
-	}
+	ticalcs_info("    renegotiating DUSB mode after protocol error");
+	retval = dusb_cmd_negotiate_mode(handle, DUSB_MODE_NORMAL);
 	if (!retval)
 	{
 		handle->priv.dusb_needs_mode_set = 0;
@@ -2345,6 +2332,66 @@ end:
 	dusb_vtl_pkt_del(handle, pkt);
 
 	return retval;
+}
+
+// TI Connect CE adapts GREET to timeout/version rejections. Only negotiate
+// before an operation: never replay an RTS or an already accepted data block.
+int TICALL dusb_cmd_negotiate_mode(CalcHandle *handle, const DUSBModeSet initial)
+{
+	VALIDATE_HANDLE(handle);
+	struct RestoreTimeout {
+		CableHandle *cable;
+		unsigned int timeout;
+		~RestoreTimeout() { ticables_options_set_timeout(cable, timeout); }
+	} restore{handle->cable, ticables_get_timeout(handle->cable)};
+	DUSBModeSet mode = initial;
+	DUSBModeSet tried[32];
+	int ret = ERR_NOT_READY;
+	for (unsigned int attempt = 0; attempt < 32; attempt++)
+	{
+		if (ticalcs_update_canceled(handle)) return ERR_ABORT;
+		for (unsigned int i = 0; i < attempt; i++)
+		{
+			if (!memcmp(&tried[i], &mode, sizeof(mode))) return ret;
+		}
+		tried[attempt] = mode;
+		const uint32_t timeout = ((uint32_t)mode.arg4 << 16) | mode.arg5;
+		const unsigned int cable_timeout = timeout / 100 + (timeout % 100 != 0);
+		ticables_options_set_timeout(handle->cable,
+		    cable_timeout > restore.timeout ? cable_timeout : restore.timeout);
+		ret = dusb_cmd_s_mode_set(handle, mode);
+		if (!ret) ret = dusb_cmd_r_mode_ack(handle);
+		if (!ret) return 0;
+		uint16_t raw = 0;
+		if (ticalcs_error_get_raw_protocol_code(ret, &raw)) return ret;
+		if (raw == 0x001c && timeout <= 59500)
+		{
+			const uint32_t next = timeout + 500;
+			mode.arg4 = next >> 16;
+			mode.arg5 = next & 0xffff;
+		}
+		else if (raw == 0x001d && timeout >= 2500)
+		{
+			const uint32_t next = timeout - 500;
+			mode.arg4 = next >> 16;
+			mode.arg5 = next & 0xffff;
+		}
+		else if (raw == 0x001e && (mode.arg2 || mode.arg3))
+		{
+			if (mode.arg3) mode.arg3--;
+			else { mode.arg2--; mode.arg3 = 9; }
+		}
+		else if (raw == 0x0009 && mode.arg1 == 3)
+		{
+			// Keep OS receive callers in their explicitly requested BASIC mode.
+			mode = initial;
+			mode.arg1 = 2;
+		}
+		else return ret;
+		ticalcs_info("Retrying DUSB GREET: mode=%u, version=%u.%u, timeout=%u ms",
+		    mode.arg1, mode.arg2, mode.arg3, ((uint32_t)mode.arg4 << 16) | mode.arg5);
+	}
+	return ret;
 }
 
 // 0xAA00: acknowledgement of data
