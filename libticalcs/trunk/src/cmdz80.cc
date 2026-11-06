@@ -226,6 +226,22 @@ int TICALL ti85_send_VAR(CalcHandle* handle, uint16_t varsize, uint8_t vartype, 
 	}
 }
 
+static bool ti73_has_flash_eor(CalcHandle *handle)
+{
+	return handle->model == CALC_TI73 || handle->model == CALC_TI83P
+	    || handle->model == CALC_TI84P || handle->model == CALC_TI84PC;
+}
+
+// A regular SKP is one byte and its caller owns the acknowledgement.
+// Flash EOR is a separate rejection with the reason in payload byte 2.
+static int ti73_rejected(CalcHandle *handle, uint16_t length)
+{
+	if (!ti73_has_flash_eor(handle) || (length != 3 && length != 5)) return ERR_VAR_REJECTED;
+	const uint8_t code = ((uint8_t *)handle->buffer)[2];
+	const int ack = ti73_send_ACK(handle);
+	return ack ? ack : ticalcs_dbus_error_set(code);
+}
+
 /* FLASH (special var header: size, id, flag, offset, page) */
 int TICALL ti73_send_VAR2(CalcHandle* handle, uint32_t length, uint8_t type, uint8_t flag, uint16_t offset, uint16_t page)
 {
@@ -1135,7 +1151,7 @@ int TICALL tiz80_recv_CTS(CalcHandle* handle, uint16_t length)
 
 	if (cmd == DBUS_CMD_SKP)
 	{
-		return ERR_VAR_REJECTED;
+		return ti73_rejected(handle, len);
 	}
 	else if (cmd != DBUS_CMD_CTS)
 	{
@@ -1314,6 +1330,10 @@ int TICALL tiz80_recv_ACK(CalcHandle* handle, uint16_t * status)
 	// TI-73/83+/84+ protocol family, including the 84+C over a link cable.
 	const bool echoes_length = handle->model == CALC_TI82 || handle->model == CALC_TI83
 	                       || handle->model == CALC_TI85 || handle->model == CALC_TI86;
+	if (ti73_has_flash_eor(handle) && cmd == DBUS_CMD_SKP && (length == 3 || length == 5))
+	{
+		return ti73_rejected(handle, length);
+	}
 	if (status != nullptr)
 	{
 		*status = length;
@@ -1353,7 +1373,7 @@ int TICALL ti73_recv_flash_ack(CalcHandle* handle)
 	if (ret) return ret;
 	ret = ti73_send_ACK(handle);
 	if (ret) return ret;
-	if (code != 2) return ERR_VAR_REJECTED;
+	if (code != 2) return ticalcs_dbus_error_set(code);
 	ticalcs_info("Waiting for Flash app replacement / garbage collection");
 	ticalcs_update_refresh(handle);
 	return tiz80_recv_ACK(handle, nullptr);

@@ -723,7 +723,9 @@ static const DUSBErrorCodeInfo usb_errors[] =
 	{ 0xF003, "UnableToAllocatePacket" },
 	{ 0xF004, "ShortSendReceive" },
 	{ 0xF005, "FailedToCommunicate" },
-	{ 0xF006, "DeviceHasBeenDisconnected" }
+	{ 0xF006, "DeviceHasBeenDisconnected" },
+	// Append to preserve the existing public error numbers.
+	{ 0x0037, "NewOSOverlapsAppsSpace" }
 };
 
 uint16_t ticalcs_dusb_error_code_from_index(unsigned int index)
