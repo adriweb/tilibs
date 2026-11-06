@@ -895,6 +895,24 @@ static int		send_var_8285	(CalcHandle* handle, CalcMode mode, FileContent* conte
 	return send_var_ns(handle, mode, content);
 }
 
+static int ti86_recv_rts_ack(CalcHandle *handle, uint16_t *status, bool *rejected)
+{
+	uint8_t host = 0, cmd = 0;
+	*rejected = false;
+	*status = 0;
+	const int ret = dbus_recv(handle, &host, &cmd, status, (uint8_t *)handle->buffer);
+	if (ret)
+	{
+		// ERR_CHECKSUM can also mean corrupt incoming data or legacy ERR2.
+		// Only a TI-86 CHK is evidence that this RTS was rejected.
+		*rejected = ret == ERR_CHECKSUM && host == DBUS_MID_TI86_PC && cmd == DBUS_CMD_ERR;
+		return ret;
+	}
+	if (cmd != DBUS_CMD_ACK) return ERR_INVALID_CMD;
+	ticalcs_info(" TI->PC: ACK");
+	return 0;
+}
+
 static int		send_var_8386	(CalcHandle* handle, CalcMode mode, FileContent* content)
 {
 	int ret = 0;
@@ -931,18 +949,22 @@ static int		send_var_8386	(CalcHandle* handle, CalcMode mode, FileContent* conte
 			size = (uint16_t)entry->size;
 		}
 
-		ret = SEND_RTS(handle, size, entry->type, entry->name);
+		for (unsigned int attempt = 0; ; attempt++)
+		{
+			ret = SEND_RTS(handle, size, entry->type, entry->name);
+			if (ret) break;
+			bool rejected = false;
+			ret = handle->model == CALC_TI86 ? ti86_recv_rts_ack(handle, &status, &rejected) : RECV_ACK(handle, &status);
+			// Graph Link 86 repeats the RTS once after a failed initial ACK.
+			// Restrict replay to explicit CHK rejection before CTS/data; a
+			// timeout or any failure later in the exchange is not retryable.
+			if (!rejected || attempt != 0) break;
+			ticalcs_info("Retrying TI-86 RTS after checksum rejection");
+		}
 		if (!ret)
 		{
-			ret = RECV_ACK(handle, &status);
-			if (!ret)
-			{
-				ret = RECV_SKP(handle, &rej_code);
-				if (!ret)
-				{
-					ret = SEND_ACK(handle);
-				}
-			}
+			ret = RECV_SKP(handle, &rej_code);
+			if (!ret) ret = SEND_ACK(handle);
 		}
 		if (ret)
 		{
