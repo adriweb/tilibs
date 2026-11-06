@@ -5,7 +5,7 @@ AM_CPPFLAGS = -I$(top_srcdir)/src \
 
 EXTRA_DIST = ticalcs2.supp vcheck
 
-noinst_PROGRAMS = test_ticalcs_2 torture_ticalcs
+noinst_PROGRAMS = test_ticalcs_2 torture_ticalcs test_dusb_var_header
 
 test_ticalcs_2_SOURCES = test_ticalcs_2.cc
 test_ticalcs_2_LDADD = $(top_builddir)/src/libticalcs2.la \
@@ -13,5 +13,8 @@ test_ticalcs_2_LDADD = $(top_builddir)/src/libticalcs2.la \
 torture_ticalcs_SOURCES = torture_ticalcs.cc
 torture_ticalcs_LDADD = $(top_builddir)/src/libticalcs2.la \
 	@GLIB_LIBS@ @TICABLES_LIBS@ @TIFILES_LIBS@ @TICONV_LIBS@
+test_dusb_var_header_SOURCES = test_dusb_var_header.cc
+test_dusb_var_header_LDADD = $(top_builddir)/src/libticalcs2.la \
+	@GLIB_LIBS@ @TICABLES_LIBS@ @TIFILES_LIBS@ @TICONV_LIBS@
 
-TESTS = torture_ticalcs
+TESTS = torture_ticalcs test_dusb_var_header

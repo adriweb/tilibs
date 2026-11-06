@@ -1654,8 +1654,8 @@ int TICALL dusb_cmd_s_dirlist_request(CalcHandle *handle, unsigned int naids, co
 }
 
 // 0x000A: variable header (name is utf-8)
-// beware: attr array contents is allocated by function
-int TICALL dusb_cmd_r_var_header(CalcHandle *handle, char *folder, char *name, DUSBCalcAttr **attr)
+// attr must have expected_attrs entries; their contents are allocated here.
+int TICALL dusb_cmd_r_var_header(CalcHandle *handle, char *folder, size_t folder_size, char *name, size_t name_size, unsigned int expected_attrs, DUSBCalcAttr **attr)
 {
 	int retval = 0;
 
@@ -1663,6 +1663,10 @@ int TICALL dusb_cmd_r_var_header(CalcHandle *handle, char *folder, char *name, D
 	VALIDATE_NONNULL(folder);
 	VALIDATE_NONNULL(name);
 	VALIDATE_NONNULL(attr);
+	if (!folder_size || !name_size)
+	{
+		return ERR_INVALID_PARAMETER;
+	}
 
 	folder[0] = 0;
 	name[0] = 0;
@@ -1690,34 +1694,94 @@ int TICALL dusb_cmd_r_var_header(CalcHandle *handle, char *folder, char *name, D
 			goto end;
 		}
 
-		int j = 0;
+		size_t j = 0;
+		if (j >= pkt->size)
+		{
+			retval = ERR_INVALID_PACKET;
+			goto end;
+		}
 		const uint8_t fld_len = pkt->data[j++];
 		if (fld_len)
 		{
+			const size_t wire_size = (size_t)fld_len + 1;
+			if (wire_size > folder_size || wire_size > pkt->size - j || pkt->data[j + fld_len] != 0)
+			{
+				retval = ERR_INVALID_PACKET;
+				goto end;
+			}
 			memcpy(folder, &pkt->data[j], fld_len + 1);
-			j += fld_len+1;
+			j += wire_size;
+		}
+		if (j >= pkt->size)
+		{
+			retval = ERR_INVALID_PACKET;
+			goto end;
 		}
 		const uint8_t var_len = pkt->data[j++];
 		if (var_len)
 		{
+			const size_t wire_size = (size_t)var_len + 1;
+			if (wire_size > name_size || wire_size > pkt->size - j || pkt->data[j + var_len] != 0)
+			{
+				retval = ERR_INVALID_PACKET;
+				goto end;
+			}
 			memcpy(name, &pkt->data[j], var_len + 1);
-			j += var_len+1;
+			j += wire_size;
 		}
 
-		const int nattr = (((int)pkt->data[j + 0]) << 8) | pkt->data[j + 1];
-		j += 2;
-
-		for (int i = 0; i < nattr; i++)
+		if (pkt->size - j < 2)
 		{
+			retval = ERR_INVALID_PACKET;
+			goto end;
+		}
+		const unsigned int nattr = (((unsigned int)pkt->data[j + 0]) << 8) | pkt->data[j + 1];
+		j += 2;
+		if (nattr != expected_attrs)
+		{
+			retval = ERR_INVALID_PACKET;
+			goto end;
+		}
+
+		for (unsigned int i = 0; i < nattr; i++)
+		{
+			if (pkt->size - j < 3)
+			{
+				retval = ERR_INVALID_PACKET;
+				goto end;
+			}
 			DUSBCalcAttr *s = attr[i] = dusb_ca_new(handle, 0, 0);
+			if (!s)
+			{
+				retval = ERR_MALLOC;
+				goto end;
+			}
 
 			s->id = ((uint16_t)pkt->data[j++]) << 8; s->id |= pkt->data[j++];
 			s->ok = !pkt->data[j++];
 			if (s->ok)
 			{
+				if (pkt->size - j < 2)
+				{
+					retval = ERR_INVALID_PACKET;
+					goto end;
+				}
 				s->size = ((uint16_t)pkt->data[j++]) << 8; s->size |= pkt->data[j++];
-				s->data = (uint8_t *)g_malloc0(s->size);
-				memcpy(s->data, &pkt->data[j], s->size);
+				if (s->size > pkt->size - j)
+				{
+					retval = ERR_INVALID_PACKET;
+					goto end;
+				}
+				if (s->size)
+				{
+					s->data = (uint8_t *)g_malloc0(s->size);
+					if (!s->data)
+					{
+						retval = ERR_MALLOC;
+						goto end;
+					}
+					memcpy(s->data, &pkt->data[j], s->size);
+				}
 				j += s->size;
 			}
 		}

@@ -534,11 +534,10 @@ static void torture_dusb()
     PRINTF(dusb_cmd_r_screenshot, INT, (CalcHandle*)0x12345678, (uint32_t*)0x12345678, nullptr);
     PRINTF(dusb_cmd_s_dirlist_request, INT, nullptr, 1, (const uint16_t*)0x12345678);
     PRINTF(dusb_cmd_s_dirlist_request, INT, (CalcHandle*)0x12345678, 1, nullptr);
-    PRINTF(dusb_cmd_r_var_header, INT, nullptr, (char*)0x12345678, (char*)0x12345678, (DUSBCalcAttr**)0x12345678);
-    PRINTF(dusb_cmd_r_var_header, INT, (CalcHandle*)0x12345678, nullptr, (char*)0x12345678, (DUSBCalcAttr**)0x12345678);
-
-    PRINTF(dusb_cmd_r_var_header, INT, (CalcHandle*)0x12345678, (char*)0x12345678, nullptr, (DUSBCalcAttr**)0x12345678);
-    PRINTF(dusb_cmd_r_var_header, INT, (CalcHandle*)0x12345678, (char*)0x12345678, (char*)0x12345678, nullptr);
+    PRINTF(dusb_cmd_r_var_header, INT, nullptr, (char*)0x12345678, 1, (char*)0x12345678, 1, 0, (DUSBCalcAttr**)0x12345678);
+    PRINTF(dusb_cmd_r_var_header, INT, (CalcHandle*)0x12345678, nullptr, 1, (char*)0x12345678, 1, 0, (DUSBCalcAttr**)0x12345678);
+    PRINTF(dusb_cmd_r_var_header, INT, (CalcHandle*)0x12345678, (char*)0x12345678, 1, nullptr, 1, 0, (DUSBCalcAttr**)0x12345678);
+    PRINTF(dusb_cmd_r_var_header, INT, (CalcHandle*)0x12345678, (char*)0x12345678, 1, (char*)0x12345678, 1, 0, nullptr);
     PRINTF(dusb_cmd_s_rts, INT, nullptr, (const char*)0x12345678, (const char*)0x12345678, 0, 1, (const DUSBCalcAttr**)0x12345678);
     PRINTF(dusb_cmd_s_rts, INT, (CalcHandle*)0x12345678, nullptr, (const char*)0x12345678, 0, 1, (const DUSBCalcAttr**)0x12345678);
     PRINTF(dusb_cmd_s_rts, INT, (CalcHandle*)0x12345678, (const char*)0x12345678, nullptr, 0, 1, (const DUSBCalcAttr**)0x12345678);

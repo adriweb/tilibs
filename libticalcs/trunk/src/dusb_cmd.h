@@ -288,7 +288,7 @@ TIEXPORT3 int TICALL dusb_cmd_r_param_data(CalcHandle *handle, unsigned int npar
 TIEXPORT3 int TICALL dusb_cmd_r_screenshot(CalcHandle *handle, uint32_t *size, uint8_t **data);
 
 TIEXPORT3 int TICALL dusb_cmd_s_dirlist_request(CalcHandle *handle, unsigned int naids, const uint16_t *aids);
-TIEXPORT3 int TICALL dusb_cmd_r_var_header(CalcHandle *handle, char *folder, char *name, DUSBCalcAttr **attr);
+TIEXPORT3 int TICALL dusb_cmd_r_var_header(CalcHandle *handle, char *folder, size_t folder_size, char *name, size_t name_size, unsigned int expected_attrs, DUSBCalcAttr **attr);
 
 TIEXPORT3 int TICALL dusb_cmd_s_rts(CalcHandle *handle, const char *folder, const char *name, uint32_t size, unsigned int nattrs, const DUSBCalcAttr **attrs);
 TIEXPORT3 int TICALL dusb_cmd_s_rts_ns(CalcHandle *handle, const char *folder, const char *name, uint32_t size, unsigned int nattrs, const DUSBCalcAttr **attrs);
