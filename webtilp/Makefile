@@ -149,6 +149,7 @@ test:
 	node --check $(NUMWORKS_JS_ENTRY)
 	node tests/test_hp_prime_frontend.js
 	node tests/test_evo_serial_frontend.js
+	node tests/test_usb_device_selection.js
 	node tests/test_calc_models.js
 	node tests/test_file_picker.js
 	node tests/test_themes.js
