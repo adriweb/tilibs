@@ -36,6 +36,7 @@
 
 #include "dusb_rpkt.h"
 #include "dusb_vpkt.h"
+#include "dusb_cmd.h"
 
 #define VPKT_DBG	1	// 1 = verbose, 2 = more verbose
 
@@ -476,7 +477,14 @@ int TICALL dusb_recv_acknowledge(CalcHandle *handle)
 			break;
 		}
 
-		if (raw.data[0] != 0xE0 && raw.data[1] != 0x00)
+		const uint16_t status = ((uint16_t)raw.data[0] << 8) | raw.data[1];
+		if (status == 0xCCCC || status == 0xCCCD)
+		{
+			handle->priv.dusb_needs_mode_set = 1;
+			ret = dusb_error_code_to_error(status);
+			break;
+		}
+		if (status != 0xE000)
 		{
 			ret = ERR_INVALID_PACKET;
 			break;
