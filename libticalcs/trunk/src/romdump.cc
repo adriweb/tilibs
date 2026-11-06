@@ -118,7 +118,7 @@ static inline int cmd_is_valid(uint16_t cmd)
 	}
 }
 
-static int recv_pkt(CalcHandle* handle, uint16_t* cmd, uint16_t* len, uint8_t* data)
+static int recv_pkt(CalcHandle* handle, uint16_t* cmd, uint16_t* len, uint8_t* data, size_t capacity)
 {
 	int i;
 	int ret = 0;
@@ -216,7 +216,14 @@ static int recv_pkt(CalcHandle* handle, uint16_t* cmd, uint16_t* len, uint8_t* d
 
 			if (data)
 			{
-				memmove(data, buf+4, *len);
+				if (*len > capacity)
+				{
+					ret = ERR_INVALID_PACKET;
+				}
+				else
+				{
+					memmove(data, buf+4, *len);
+				}
 			}
 		}
 	}
@@ -241,7 +248,7 @@ static int rom_recv_RDY(CalcHandle* handle)
 {
 	uint16_t cmd = 0, len = 0;
 
-	const int ret = recv_pkt(handle, &cmd, &len, nullptr);
+	const int ret = recv_pkt(handle, &cmd, &len, nullptr, 0);
 	ticalcs_info(" TI->PC: %s", ret ? "ERROR" : (cmd ? "OK" : "KO"));
 
 	return ret;
@@ -257,7 +264,7 @@ static int rom_recv_EXIT(CalcHandle* handle)
 {
 	uint16_t cmd = 0, len = 0;
 
-	const int ret = recv_pkt(handle, &cmd, &len, nullptr);
+	const int ret = recv_pkt(handle, &cmd, &len, nullptr, 0);
 	ticalcs_info(" TI->PC: EXIT");
 
 	return ret;
@@ -273,8 +280,17 @@ static int rom_recv_SIZE(CalcHandle* handle, uint32_t* size)
 {
 	uint16_t cmd = 0, len = 0;
 
-	const int ret = recv_pkt(handle, &cmd, &len, (uint8_t*)size);
-	ticalcs_info(" TI->PC: SIZE (0x%08x bytes)", *size);
+	int ret = recv_pkt(handle, &cmd, &len, (uint8_t*)size, sizeof(*size));
+	// The CE USB dumper's cmdReqSize replies with command zero rather than
+	// CMD_REQ_SIZE. Both formats carry the same four-byte ROM size.
+	if (!ret && ((cmd != CMD_REQ_SIZE && cmd != CMD_KO) || len != sizeof(*size)))
+	{
+		ret = ERR_INVALID_PACKET;
+	}
+	if (!ret)
+	{
+		ticalcs_info(" TI->PC: SIZE (0x%08x bytes)", *size);
+	}
 
 	return ret;
 }
@@ -289,21 +305,45 @@ static int rom_recv_DATA(CalcHandle* handle, uint16_t* size, uint8_t* data)
 {
 	uint16_t cmd = 0;
 
-	int ret = recv_pkt(handle, &cmd, size, data);
+	int ret = recv_pkt(handle, &cmd, size, data, TICALCS_INTERNAL_BUFFER_SIZE);
 	if (!ret)
 	{
 		if (cmd == CMD_DATA1)
 		{
-			ticalcs_info(" TI->PC: BLOCK WITHOUT REPEATED DATA (0x%04x bytes)", *size);
-			handle->priv.romdump_std_blk++;
+			if (*size == 0)
+			{
+				ret = ERR_INVALID_PACKET;
+			}
+			else
+			{
+				ticalcs_info(" TI->PC: BLOCK WITHOUT REPEATED DATA (0x%04x bytes)", *size);
+				handle->priv.romdump_std_blk++;
+			}
 		}
 		else if (cmd == CMD_DATA2)
 		{
-			*size = (((uint16_t)data[1]) << 8) | data[0];
-			const uint16_t rpt = (((uint16_t)data[3]) << 8) | data[2];
-			memset(data, rpt, *size);
-			ticalcs_info(" TI->PC: BLOCK WITH REPEATED DATA (0x%04x bytes)", *size);
-			handle->priv.romdump_sav_blk++;
+			// CE USB uses a two-byte length and one repeated byte. Other
+			// dumpers append a duplicate byte (Z80) or a zero byte (68k).
+			if (*size != 3 && *size != 4)
+			{
+				ret = ERR_INVALID_PACKET;
+			}
+			else
+			{
+				const uint16_t decoded_size = (((uint16_t)data[1]) << 8) | data[0];
+				const uint8_t rpt = data[2];
+				if (decoded_size == 0)
+				{
+					ret = ERR_INVALID_PACKET;
+				}
+				else
+				{
+					*size = decoded_size;
+					memset(data, rpt, *size);
+					ticalcs_info(" TI->PC: BLOCK WITH REPEATED DATA (0x%04x bytes)", *size);
+					handle->priv.romdump_sav_blk++;
+				}
+			}
 		}
 		else
 		{
@@ -350,22 +390,25 @@ int TICALL rd_read_dump(CalcHandle* handle, const char *filename)
 	for(i = 0; i < 3; i++)
 	{
 		ret = rom_send_RDY(handle);
-		if (rom_recv_RDY(handle))
+		if (!ret)
+		{
+			ret = rom_recv_RDY(handle);
+		}
+		if (ret)
 		{
 			goto exit; // Bail out.
 		}
-		if (!ret)
-		{
-			break; // Proceed further.
-		}
+		break; // Proceed further.
 	}
 
 	// request ROM size
-	if (rom_send_SIZE(handle))
+	ret = rom_send_SIZE(handle);
+	if (ret)
 	{
 		goto exit;
 	}
-	if (rom_recv_SIZE(handle, &size))
+	ret = rom_recv_SIZE(handle, &size);
+	if (ret)
 	{
 		goto exit;
 	}

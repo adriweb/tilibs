@@ -67,7 +67,7 @@
 #define RECV_ACK ti73_recv_ACK
 #define RECV_VAR ti73_recv_VAR
 #define RECV_VAR2 ti73_recv_VAR2
-#define RECV_XDP ti73_recv_XDP
+#define RECV_XDP ti73_recv_XDP_sized
 #define RECV_SKP ti73_recv_SKP
 #define RECV_CTS ti73_recv_CTS
 
@@ -76,6 +76,8 @@
 #define TI73_COLS  96
 #define TI84PC_ROWS 240
 #define TI84PC_COLS 320
+#define TI84PC_SCREEN_SIZE (TI84PC_ROWS * TI84PC_COLS * 2U)
+#define TI84PC_SCREEN_MAX_ENCODED_SIZE (TI84PC_SCREEN_SIZE * 2U)
 
 static int		is_ready	(CalcHandle* handle)
 {
@@ -176,7 +178,7 @@ static int		recv_screen	(CalcHandle* handle, CalcScreenCoord* sc, uint8_t** bitm
 		if (!ret)
 		{
 			uint16_t pktsize;
-			ret = RECV_XDP(handle, &pktsize, data);
+			ret = RECV_XDP(handle, &pktsize, data, 65542U);
 			if (!ret || ret == ERR_CHECKSUM) // problem with checksum
 			{
 				ret = SEND_ACK(handle);
@@ -205,19 +207,26 @@ static int		recv_screen	(CalcHandle* handle, CalcScreenCoord* sc, uint8_t** bitm
 
 						while (1)
 						{
-							ret = RECV_XDP(handle, &pktsize, (uint8_t *)handle->buffer2);
+							ret = RECV_XDP(handle, &pktsize, (uint8_t *)handle->buffer2, TICALCS_INTERNAL_BUFFER_SIZE);
 							if (ret == ERR_EOT)
 							{
 								ret = SEND_ACK(handle);
 								break;
 							}
 
-							*bitmap = (uint8_t *)ticalcs_realloc_screen(data, size + pktsize);
+							if (pktsize > TI84PC_SCREEN_MAX_ENCODED_SIZE - size)
+							{
+								ret = ERR_INVALID_PACKET;
+								break;
+							}
+
+							const uint32_t new_size = size + pktsize;
+							*bitmap = (uint8_t *)ticalcs_realloc_screen(data, new_size);
 							if (*bitmap != nullptr)
 							{
 								data = *bitmap;
 								memcpy(data + size, handle->buffer2, pktsize);
-								size += pktsize;
+								size = new_size;
 
 								ret = SEND_ACK(handle);
 								if (ret)
@@ -225,7 +234,7 @@ static int		recv_screen	(CalcHandle* handle, CalcScreenCoord* sc, uint8_t** bitm
 									break;
 								}
 
-								handle->updat->max1 = TI84PC_COLS * TI84PC_ROWS * 2;
+								handle->updat->max1 = TI84PC_SCREEN_SIZE;
 								handle->updat->cnt1 = size;
 								ticalcs_update_pbar(handle);
 							}
@@ -239,8 +248,17 @@ static int		recv_screen	(CalcHandle* handle, CalcScreenCoord* sc, uint8_t** bitm
 
 						if (!ret)
 						{
-							*bitmap = (uint8_t *)ticalcs_alloc_screen(TI84PC_ROWS * TI84PC_COLS * 2);
-							ret = ticalcs_screen_84pcse_rle_uncompress(data, size, *bitmap, TI84PC_ROWS * TI84PC_COLS * 2);
+							*bitmap = (uint8_t *)ticalcs_alloc_screen(TI84PC_SCREEN_SIZE);
+							if (*bitmap == nullptr)
+							{
+								ret = ERR_MALLOC;
+							}
+							else
+							{
+								ret = ticalcs_screen_84pcse_rle_uncompress(data, size, *bitmap, TI84PC_SCREEN_SIZE);
+							}
+							ticalcs_free_screen(data);
+							data = *bitmap;
 						}
 					}
 				}
@@ -276,7 +294,7 @@ static int		get_dirlist	(CalcHandle* handle, GNode** vars, GNode** apps)
 		ret = RECV_ACK(handle, &unused);
 		if (!ret)
 		{
-			ret = RECV_XDP(handle, &unused, (uint8_t *)handle->buffer2);
+			ret = RECV_XDP(handle, &unused, (uint8_t *)handle->buffer2, TICALCS_INTERNAL_BUFFER_SIZE);
 			if (!ret)
 			{
 				ret = SEND_ACK(handle);
@@ -396,7 +414,7 @@ static int		get_memfree	(CalcHandle* handle, uint32_t* ram, uint32_t* flash)
 		ret = RECV_ACK(handle, &unused);
 		if (!ret)
 		{
-			ret = RECV_XDP(handle, &unused, (uint8_t *)handle->buffer2);
+			ret = RECV_XDP(handle, &unused, (uint8_t *)handle->buffer2, TICALCS_INTERNAL_BUFFER_SIZE);
 			if (!ret)
 			{
 				ret = SEND_EOT(handle);
@@ -559,7 +577,7 @@ static int		recv_backup	(CalcHandle* handle, BackupContent* content)
 		ticalcs_update_pbar(handle);
 
 		content->data_part1 = (uint8_t *)tifiles_ve_alloc_data(65536U);
-		ret = RECV_XDP(handle, &content->data_length1, content->data_part1);
+		ret = RECV_XDP(handle, &content->data_length1, content->data_part1, 65536U);
 		if (!ret)
 		{
 			ret = SEND_ACK(handle);
@@ -572,7 +590,7 @@ static int		recv_backup	(CalcHandle* handle, BackupContent* content)
 		ticalcs_update_pbar(handle);
 
 		content->data_part2 = (uint8_t *)tifiles_ve_alloc_data(65536U);
-		ret = RECV_XDP(handle, &content->data_length2, content->data_part2);
+		ret = RECV_XDP(handle, &content->data_length2, content->data_part2, 65536U);
 		if (!ret)
 		{
 			ret = SEND_ACK(handle);
@@ -585,7 +603,7 @@ static int		recv_backup	(CalcHandle* handle, BackupContent* content)
 		ticalcs_update_pbar(handle);
 
 		content->data_part3 = (uint8_t *)tifiles_ve_alloc_data(65536U);
-		ret = RECV_XDP(handle, &content->data_length3, content->data_part3);
+		ret = RECV_XDP(handle, &content->data_length3, content->data_part3, 65536U);
 		if (!ret)
 		{
 			ret = SEND_ACK(handle);
@@ -757,7 +775,7 @@ static int		recv_var	(CalcHandle* handle, CalcMode mode, FileContent* content, V
 		}
 
 		ve->data = (uint8_t *)tifiles_ve_alloc_data(ve->size);
-		ret = RECV_XDP(handle, &ve_size, ve->data);
+		ret = RECV_XDP(handle, &ve_size, ve->data, ve->size);
 		if (!ret)
 		{
 			ve->size = ve_size;
@@ -935,7 +953,7 @@ static int		recv_flash	(CalcHandle* handle, FlashContent* content, VarRequest* v
 	uint32_t size;
 	int first_block;
 	int offset;
-	uint8_t buffer[FLASH_PAGE_SIZE + 4];
+	uint8_t buffer[FLASH_PAGE_SIZE];
 
 	ticonv_varname_to_utf8_sn(handle->model, vr->name, handle->updat->text, sizeof(handle->updat->text), vr->type);
 	ticalcs_update_label(handle);
@@ -992,6 +1010,11 @@ static int		recv_flash	(CalcHandle* handle, FlashContent* content, VarRequest* v
 		}
 		if (old_page != data_page)
 		{
+			if ((unsigned int)page + 1U >= content->num_pages)
+			{
+				ret = ERR_INVALID_PACKET;
+				break;
+			}
 			fp->addr = data_addr & 0x4000;
 			fp->page = old_page;
 			fp->flag = 0x80;
@@ -1012,7 +1035,14 @@ static int		recv_flash	(CalcHandle* handle, FlashContent* content, VarRequest* v
 			ret = RECV_ACK(handle, nullptr);
 			if (!ret)
 			{
-				ret = RECV_XDP(handle, &data_length, &buffer[offset]);
+				if (offset < 0 || (size_t)offset > sizeof(buffer))
+				{
+					ret = ERR_INVALID_PACKET;
+				}
+				else
+				{
+					ret = RECV_XDP(handle, &data_length, &buffer[offset], sizeof(buffer) - (size_t)offset);
+				}
 				if (!ret)
 				{
 					ret = SEND_ACK(handle);
@@ -1087,10 +1117,10 @@ static int		recv_idlist	(CalcHandle* handle, uint8_t* id)
 						ret = RECV_ACK(handle, nullptr);
 						if (!ret)
 						{
-							ret = RECV_XDP(handle, &varsize, data);
+							ret = RECV_XDP(handle, &varsize, data, sizeof(data));
 							if (!ret)
 							{
-								ret = SEND_ACK(handle);
+								ret = varsize == 11 ? SEND_ACK(handle) : ERR_INVALID_PACKET;
 								if (!ret)
 								{
 									int i = data[9];
@@ -1317,7 +1347,7 @@ static int		get_clock	(CalcHandle* handle, CalcClock* _clock)
 						ret = RECV_ACK(handle, nullptr);
 						if (!ret)
 						{
-							ret = RECV_XDP(handle, &varsize, buffer);
+							ret = RECV_XDP(handle, &varsize, buffer, TICALCS_INTERNAL_BUFFER_SIZE);
 							if (!ret)
 							{
 								ret = SEND_ACK(handle);
@@ -1327,6 +1357,11 @@ static int		get_clock	(CalcHandle* handle, CalcClock* _clock)
 				}
 			}
 		}
+	}
+
+	if (!ret && varsize < 8)
+	{
+		ret = ERR_INVALID_PACKET;
 	}
 
 	if (!ret)
@@ -1412,7 +1447,7 @@ static int		get_version	(CalcHandle* handle, CalcInfos* infos)
 				ret = RECV_ACK(handle, nullptr);
 				if (!ret)
 				{
-					ret = RECV_XDP(handle, &length, buffer);
+					ret = RECV_XDP(handle, &length, buffer, TICALCS_INTERNAL_BUFFER_SIZE);
 					if (!ret)
 					{
 						ret = SEND_ACK(handle);
@@ -1577,7 +1612,15 @@ static int		recv_cert	(CalcHandle* handle, FlashContent* content)
 						ret = RECV_ACK(handle, nullptr);
 						if (!ret)
 						{
-							ret = RECV_XDP(handle, &block_size, content->data_part);
+							if (content->data_length > 2U * 1024U * 1024U)
+							{
+								ret = ERR_INVALID_PACKET;
+							}
+							else
+							{
+								ret = RECV_XDP(handle, &block_size, content->data_part + content->data_length,
+									2U * 1024U * 1024U - content->data_length);
+							}
 							if (!ret)
 							{
 								ret = SEND_ACK(handle);

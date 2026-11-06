@@ -384,6 +384,11 @@ int TICALL ticalcs_screen_84pcse_rle_uncompress(const uint8_t *src, uint32_t src
 	VALIDATE_NONNULL(src);
 	VALIDATE_NONNULL(dst);
 
+	if (src_length < 2)
+	{
+		return ERR_INVALID_SCREENSHOT;
+	}
+
 	if (src[0] != 1)
 	{
 		return ERR_INVALID_SCREENSHOT;
@@ -398,7 +403,7 @@ int TICALL ticalcs_screen_84pcse_rle_uncompress(const uint8_t *src, uint32_t src
 	}
 
 	src_length -= palette_size * 2 + 1;
-	const uint8_t* palette = src + src_length - 2;
+	const uint8_t* palette = src + src_length;
 
 	while (src_length > 0)
 	{
@@ -422,8 +427,8 @@ int TICALL ticalcs_screen_84pcse_rle_uncompress(const uint8_t *src, uint32_t src
 					return ERR_INVALID_SCREENSHOT;
 				}
 
-				dst[0] = palette[2 * c];
-				dst[1] = palette[2 * c + 1];
+				dst[0] = palette[2 * (c - 1)];
+				dst[1] = palette[2 * (c - 1) + 1];
 				dst += 2;
 				dst_length -= 2;
 			}
@@ -447,8 +452,8 @@ int TICALL ticalcs_screen_84pcse_rle_uncompress(const uint8_t *src, uint32_t src
 
 			for (i = 0; i < n; i++)
 			{
-				dst[0] = palette[2 * c];
-				dst[1] = palette[2 * c + 1];
+				dst[0] = palette[2 * (c - 1)];
+				dst[1] = palette[2 * (c - 1) + 1];
 				dst += 2;
 				dst_length -= 2;
 			}
@@ -486,8 +491,8 @@ byte_mode:
 				return ERR_INVALID_SCREENSHOT;
 			}
 
-			dst[0] = palette[2 * c];
-			dst[1] = palette[2 * c + 1];
+			dst[0] = palette[2 * (c - 1)];
+			dst[1] = palette[2 * (c - 1) + 1];
 			dst += 2;
 			dst_length -= 2;
 
@@ -511,8 +516,8 @@ byte_mode:
 
 			for (i = 0; i < n; i++)
 			{
-				dst[0] = palette[2 * c];
-				dst[1] = palette[2 * c + 1];
+				dst[0] = palette[2 * (c - 1)];
+				dst[1] = palette[2 * (c - 1) + 1];
 				dst += 2;
 				dst_length -= 2;
 			}

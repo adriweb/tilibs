@@ -62,8 +62,8 @@
 #define SEND_EOT(handle) (handle->model != CALC_TI92 ? ti89_send_EOT(handle) : ti92_send_EOT(handle))
 
 #define RECV_ACK(handle, status) (handle->model != CALC_TI92 ? ti89_recv_ACK(handle, status) : ti92_recv_ACK(handle, status))
-#define RECV_VAR(handle, varsize, vartype, varname) (handle->model != CALC_TI92 ? ti89_recv_VAR(handle, varsize, vartype, varname) : ti92_recv_VAR(handle, varsize, vartype, varname))
-#define RECV_XDP(handle, length, data) (handle->model != CALC_TI92 ? ti89_recv_XDP(handle, length, data) : ti92_recv_XDP(handle, length, data))
+#define RECV_VAR(handle, varsize, vartype, varname, capacity) (handle->model != CALC_TI92 ? ti89_recv_VAR_sized(handle, varsize, vartype, varname, capacity) : ti92_recv_VAR_sized(handle, varsize, vartype, varname, capacity))
+#define RECV_XDP(handle, length, data, capacity) (handle->model != CALC_TI92 ? ti89_recv_XDP_sized(handle, length, data, capacity) : ti92_recv_XDP_sized(handle, length, data, capacity))
 #define RECV_CTS(handle) (handle->model != CALC_TI92 ? ti89_recv_CTS(handle) : ti92_recv_CTS(handle))
 #define RECV_SKP(handle, rej_code) (handle->model != CALC_TI92 ? ti89_recv_SKP(handle, rej_code) : ti92_recv_SKP(handle, rej_code))
 #define RECV_CNT(handle) (handle->model != CALC_TI92 ? ti89_recv_CNT(handle) : ti92_recv_CNT(handle))
@@ -235,7 +235,7 @@ static int		recv_screen	(CalcHandle* handle, CalcScreenCoord* sc, uint8_t** bitm
 		if (!ret)
 		{
 			uint16_t max_cnt;
-			ret = RECV_XDP(handle, &max_cnt, *bitmap);
+			ret = RECV_XDP(handle, &max_cnt, *bitmap, 65537U);
 			if (!ret || ret == ERR_CHECKSUM) // problem with checksum
 			{
 				// Clip the unused part of the screen (nevertheless usable with asm programs)
@@ -295,7 +295,7 @@ static int		get_dirlist	(CalcHandle* handle, GNode** vars, GNode** apps)
 		ret = RECV_ACK(handle, NULL);
 		if (!ret)
 		{
-			ret = RECV_VAR(handle, &info.size, &info.type, info.name);
+			ret = RECV_VAR(handle, &info.size, &info.type, info.name, sizeof(info.name));
 			if (!ret)
 			{
 				ret = SEND_ACK(handle);
@@ -307,7 +307,7 @@ static int		get_dirlist	(CalcHandle* handle, GNode** vars, GNode** apps)
 						ret = RECV_ACK(handle, NULL);
 						if (!ret)
 						{
-							ret = RECV_XDP(handle, &block_size, buffer);
+							ret = RECV_XDP(handle, &block_size, buffer, TICALCS_INTERNAL_BUFFER_SIZE);
 							if (!ret)
 							{
 								ret = SEND_ACK(handle);
@@ -329,6 +329,11 @@ static int		get_dirlist	(CalcHandle* handle, GNode** vars, GNode** apps)
 	if (ret)
 	{
 		return ret;
+	}
+	const unsigned int record_size = 14U + extra;
+	if (block_size < 4U || (block_size - 4U) % record_size != 0)
+	{
+		return ERR_INVALID_PACKET;
 	}
 
 	// First step: list of folders, and FlashApps on some OS versions.
@@ -387,7 +392,7 @@ static int		get_dirlist	(CalcHandle* handle, GNode** vars, GNode** apps)
 			ret = RECV_ACK(handle, NULL);
 			if (!ret)
 			{
-				ret = RECV_VAR(handle, &info.size, &info.type, info.name);
+				ret = RECV_VAR(handle, &info.size, &info.type, info.name, sizeof(info.name));
 				if (!ret)
 				{
 					ret = SEND_ACK(handle);
@@ -399,7 +404,7 @@ static int		get_dirlist	(CalcHandle* handle, GNode** vars, GNode** apps)
 							ret = RECV_ACK(handle, NULL);
 							if (!ret)
 							{
-								ret = RECV_XDP(handle, &block_size, buffer);
+								ret = RECV_XDP(handle, &block_size, buffer, TICALCS_INTERNAL_BUFFER_SIZE);
 								if (!ret)
 								{
 									ret = SEND_ACK(handle);
@@ -420,7 +425,12 @@ static int		get_dirlist	(CalcHandle* handle, GNode** vars, GNode** apps)
 		}
 		if (!ret)
 		{
-			for (j = 4 + 14 + extra; j < (int)block_size;)
+			const unsigned int records_offset = 4U + record_size;
+			if (block_size < records_offset || (block_size - records_offset) % record_size != 0)
+			{
+				return ERR_INVALID_PACKET;
+			}
+			for (j = (int)records_offset; j < (int)block_size;)
 			{
 				VarEntry *ve = tifiles_ve_create();
 
@@ -502,7 +512,7 @@ static int		get_dirlist_92	(CalcHandle* handle, GNode** vars, GNode** apps)
 			ret = RECV_ACK(handle, NULL);
 			if (!ret)
 			{
-				ret = RECV_VAR(handle, &info.size, &info.type, info.name);
+				ret = RECV_VAR(handle, &info.size, &info.type, info.name, sizeof(info.name));
 			}
 		}
 	}
@@ -527,12 +537,17 @@ static int		get_dirlist_92	(CalcHandle* handle, GNode** vars, GNode** apps)
 				ret = RECV_ACK(handle, NULL);
 				if (!ret)
 				{
-					ret = RECV_XDP(handle, &unused, buffer);
+					ret = RECV_XDP(handle, &unused, buffer, TICALCS_INTERNAL_BUFFER_SIZE);
 				}
 			}
 		}
 		if (ret)
 		{
+			break;
+		}
+		if (unused < 18U)
+		{
+			ret = ERR_INVALID_PACKET;
 			break;
 		}
 
@@ -685,7 +700,7 @@ static int		recv_backup	(CalcHandle* handle, BackupContent* content)
 				ticalcs_slprintf(handle->updat->text, sizeof(handle->updat->text), _("Block #%2i"), block);
 				ticalcs_update_label(handle);
 
-				ret = RECV_VAR(handle, &block_size, &content->type, content->rom_version);
+				ret = RECV_VAR(handle, &block_size, &content->type, content->rom_version, sizeof(content->rom_version));
 				const int ret2 = SEND_ACK(handle);
 
 				if (ret)
@@ -708,15 +723,26 @@ static int		recv_backup	(CalcHandle* handle, BackupContent* content)
 					ret = RECV_ACK(handle, NULL);
 					if (!ret)
 					{
-						uint8_t* ptr = content->data_part + content->data_length;
-						ret = RECV_XDP(handle, &unused, ptr);
-						if (!ret)
+						if (content->data_length > 128U * 1024U)
 						{
-							memmove(ptr, ptr + 4, block_size);
-							ret = SEND_ACK(handle);
+							ret = ERR_INVALID_PACKET;
+						}
+						else
+						{
+							uint8_t* ptr = content->data_part + content->data_length;
+							ret = RECV_XDP(handle, &unused, ptr, 128U * 1024U - content->data_length);
+							if (!ret && (block_size > UINT16_MAX - 4U || unused != block_size + 4U))
+							{
+								ret = ERR_INVALID_PACKET;
+							}
 							if (!ret)
 							{
-								content->data_length += block_size;
+								memmove(ptr, ptr + 4, block_size);
+								ret = SEND_ACK(handle);
+								if (!ret)
+								{
+									content->data_length += block_size;
+								}
 							}
 						}
 					}
@@ -857,7 +883,7 @@ static int		recv_var	(CalcHandle* handle, CalcMode mode, FileContent* content, V
 				return ERR_MISSING_VAR;
 			}
 
-			ret = RECV_VAR(handle, &ve->size, &ve->type, ve->name);
+			ret = RECV_VAR(handle, &ve->size, &ve->type, ve->name, sizeof(ve->name));
 			if (!ret)
 			{
 				vr->size = ve->size;
@@ -870,8 +896,19 @@ static int		recv_var	(CalcHandle* handle, CalcMode mode, FileContent* content, V
 						ret = RECV_ACK(handle, NULL);
 						if (!ret)
 						{
-							ve->data = (uint8_t *)tifiles_ve_alloc_data(ve->size + 4);
-							ret = RECV_XDP(handle, &unused, ve->data);
+							if (ve->size > UINT16_MAX - 4U)
+							{
+								ret = ERR_INVALID_PACKET;
+							}
+							else
+							{
+								ve->data = (uint8_t *)tifiles_ve_alloc_data(ve->size + 4U);
+								ret = ve->data ? RECV_XDP(handle, &unused, ve->data, ve->size + 4U) : ERR_MALLOC;
+							}
+							if (!ret && unused != ve->size + 4U)
+							{
+								ret = ERR_INVALID_PACKET;
+							}
 							if (!ret)
 							{
 								memmove(ve->data, ve->data + 4, ve->size);
@@ -1054,7 +1091,7 @@ static int		recv_var_ns	(CalcHandle* handle, CalcMode mode, FileContent* content
 
 		ticalcs_strlcpy(ve->folder, "main", sizeof(ve->folder));
 
-		ret = RECV_VAR(handle, &ve->size, &ve->type, tipath);
+		ret = RECV_VAR(handle, &ve->size, &ve->type, tipath, sizeof(tipath));
 		const int ret2 = SEND_ACK(handle);
 
 		if (ret)
@@ -1093,8 +1130,19 @@ static int		recv_var_ns	(CalcHandle* handle, CalcMode mode, FileContent* content
 			ret = RECV_ACK(handle, NULL);
 			if (!ret)
 			{
-				ve->data = (uint8_t *)tifiles_ve_alloc_data(ve->size + 4);
-				ret = RECV_XDP(handle, &unused, ve->data);
+				if (ve->size > UINT16_MAX - 4U)
+				{
+					ret = ERR_INVALID_PACKET;
+				}
+				else
+				{
+					ve->data = (uint8_t *)tifiles_ve_alloc_data(ve->size + 4U);
+					ret = ve->data ? RECV_XDP(handle, &unused, ve->data, ve->size + 4U) : ERR_MALLOC;
+				}
+				if (!ret && unused != ve->size + 4U)
+				{
+					ret = ERR_INVALID_PACKET;
+				}
 				if (!ret)
 				{
 					memmove(ve->data, ve->data + 4, ve->size);
@@ -1238,7 +1286,7 @@ static int		recv_flash	(CalcHandle* handle, FlashContent* content, VarRequest* v
 		ret = RECV_ACK(handle, NULL);
 		if (!ret)
 		{
-			ret = RECV_VAR(handle, &content->data_length, &content->data_type, content->name);
+			ret = RECV_VAR(handle, &content->data_length, &content->data_type, content->name, sizeof(content->name));
 			if (!ret)
 			{
 
@@ -1258,13 +1306,22 @@ static int		recv_flash	(CalcHandle* handle, FlashContent* content, VarRequest* v
 							ret = RECV_ACK(handle, NULL);
 							if (!ret)
 							{
-								ret = RECV_XDP(handle, &block_size, content->data_part + content->data_length);
+								if (content->data_length > 4U * 1024U * 1024U)
+								{
+									ret = ERR_INVALID_PACKET;
+								}
+								else
+								{
+									ret = RECV_XDP(handle, &block_size, content->data_part + content->data_length,
+										4U * 1024U * 1024U - content->data_length);
+								}
 								if (!ret)
 								{
+									const uint32_t received_size = block_size == 0 ? 65536U : block_size;
 									ret = SEND_ACK(handle);
 									if (!ret)
 									{
-										content->data_length += block_size;
+										content->data_length += received_size;
 
 										ret  = RECV_CNT(handle);
 										if (ret)
@@ -1276,7 +1333,7 @@ static int		recv_flash	(CalcHandle* handle, FlashContent* content, VarRequest* v
 											break;
 										}
 
-										handle->updat->cnt2 += block_size;
+										handle->updat->cnt2 += received_size;
 										ticalcs_update_pbar(handle);
 									}
 								}
@@ -1302,6 +1359,7 @@ static int		recv_idlist	(CalcHandle* handle, uint8_t* idlist)
 	uint16_t pktsize;
 	uint8_t vartype;
 	char varname[9];
+	uint8_t *buffer = (uint8_t *)handle->buffer2;
 
 	ticalcs_strlcpy(handle->updat->text, "ID-LIST", sizeof(handle->updat->text));
 	ticalcs_update_label(handle);
@@ -1312,7 +1370,7 @@ static int		recv_idlist	(CalcHandle* handle, uint8_t* idlist)
 		ret = RECV_ACK(handle, NULL);
 		if (!ret)
 		{
-			ret = RECV_VAR(handle, &varsize, &vartype, varname);
+			ret = RECV_VAR(handle, &varsize, &vartype, varname, sizeof(varname));
 			if (!ret)
 			{
 				ret = SEND_ACK(handle);
@@ -1324,12 +1382,19 @@ static int		recv_idlist	(CalcHandle* handle, uint8_t* idlist)
 						ret = RECV_ACK(handle, NULL);
 						if (!ret)
 						{
-							ret = RECV_XDP(handle, &pktsize, idlist);
+							ret = RECV_XDP(handle, &pktsize, buffer, TICALCS_INTERNAL_BUFFER_SIZE);
 							if (!ret)
 							{
-								memmove(idlist, idlist + 8, pktsize - 8);
-								idlist[pktsize - 8] = '\0';
-								ret = SEND_ACK(handle);
+								if (pktsize < 8 || pktsize - 8U >= 32U)
+								{
+									ret = ERR_INVALID_PACKET;
+								}
+								else
+								{
+									memcpy(idlist, buffer + 8, pktsize - 8U);
+									idlist[pktsize - 8U] = '\0';
+									ret = SEND_ACK(handle);
+								}
 								if (!ret)
 								{
 									ret = RECV_EOT(handle);
@@ -1472,7 +1537,7 @@ static int		get_clock	(CalcHandle* handle, CalcClock* _clock)
 		ret = RECV_ACK(handle, NULL);
 		if (!ret)
 		{
-			ret = RECV_VAR(handle, &varsize, &vartype, varname);
+			ret = RECV_VAR(handle, &varsize, &vartype, varname, sizeof(varname));
 			if (!ret)
 			{
 				ret = SEND_ACK(handle);
@@ -1485,7 +1550,11 @@ static int		get_clock	(CalcHandle* handle, CalcClock* _clock)
 						if (!ret)
 						{
 							uint8_t * buffer = (uint8_t *)(handle->buffer2);
-							ret = RECV_XDP(handle, &pktsize, buffer);
+							ret = RECV_XDP(handle, &pktsize, buffer, TICALCS_INTERNAL_BUFFER_SIZE);
+							if (!ret && pktsize != 16U)
+							{
+								ret = ERR_INVALID_PACKET;
+							}
 							if (!ret)
 							{
 								ret = SEND_ACK(handle);
@@ -1683,7 +1752,7 @@ static int		get_version	(CalcHandle* handle, CalcInfos* infos)
 				ret = RECV_ACK(handle, NULL);
 				if (!ret)
 				{
-					ret = RECV_XDP(handle, &length, buffer);
+					ret = RECV_XDP(handle, &length, buffer, TICALCS_INTERNAL_BUFFER_SIZE);
 					if (!ret)
 					{
 						ret = SEND_ACK(handle);
@@ -1740,7 +1809,7 @@ static int		get_version_92	(CalcHandle* handle, CalcInfos* infos)
 		ret = RECV_ACK(handle, NULL);
 		if (!ret)
 		{
-			ret = RECV_VAR(handle, &size, &type, name);
+			ret = RECV_VAR(handle, &size, &type, name, sizeof(name));
 			if (!ret)
 			{
 				ret = SEND_EOT(handle);

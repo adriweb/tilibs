@@ -363,43 +363,51 @@ int TICALL dbus_recv_header(CalcHandle *handle, uint8_t* host, uint8_t* cmd, uin
 	return ret;
 }
 
-int TICALL dbus_recv_data(CalcHandle *handle, uint16_t* length, uint8_t* data)
+static int dbus_recv_data_sized_impl(CalcHandle *handle, uint16_t* length, uint32_t data_length,
+	uint8_t* data, size_t capacity)
 {
 	int ret = 0;
 	int i;
 	uint8_t buf[4] = { 0, 0, 0, 0 };
+	uint8_t *recv_data;
+	int oversized;
 	CalcEventData event;
 
 	VALIDATE_HANDLE(handle);
 	VALIDATE_NONNULL(length);
-	VALIDATE_NONNULL(data);
+	if (data == nullptr && capacity != 0)
+	{
+		return ERR_INVALID_PARAMETER;
+	}
+	oversized = data == nullptr || data_length > capacity;
+	recv_data = oversized ? (uint8_t *)handle->buffer : data;
 
 	SET_HANDLE_BUSY_IF_NECESSARY(handle);
 
 	ticalcs_event_fill_header(handle, &event, /* type */ CALC_EVENT_TYPE_BEFORE_RECV_DBUS_PKT_DATA, /* retval */ 0, /* operation */ CALC_FNCT_LAST);
-	ticalcs_event_fill_dbus_pkt(&event, /* length */ *length, /* id */ 0, /* cmd */ 0, /* data */ data);
+	ticalcs_event_fill_dbus_pkt(&event, /* length */ data_length, /* id */ 0, /* cmd */ 0, /* data */ recv_data);
 	ret = ticalcs_event_send(handle, &event);
 
 	if (!ret)
 	{
 		// compute chunks
 		handle->priv.progress_min_size = (handle->cable->model == CABLE_GRY) ? 512 : 2048;
-		handle->priv.progress_blk_size = *length / 20;
+		handle->priv.progress_blk_size = data_length / 20;
 		if (handle->priv.progress_blk_size == 0)
 		{
 			handle->priv.progress_blk_size = 1;
 		}
 
-		const int q = *length / handle->priv.progress_blk_size;
-		const int r = *length % handle->priv.progress_blk_size;
-		handle->updat->max1 = *length;
+		const int q = data_length / handle->priv.progress_blk_size;
+		const int r = data_length % handle->priv.progress_blk_size;
+		handle->updat->max1 = data_length;
 		handle->updat->cnt1 = 0;
 
 		ret = 0;
 		// recv full chunks
 		for (i = 0; i < q; i++)
 		{
-			ret = ticables_cable_recv(handle->cable, &data[i*handle->priv.progress_blk_size], handle->priv.progress_blk_size);
+			ret = ticables_cable_recv(handle->cable, &recv_data[i*handle->priv.progress_blk_size], handle->priv.progress_blk_size);
 			if (ret)
 			{
 				break;
@@ -407,7 +415,7 @@ int TICALL dbus_recv_data(CalcHandle *handle, uint16_t* length, uint8_t* data)
 			ticables_progress_get(handle->cable, nullptr, nullptr, &handle->updat->rate);
 
 			handle->updat->cnt1 += handle->priv.progress_blk_size;
-			if (*length > handle->priv.progress_min_size)
+			if (data_length > handle->priv.progress_min_size)
 			{
 				handle->updat->pbar();
 			}
@@ -422,15 +430,21 @@ int TICALL dbus_recv_data(CalcHandle *handle, uint16_t* length, uint8_t* data)
 		// recv last chunk
 		if (!ret)
 		{
-			ret = ticables_cable_recv(handle->cable, &data[i*handle->priv.progress_blk_size], (uint16_t)r);
+			if (r != 0)
+			{
+				ret = ticables_cable_recv(handle->cable, &recv_data[i*handle->priv.progress_blk_size], (uint16_t)r);
+			}
 			if (!ret)
 			{
-				ticables_progress_get(handle->cable, nullptr, nullptr, &handle->updat->rate);
+				if (r != 0)
+				{
+					ticables_progress_get(handle->cable, nullptr, nullptr, &handle->updat->rate);
+				}
 				ret = ticables_cable_recv(handle->cable, buf, 2);
 				if (!ret)
 				{
 					handle->updat->cnt1++;
-					if (*length > handle->priv.progress_min_size)
+					if (data_length > handle->priv.progress_min_size)
 					{
 						handle->updat->pbar();
 					}
@@ -447,20 +461,40 @@ int TICALL dbus_recv_data(CalcHandle *handle, uint16_t* length, uint8_t* data)
 		{
 			// verify checksum
 			const uint16_t chksum = buf[0] | ((uint16_t)buf[1] << 8);
-			if (chksum != tifiles_checksum(data, *length))
+			if (chksum != tifiles_checksum(recv_data, data_length))
 			{
 				ret = ERR_CHECKSUM;
+			}
+			else if (oversized)
+			{
+				ret = ERR_INVALID_PACKET;
 			}
 		}
 	}
 
 	ticalcs_event_fill_header(handle, &event, /* type */ CALC_EVENT_TYPE_AFTER_RECV_DBUS_PKT_DATA, /* retval */ ret, /* operation */ CALC_FNCT_LAST);
-	ticalcs_event_fill_dbus_pkt(&event, /* length */ *length, /* id */ 0, /* cmd */ 0, /* data */ data);
+	ticalcs_event_fill_dbus_pkt(&event, /* length */ data_length, /* id */ 0, /* cmd */ 0, /* data */ recv_data);
 	ret = ticalcs_event_send(handle, &event);
 
 	CLEAR_HANDLE_BUSY_IF_NECESSARY(handle);
 
 	return ret;
+}
+
+int TICALL dbus_recv_data_sized(CalcHandle *handle, uint16_t* length, uint8_t* data, size_t capacity)
+{
+	VALIDATE_HANDLE(handle);
+	VALIDATE_NONNULL(length);
+	if (data == nullptr && capacity != 0)
+	{
+		return ERR_INVALID_PARAMETER;
+	}
+	return dbus_recv_data_sized_impl(handle, length, *length, data, capacity);
+}
+
+int TICALL dbus_recv_data(CalcHandle *handle, uint16_t* length, uint8_t* data)
+{
+	return dbus_recv_data_sized(handle, length, data, UINT16_MAX);
 }
 
 /*
@@ -471,7 +505,7 @@ int TICALL dbus_recv_data(CalcHandle *handle, uint16_t* length, uint8_t* data)
   - data [out]	 : received data (depending on command)
   - int [out]	 : an error code
 */
-int TICALL dbus_recv(CalcHandle* handle, uint8_t* host, uint8_t* cmd, uint16_t* length, uint8_t* data)
+int TICALL dbus_recv_sized(CalcHandle* handle, uint8_t* host, uint8_t* cmd, uint16_t* length, uint8_t* data, size_t capacity)
 {
 	static int ref = 0;
 
@@ -501,8 +535,16 @@ int TICALL dbus_recv(CalcHandle* handle, uint8_t* host, uint8_t* cmd, uint16_t* 
 			case DBUS_CMD_REQ:
 			case DBUS_CMD_IND:
 			case DBUS_CMD_RTS:
-				ret = dbus_recv_data(handle, length, data);
+			{
+				// TI-68k Flash transfers encode a full 64 KiB XDP block with
+				// a zero 16-bit length. Keep the public length word unchanged,
+				// but receive and validate the actual payload size.
+				const uint32_t data_length = (*cmd == DBUS_CMD_XDP && *length == 0
+				    && tifiles_calc_is_ti9x(handle->model)) ? 65536U : *length;
+				ret = dbus_recv_data_sized_impl(handle, length, data_length, data,
+					data != nullptr ? capacity : 0);
 				break;
+			}
 			case DBUS_CMD_CTS:	// short packet (no data)
 			case DBUS_CMD_ACK:
 			case DBUS_CMD_ERR:
@@ -529,6 +571,11 @@ int TICALL dbus_recv(CalcHandle* handle, uint8_t* host, uint8_t* cmd, uint16_t* 
 	CLEAR_HANDLE_BUSY_IF_NECESSARY(handle);
 
 	return ret;
+}
+
+int TICALL dbus_recv(CalcHandle* handle, uint8_t* host, uint8_t* cmd, uint16_t* length, uint8_t* data)
+{
+	return dbus_recv_sized(handle, host, cmd, length, data, UINT16_MAX);
 }
 
 int TICALL dbus_dissect(CalcModel model, FILE * f, const uint8_t * data, uint32_t len)

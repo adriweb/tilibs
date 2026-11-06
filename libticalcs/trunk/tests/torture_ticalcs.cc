@@ -271,6 +271,13 @@ static void torture_ticalcs()
     PRINTF(dbus_recv_data, INT, nullptr, (uint16_t*)0x12345678, (uint8_t*)0x12345678);
     PRINTF(dbus_recv_data, INT, (CalcHandle*)0x12345678, nullptr, (uint8_t*)0x12345678);
     PRINTF(dbus_recv_data, INT, (CalcHandle*)0x12345678, (uint16_t*)0x12345678, nullptr);
+    PRINTF(dbus_recv_sized, INT, nullptr, (uint8_t*)0x12345678, (uint8_t*)0x12345678, (uint16_t*)0x12345678, (uint8_t*)0x12345678, 1);
+    PRINTF(dbus_recv_sized, INT, (CalcHandle*)0x12345678, nullptr, (uint8_t*)0x12345678, (uint16_t*)0x12345678, (uint8_t*)0x12345678, 1);
+    PRINTF(dbus_recv_sized, INT, (CalcHandle*)0x12345678, (uint8_t*)0x12345678, nullptr, (uint16_t*)0x12345678, (uint8_t*)0x12345678, 1);
+    PRINTF(dbus_recv_sized, INT, (CalcHandle*)0x12345678, (uint8_t*)0x12345678, (uint8_t*)0x12345678, nullptr, (uint8_t*)0x12345678, 1);
+    PRINTF(dbus_recv_data_sized, INT, nullptr, (uint16_t*)0x12345678, (uint8_t*)0x12345678, 1);
+    PRINTF(dbus_recv_data_sized, INT, (CalcHandle*)0x12345678, nullptr, (uint8_t*)0x12345678, 1);
+    PRINTF(dbus_recv_data_sized, INT, (CalcHandle*)0x12345678, (uint16_t*)0x12345678, nullptr, 1);
 // dusb_rpkt.c
     PRINTF(dusb_send, INT, nullptr, (DUSBRawPacket*)0x12345678);
     PRINTF(dusb_send, INT, (CalcHandle*)0x12345678, nullptr);
@@ -645,6 +652,8 @@ static void torture_cmdz80()
     PRINTF(ti73_recv_SKP, INT, (CalcHandle*)0x12345678, nullptr);
     PRINTF(ti73_recv_XDP, INT, nullptr, (uint16_t*)0x12345678, (uint8_t*)0x12345678);
     PRINTF(ti73_recv_XDP, INT, (CalcHandle*)0x12345678, nullptr, (uint8_t*)0x12345678);
+    PRINTF(ti73_recv_XDP_sized, INT, nullptr, (uint16_t*)0x12345678, (uint8_t*)0x12345678, 1);
+    PRINTF(ti73_recv_XDP_sized, INT, (CalcHandle*)0x12345678, nullptr, (uint8_t*)0x12345678, 1);
     PRINTF(ti73_recv_ACK, INT, nullptr, (uint16_t*)0x12345678);
     PRINTF(ti73_recv_RTS, INT, nullptr, (uint16_t*)0x12345678, (uint8_t*)0x12345678, (char*)0x12345678, (uint8_t*)0x12345678, (uint8_t*)0x12345678);
 
@@ -753,12 +762,17 @@ static void torture_cmd68k()
     PRINTF(ti89_recv_VAR, INT, (CalcHandle *)0x12345678, nullptr, (uint8_t*)0x12345678, (char*)0x12345678);
     PRINTF(ti89_recv_VAR, INT, (CalcHandle *)0x12345678, (uint32_t *)0x12345678, nullptr, (char*)0x12345678);
     PRINTF(ti89_recv_VAR, INT, (CalcHandle *)0x12345678, (uint32_t *)0x12345678, (uint8_t *)0x12345678, nullptr);
+    PRINTF(ti89_recv_VAR_sized, INT, nullptr, (uint32_t*)0x12345678, (uint8_t*)0x12345678, (char*)0x12345678, 1);
+    PRINTF(ti89_recv_VAR_sized, INT, (CalcHandle*)0x12345678, nullptr, (uint8_t*)0x12345678, (char*)0x12345678, 1);
+    PRINTF(ti89_recv_VAR_sized, INT, (CalcHandle*)0x12345678, (uint32_t*)0x12345678, (uint8_t*)0x12345678, nullptr, 1);
     PRINTF(ti89_recv_CTS, INT, nullptr);
     PRINTF(ti89_recv_SKP, INT, nullptr, (uint8_t*)0x12345678);
     PRINTF(ti89_recv_SKP, INT, (CalcHandle*)0x12345678, nullptr);
     PRINTF(ti89_recv_XDP, INT, nullptr, (uint16_t*)0x12345678, (uint8_t*)0x12345678);
 
     PRINTF(ti89_recv_XDP, INT, (CalcHandle*)0x12345678, nullptr, (uint8_t*)0x12345678);
+    PRINTF(ti89_recv_XDP_sized, INT, nullptr, (uint16_t*)0x12345678, (uint8_t*)0x12345678, 1);
+    PRINTF(ti89_recv_XDP_sized, INT, (CalcHandle*)0x12345678, nullptr, (uint8_t*)0x12345678, 1);
     PRINTF(ti89_send_ACK, INT, nullptr);
     PRINTF(ti89_recv_CNT, INT, nullptr);
     PRINTF(ti89_recv_EOT, INT, nullptr);
@@ -766,6 +780,9 @@ static void torture_cmd68k()
     PRINTF(ti89_recv_RTS, INT, (CalcHandle*)0x12345678, nullptr, (uint8_t*)0x12345678, (char*)0x12345678);
     PRINTF(ti89_recv_RTS, INT, (CalcHandle*)0x12345678, (uint32_t*)0x12345678, nullptr, (char*)0x12345678);
     PRINTF(ti89_recv_RTS, INT, (CalcHandle*)0x12345678, (uint32_t*)0x12345678, (uint8_t*)0x12345678, nullptr);
+    PRINTF(ti89_recv_RTS_sized, INT, nullptr, (uint32_t*)0x12345678, (uint8_t*)0x12345678, (char*)0x12345678, 1);
+    PRINTF(ti89_recv_RTS_sized, INT, (CalcHandle*)0x12345678, nullptr, (uint8_t*)0x12345678, (char*)0x12345678, 1);
+    PRINTF(ti89_recv_RTS_sized, INT, (CalcHandle*)0x12345678, (uint32_t*)0x12345678, (uint8_t*)0x12345678, nullptr, 1);
     PRINTF(ti92_send_VAR, INT, nullptr, 0, 0, (const char*)0x12345678);
     PRINTF(ti92_send_VAR, INT, (CalcHandle*)0x12345678, 0, 0, nullptr);
 
@@ -789,12 +806,14 @@ static void torture_cmd68k()
     PRINTF(ti92_recv_VAR, INT, (CalcHandle*)0x12345678, nullptr, (uint8_t*)0x12345678, (char*)0x12345678);
     PRINTF(ti92_recv_VAR, INT, (CalcHandle*)0x12345678, (uint32_t*)0x12345678, nullptr, (char*)0x12345678);
     PRINTF(ti92_recv_VAR, INT, (CalcHandle*)0x12345678, (uint32_t*)0x12345678, (uint8_t*)0x12345678, nullptr);
+    PRINTF(ti92_recv_VAR_sized, INT, nullptr, (uint32_t*)0x12345678, (uint8_t*)0x12345678, (char*)0x12345678, 1);
     PRINTF(ti92_recv_CTS, INT, nullptr);
 
     PRINTF(ti92_recv_SKP, INT, nullptr, (uint8_t*)0x12345678);
     PRINTF(ti92_recv_SKP, INT, (CalcHandle*)0x12345678, nullptr);
     PRINTF(ti92_recv_XDP, INT, nullptr, (uint16_t*)0x12345678, (uint8_t*)0x12345678);
     PRINTF(ti92_recv_XDP, INT, (CalcHandle*)0x12345678, nullptr, (uint8_t*)0x12345678);
+    PRINTF(ti92_recv_XDP_sized, INT, nullptr, (uint16_t*)0x12345678, (uint8_t*)0x12345678, 1);
     PRINTF(ti92_send_ACK, INT, nullptr);
     PRINTF(ti92_recv_CNT, INT, nullptr);
     PRINTF(ti92_recv_EOT, INT, nullptr);
@@ -803,6 +822,7 @@ static void torture_cmd68k()
     PRINTF(ti92_recv_RTS, INT, (CalcHandle*)0x12345678, (uint32_t*)0x12345678, nullptr, (char*)0x12345678);
 
     PRINTF(ti92_recv_RTS, INT, (CalcHandle*)0x12345678, (uint32_t*)0x12345678, (uint8_t*)0x12345678, nullptr);
+    PRINTF(ti92_recv_RTS_sized, INT, nullptr, (uint32_t*)0x12345678, (uint8_t*)0x12345678, (char*)0x12345678, 1);
 }
 
 static void torture_romdump()

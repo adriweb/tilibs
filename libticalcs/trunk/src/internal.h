@@ -30,6 +30,8 @@
 #include "macros.h"
 #include "calclabequipmentdata.h"
 
+#define TICALCS_INTERNAL_BUFFER_SIZE (65536U + 6U)
+
 #define VALIDATE_NONNULL(ptr) \
 	do \
 	{ \

@@ -29,6 +29,13 @@ extern "C" {
 #endif
 
 #define DUSB_DH_SIZE		(4+2)	// size + type
+#define DUSB_VIRTUAL_PACKET_MAX_SIZE (128U << 20)
+
+static inline int dusb_vpkt_append_size_valid(uint32_t current_size, uint32_t append_size)
+{
+	return current_size <= DUSB_VIRTUAL_PACKET_MAX_SIZE
+		&& append_size <= DUSB_VIRTUAL_PACKET_MAX_SIZE - current_size;
+}
 
 // Virtual packet types
 

@@ -270,10 +270,13 @@ int TICALL nsp_send(CalcHandle* handle, NSPRawPacket* pkt)
 int TICALL nsp_recv(CalcHandle* handle, NSPRawPacket* pkt)
 {
 	uint8_t buf[NSP_HEADER_SIZE];
+	uint8_t oversized_data[UINT8_MAX];
+	uint8_t *event_data;
 	CalcEventData event;
 
 	VALIDATE_HANDLE(handle);
 	VALIDATE_NONNULL(pkt);
+	event_data = pkt->data;
 
 	SET_HANDLE_BUSY_IF_NECESSARY(handle);
 
@@ -298,6 +301,16 @@ int TICALL nsp_recv(CalcHandle* handle, NSPRawPacket* pkt)
 			pkt->ack       = buf[13];
 			pkt->seq       = buf[14];
 			pkt->hdr_sum   = buf[15];
+			if (pkt->data_size > NSP_DATA_SIZE)
+			{
+				event_data = oversized_data;
+				ret = ticables_cable_recv(handle->cable, oversized_data, pkt->data_size);
+				if (!ret)
+				{
+					ret = ERR_INVALID_PACKET;
+				}
+				break;
+			}
 
 			if (pkt->src_port == 0x00fe || pkt->src_port == 0x00ff || pkt->src_port == 0x00d3)
 			{
@@ -343,7 +356,7 @@ int TICALL nsp_recv(CalcHandle* handle, NSPRawPacket* pkt)
 
 	ticalcs_event_fill_header(handle, &event, /* type */ CALC_EVENT_TYPE_AFTER_RECV_NSP_RPKT, /* retval */ ret, /* operation */ CALC_FNCT_LAST);
 	ticalcs_event_fill_nsp_rpkt(&event, /* src_addr */ pkt->src_addr, /* src_port */ pkt->src_port, /* dst_addr */ pkt->dst_addr, /* dst_port */ pkt->dst_port,
-	                            /* data_sum */ pkt->data_sum, /* data_size */ pkt->data_size, /* ack */ pkt->ack, /* seq */ pkt->seq, /* hdr_sum */ pkt->hdr_sum, /* data */ pkt->data);
+	                            /* data_sum */ pkt->data_sum, /* data_size */ pkt->data_size, /* ack */ pkt->ack, /* seq */ pkt->seq, /* hdr_sum */ pkt->hdr_sum, /* data */ event_data);
 	ret = ticalcs_event_send(handle, &event);
 
 	CLEAR_HANDLE_BUSY_IF_NECESSARY(handle);

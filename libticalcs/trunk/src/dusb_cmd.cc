@@ -848,6 +848,10 @@ int dusb_check_cmd_data(CalcModel model, const uint8_t * data, uint32_t len, uin
 	int ret = ERR_INVALID_PACKET;
 
 	(void)vtl_size;
+	if (len != 0 && data == nullptr)
+	{
+		return ret;
+	}
 
 	switch (vtl_type)
 	{
@@ -877,41 +881,48 @@ int dusb_check_cmd_data(CalcModel model, const uint8_t * data, uint32_t len, uin
 
 		case DUSB_VPKT_PARM_DATA:
 		{
-			if (len >= 2U)
+			if (len < 2U)
 			{
-				const uint16_t nparams = (((uint16_t)(data[0])) << 8) | ((uint16_t)(data[1]));
-				data += 2;
-				if (len >= 2U + 3 * nparams)
-				{
-					uint32_t additional_size = 0;
-					int overrun = 0;
-
-					for (uint16_t i = 0; i < nparams; i++)
-					{
-						const uint8_t ok = !(data[2]);
-						data += 3;
-						if (ok)
-						{
-							const uint16_t size = (((uint16_t)(data[0])) << 8) | ((uint16_t)(data[1]));
-							data += size + 2;
-							additional_size += size + 2;
-						}
-						if (len < 2U + 3 * nparams + additional_size)
-						{
-							overrun = 1;
-							break;
-						}
-						// else do nothing.
-					}
-					if (!overrun && len == 2U + 3 * nparams + additional_size)
-					{
-						ret = 0;
-					}
-					// else do nothing.
-				}
-				// else do nothing.
+				break;
 			}
-			// else do nothing.
+
+			const uint16_t nparams = (((uint16_t)(data[0])) << 8) | ((uint16_t)(data[1]));
+			const uint8_t *cursor = data + 2;
+			uint32_t remaining = len - 2U;
+			int records_valid = 1;
+			for (uint16_t i = 0; i < nparams; i++)
+			{
+				if (remaining < 3U)
+				{
+					records_valid = 0;
+					break;
+				}
+				const uint8_t ok = !cursor[2];
+				cursor += 3;
+				remaining -= 3U;
+				if (ok)
+				{
+					if (remaining < 2U)
+					{
+						records_valid = 0;
+						break;
+					}
+					const uint16_t size = (((uint16_t)(cursor[0])) << 8) | ((uint16_t)(cursor[1]));
+					cursor += 2;
+					remaining -= 2U;
+					if (size > remaining)
+					{
+						records_valid = 0;
+						break;
+					}
+					cursor += size;
+					remaining -= size;
+				}
+			}
+			if (records_valid && remaining == 0)
+			{
+				ret = 0;
+			}
 		}
 		break;
 
@@ -1514,6 +1525,11 @@ int TICALL dusb_cmd_r_param_data(CalcHandle *handle, unsigned int nparams, DUSBC
 			goto end;
 		}
 		else if (pkt->type != DUSB_VPKT_PARM_DATA)
+		{
+			retval = ERR_INVALID_PACKET;
+			goto end;
+		}
+		else if (dusb_check_cmd_data(handle->model, pkt->data, pkt->size, pkt->size, pkt->type))
 		{
 			retval = ERR_INVALID_PACKET;
 			goto end;

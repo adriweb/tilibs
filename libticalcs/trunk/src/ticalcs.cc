@@ -660,13 +660,13 @@ CalcHandle* TICALL ticalcs_handle_new(CalcModel model)
 			handle->event_hook = ticalcs_default_event_hook;
 			//handle->event_count = 0;
 
-			handle->buffer = (uint8_t *)g_malloc(65536 + 6);
+			handle->buffer = (uint8_t *)g_malloc(TICALCS_INTERNAL_BUFFER_SIZE);
 			if (handle->buffer == nullptr)
 			{
 				g_free(handle);
 				handle = nullptr;
 			}
-			handle->buffer2 = (uint8_t *)g_malloc(65536 + 6);
+			handle->buffer2 = (uint8_t *)g_malloc(TICALCS_INTERNAL_BUFFER_SIZE);
 			if (handle->buffer2 == nullptr)
 			{
 				g_free(handle->buffer);

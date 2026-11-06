@@ -644,7 +644,7 @@ int TICALL tixx_get_lab_equipment_data_legacy(CalcHandle* handle, CalcModel mode
 			if (ret) break;
 
 			varname[0] = 0;
-			ret = ti92_recv_VAR(handle, &varsize, &vartype, varname);
+			ret = ti92_recv_VAR_sized(handle, &varsize, &vartype, varname, sizeof(varname));
 			if (ret) break;
 			if (vartype != 4)
 			{
@@ -662,7 +662,7 @@ int TICALL tixx_get_lab_equipment_data_legacy(CalcHandle* handle, CalcModel mode
 			ret = ti89_recv_ACK(handle, NULL);
 			if (ret) break;
 
-			ret = ti68k_recv_XDP(handle, &length, (uint8_t *)handle->buffer2);
+			ret = ti68k_recv_XDP_sized(handle, &length, (uint8_t *)handle->buffer2, TICALCS_INTERNAL_BUFFER_SIZE);
 			if (ret) break;
 			size_mismatch = (varsize != (uint32_t)length);
 			if (size_mismatch)

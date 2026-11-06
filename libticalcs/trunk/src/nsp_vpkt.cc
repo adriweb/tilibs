@@ -43,6 +43,7 @@
 #include "error.h"
 
 #include "nsp_vpkt.h"
+#include "nsp_limits.h"
 
 // Creation/Destruction/Garbage Collecting of packets
 
@@ -168,6 +169,34 @@ void TICALL nsp_vtl_pkt_free_data(CalcHandle * handle, void * data)
 	{
 		g_free(data);
 	}
+}
+
+static int nsp_vtl_pkt_append_data(NSPVirtualPacket *vtl, uint32_t expected_size, const uint8_t *data, uint32_t size)
+{
+	if (vtl == nullptr || (size != 0 && data == nullptr))
+	{
+		return ERR_INVALID_PARAMETER;
+	}
+	if (!nsp_vpkt_append_size_valid(vtl->size, expected_size, size))
+	{
+		return ERR_INVALID_PACKET;
+	}
+
+	const uint32_t new_size = vtl->size + size;
+	uint8_t *new_data = (uint8_t *)g_realloc(vtl->data, (size_t)new_size + 1U);
+	if (new_data == nullptr)
+	{
+		return ERR_MALLOC;
+	}
+	if (size != 0)
+	{
+		memcpy(new_data + vtl->size, data, size);
+	}
+	new_data[new_size] = 0;
+	vtl->data = new_data;
+	vtl->size = new_size;
+
+	return 0;
 }
 
 // Session Management
@@ -542,7 +571,6 @@ int TICALL nsp_send_data(CalcHandle *handle, NSPVirtualPacket *vtl)
 int TICALL nsp_recv_data(CalcHandle* handle, NSPVirtualPacket* vtl)
 {
 	NSPRawPacket raw;
-	long offset = 0;
 	int ret = 0;
 	CalcEventData event;
 
@@ -560,8 +588,13 @@ int TICALL nsp_recv_data(CalcHandle* handle, NSPVirtualPacket* vtl)
 		memset(&raw, 0, sizeof(raw));
 
 		const uint32_t size = vtl->size;
+		if (size > NSP_VIRTUAL_PACKET_MAX_SIZE)
+		{
+			ret = ERR_INVALID_PACKET;
+		}
+		g_free(vtl->data);
 		vtl->size = 0;
-		vtl->data = (uint8_t *)g_malloc(NSP_DATA_SIZE);
+		vtl->data = ret ? nullptr : (uint8_t *)g_malloc0(1);
 
 		if (vtl->data)
 		{
@@ -575,14 +608,14 @@ int TICALL nsp_recv_data(CalcHandle* handle, NSPVirtualPacket* vtl)
 				if (raw.data_size > 0)
 				{
 					vtl->cmd = raw.data[0];
-					vtl->size += raw.data_size-1;
-
-					vtl->data = (uint8_t *)g_realloc(vtl->data, vtl->size);
-					memcpy(vtl->data + offset, &(raw.data[1]), raw.data_size-1);
-					offset += raw.data_size-1;
+					ret = nsp_vtl_pkt_append_data(vtl, size, &(raw.data[1]), raw.data_size - 1U);
+					if (ret)
+					{
+						break;
+					}
 
 					handle->updat->max1 = size ? size : vtl->size;
-					handle->updat->cnt1 += NSP_DATA_SIZE;
+					handle->updat->cnt1 = vtl->size;
 					handle->updat->pbar();
 				}
 
@@ -612,6 +645,10 @@ int TICALL nsp_recv_data(CalcHandle* handle, NSPVirtualPacket* vtl)
 					break;
 				}
 			}
+		}
+		else if (!ret)
+		{
+			ret = ERR_MALLOC;
 		}
 
 		vtl->src_addr = raw.src_addr;

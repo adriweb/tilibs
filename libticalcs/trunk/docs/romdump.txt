@@ -72,3 +72,31 @@ goes on...
 
 PC: 1234 0000 1234		unknown packet
 TI:						error: ignored => wait for next command
+
+5) Bundled dumper reply variants
+
+All bundled dumpers reply to AA55 with command 0001 and no data, and to
+0002 with command 0002 and no data. Data blocks use 0006; repeated-data
+blocks use 0007. Size and payload variants are:
+
+Implementation       Size reply  Raw block bytes  Repeated-data payload
+romdump_8x            0003 / 4    1024             LE16 count, value, value
+romdump_84p_usb       0003 / 4    1024             LE16 count, value, value
+romdump_9x            0003 / 4    4096             LE16 count, value, 00
+romdump_834pce_usb    0000 / 4    1..65535         LE16 count, value
+
+The size reply payload is always a four-byte little-endian byte count.
+The CE USB size reply uses command 0000 with four bytes of data; this is
+distinct from the zero-length "not ready" packet documented above.
+The fourth repeated-data byte is not part of the repeated value: only
+the byte immediately following the LE16 count is repeated.
+
+romdump_8x covers TI-73/82/83/83+/84+/84+CSE/85/86 over the legacy link.
+romdump_84p_usb covers TI-84+/84+T/84+CSE and TI-82 Advanced over USB.
+romdump_9x covers TI-89/89T/92/92+/Voyage 200, including 89T DirectUSB.
+romdump_834pce_usb covers TI-83PCE/84PCE and TI-82 Advanced Edition Python.
+
+The 68k dumper can also send command 0004 (no payload) for an invalid
+block address; the host reports a ROM error. CMD_NONE (FFFF) is an
+internal receive sentinel, not a reply command. The Z80 CMD_RETRY (0004)
+and CMD_NOK (0000) constants are not emitted by the bundled Z80 dumpers.
