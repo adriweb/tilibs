@@ -484,8 +484,8 @@ int TICALL ticalcs_probe_calc(CableHandle* cable, CalcModel* model)
 		memset(&calc, 0, sizeof(CalcHandle));
 		calc.model = *model = CALC_NONE;
 		calc.updat = (CalcUpdate *)&default_update;
-		calc.buffer = (uint8_t *)g_malloc(65536 + 6);
-		calc.buffer2 = (uint8_t *)g_malloc(65536 + 6);
+		calc.buffer = (uint8_t *)g_malloc(TICALCS_INTERNAL_BUFFER_SIZE);
+		calc.buffer2 = (uint8_t *)g_malloc(TICALCS_INTERNAL_BUFFER_SIZE);
 		calc.cable = cable;
 		calc.open = !0;
 		calc.event_hook = ticalcs_default_event_hook;
@@ -538,8 +538,8 @@ int TICALL ticalcs_probe_usb_calc(CableHandle* cable, CalcModel* model)
 		memset(&calc, 0, sizeof(CalcHandle));
 		calc.model = *model = CALC_NONE;
 		calc.updat = (CalcUpdate *)&default_update;
-		calc.buffer = (uint8_t *)g_malloc(65536 + 6);
-		calc.buffer2 = (uint8_t *)g_malloc(65536 + 6);
+		calc.buffer = (uint8_t *)g_malloc(TICALCS_INTERNAL_BUFFER_SIZE);
+		calc.buffer2 = (uint8_t *)g_malloc(TICALCS_INTERNAL_BUFFER_SIZE);
 		calc.cable = cable;
 		calc.open = !0;
 		calc.event_hook = ticalcs_default_event_hook;
@@ -619,8 +619,8 @@ int TICALL ticalcs_probe(CableModel c_model, CablePort c_port, CalcModel* model,
 				memset(&calc, 0, sizeof(CalcHandle));
 				calc.model = *model = CALC_NONE;
 				calc.updat = (CalcUpdate *)&default_update;
-				calc.buffer = (uint8_t *)g_malloc(65536 + 6);
-				calc.buffer2 = (uint8_t *)g_malloc(65536 + 6);
+				calc.buffer = (uint8_t *)g_malloc(TICALCS_INTERNAL_BUFFER_SIZE);
+				calc.buffer2 = (uint8_t *)g_malloc(TICALCS_INTERNAL_BUFFER_SIZE);
 				calc.cable = handle;
 				calc.open = !0;
 				calc.event_hook = ticalcs_default_event_hook;

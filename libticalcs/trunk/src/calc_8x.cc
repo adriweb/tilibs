@@ -64,7 +64,7 @@
 
 #define RECV_ACK(handle, status) ((handle->model < CALC_TI85) ? ti82_recv_ACK(handle, status) : ti85_recv_ACK(handle, status))
 #define RECV_VAR(handle, varsize, vartype, varname) ((handle->model < CALC_TI85) ? ti82_recv_VAR(handle, varsize, vartype, varname) : ti85_recv_VAR(handle, varsize, vartype, varname))
-#define RECV_XDP(handle, length, data) ((handle->model < CALC_TI85) ? ti82_recv_XDP(handle, length, data) : ti85_recv_XDP(handle, length, data))
+#define RECV_XDP(handle, length, data, capacity) ((handle->model < CALC_TI85) ? ti82_recv_XDP_sized(handle, length, data, capacity) : ti85_recv_XDP_sized(handle, length, data, capacity))
 #define RECV_SKP(handle, rej_code) ((handle->model < CALC_TI85) ? ti82_recv_SKP(handle, rej_code) : ti85_recv_SKP(handle, rej_code))
 #define RECV_ERR ti82_recv_ERR
 
@@ -192,7 +192,7 @@ static int		recv_screen_80	(CalcHandle* handle, CalcScreenCoord* sc, uint8_t** b
 		if (!ret)
 		{
 			uint16_t max_cnt;
-			ret = ti80_recv_XDP(handle, &max_cnt, (uint8_t *)handle->buffer);
+			ret = ti80_recv_XDP_sized(handle, &max_cnt, (uint8_t *)handle->buffer, TICALCS_INTERNAL_BUFFER_SIZE);
 			if (!ret)
 			{
 				int i = 0;
@@ -262,7 +262,7 @@ static int		recv_screen	(CalcHandle* handle, CalcScreenCoord* sc, uint8_t** bitm
 		if (!ret)
 		{
 			uint16_t max_cnt;
-			ret = RECV_XDP(handle, &max_cnt, *bitmap);
+			ret = RECV_XDP(handle, &max_cnt, *bitmap, 65537U);
 			if (!ret || ret == ERR_CHECKSUM) // problem with checksum
 			{
 				*bitmap = (uint8_t *)ticalcs_realloc_screen(*bitmap, (handle->model < CALC_TI85) ? TI82_COLS * TI82_ROWS / 8 : TI85_COLS * TI85_ROWS / 8);
@@ -298,7 +298,7 @@ static int		get_dirlist	(CalcHandle* handle, GNode** vars, GNode** apps)
 		ret = RECV_ACK(handle, &unused);
 		if (!ret)
 		{
-			ret = RECV_XDP(handle, &unused, (uint8_t *)handle->buffer2);
+			ret = RECV_XDP(handle, &unused, (uint8_t *)handle->buffer2, TICALCS_INTERNAL_BUFFER_SIZE);
 			if (!ret)
 			{
 				ret = SEND_ACK(handle);
@@ -428,7 +428,7 @@ static int		get_memfree	(CalcHandle* handle, uint32_t* ram, uint32_t* flash)
 		ret = RECV_ACK(handle, &unused);
 		if (!ret)
 		{
-			ret = RECV_XDP(handle, &unused, (uint8_t *)handle->buffer2);
+			ret = RECV_XDP(handle, &unused, (uint8_t *)handle->buffer2, TICALCS_INTERNAL_BUFFER_SIZE);
 			if (!ret)
 			{
 				ret = SEND_EOT(handle);
@@ -682,7 +682,7 @@ static int		recv_backup	(CalcHandle* handle, BackupContent* content)
 		ticalcs_update_pbar(handle);
 
 		content->data_part1 = (uint8_t *)tifiles_ve_alloc_data(65536U);
-		ret = RECV_XDP(handle, &content->data_length1, content->data_part1);
+		ret = RECV_XDP(handle, &content->data_length1, content->data_part1, 65536U);
 		if (!ret)
 		{
 			ret = SEND_ACK(handle);
@@ -695,7 +695,7 @@ static int		recv_backup	(CalcHandle* handle, BackupContent* content)
 		ticalcs_update_pbar(handle);
 
 		content->data_part2 = (uint8_t *)tifiles_ve_alloc_data(65536U);
-		ret = RECV_XDP(handle, &content->data_length2, content->data_part2);
+		ret = RECV_XDP(handle, &content->data_length2, content->data_part2, 65536U);
 		if (!ret)
 		{
 			ret = SEND_ACK(handle);
@@ -710,7 +710,7 @@ static int		recv_backup	(CalcHandle* handle, BackupContent* content)
 		if (content->data_length3)
 		{
 			content->data_part3 = (uint8_t *)tifiles_ve_alloc_data(65536U);
-			ret = RECV_XDP(handle, &content->data_length3, content->data_part3);
+			ret = RECV_XDP(handle, &content->data_length3, content->data_part3, 65536U);
 			if (!ret)
 			{
 				ret = SEND_ACK(handle);
@@ -734,7 +734,7 @@ static int		recv_backup	(CalcHandle* handle, BackupContent* content)
 		else
 		{
 			content->data_part4 = (uint8_t *)tifiles_ve_alloc_data(65536U);
-			ret = RECV_XDP(handle, &content->data_length4, content->data_part4);
+			ret = RECV_XDP(handle, &content->data_length4, content->data_part4, 65536U);
 			if (!ret)
 			{
 				ret = SEND_ACK(handle);
@@ -1056,7 +1056,7 @@ static int		recv_var	(CalcHandle* handle, CalcMode mode, FileContent* content, V
 		}
 
 		ve->data = (uint8_t *)tifiles_ve_alloc_data(ve->size);
-		ret = RECV_XDP(handle, &ve_size, ve->data);
+		ret = RECV_XDP(handle, &ve_size, ve->data, ve->size);
 		if (!ret)
 		{
 			ve->size = ve_size;
@@ -1124,7 +1124,7 @@ static int		recv_var_ns	(CalcHandle* handle, CalcMode mode, FileContent* content
 				ticalcs_update_label(handle);
 
 				ve->data = (uint8_t *)tifiles_ve_alloc_data(ve->size);
-				ret = RECV_XDP(handle, &ve_size, ve->data);
+				ret = RECV_XDP(handle, &ve_size, ve->data, ve->size);
 				if (!ret)
 				{
 					ve->size = ve_size;

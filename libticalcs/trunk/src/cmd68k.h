@@ -51,6 +51,7 @@ TIEXPORT3 int TICALL ti68k_send_EOT(CalcHandle* handle, uint8_t target);
 /* TI-68k family, receive functions */
 TIEXPORT3 int TICALL ti68k_recv_SKP(CalcHandle* handle, uint8_t * rej_code);
 TIEXPORT3 int TICALL ti68k_recv_XDP(CalcHandle* handle, uint16_t * length, uint8_t * data);
+TIEXPORT3 int TICALL ti68k_recv_XDP_sized(CalcHandle* handle, uint16_t * length, uint8_t * data, size_t capacity);
 TIEXPORT3 int TICALL ti68k_recv_CNT(CalcHandle *handle);
 TIEXPORT3 int TICALL ti68k_recv_EOT(CalcHandle *handle);
 
@@ -75,13 +76,16 @@ TIEXPORT3 int TICALL ti89_send_DEL(CalcHandle *handle, uint32_t varsize, uint8_t
 
 /* TI-89 family, receive functions */
 TIEXPORT3 int TICALL ti89_recv_VAR(CalcHandle *handle, uint32_t * varsize, uint8_t * vartype, char *varname);
+TIEXPORT3 int TICALL ti89_recv_VAR_sized(CalcHandle *handle, uint32_t * varsize, uint8_t * vartype, char *varname, size_t varname_capacity);
 TIEXPORT3 int TICALL ti89_recv_CTS(CalcHandle *handle);
 static inline int ti89_recv_SKP(CalcHandle* handle, uint8_t* rej_code) { return ti68k_recv_SKP(handle, rej_code); }
 static inline int ti89_recv_XDP(CalcHandle* handle, uint16_t* length, uint8_t* data) { return ti68k_recv_XDP(handle, length, data); }
+static inline int ti89_recv_XDP_sized(CalcHandle* handle, uint16_t* length, uint8_t* data, size_t capacity) { return ti68k_recv_XDP_sized(handle, length, data, capacity); }
 TIEXPORT3 int TICALL ti89_recv_ACK(CalcHandle *handle, uint16_t * status);
 static inline int ti89_recv_CNT(CalcHandle* handle) { return ti68k_recv_CNT(handle); }
 static inline int ti89_recv_EOT(CalcHandle* handle) { return ti68k_recv_EOT(handle); }
 TIEXPORT3 int TICALL ti89_recv_RTS(CalcHandle *handle, uint32_t * varsize, uint8_t * vartype, char *varname);
+TIEXPORT3 int TICALL ti89_recv_RTS_sized(CalcHandle *handle, uint32_t * varsize, uint8_t * vartype, char *varname, size_t varname_capacity);
 
 
 /* TI-92, send functions */
@@ -101,13 +105,16 @@ TIEXPORT3 int TICALL ti92_send_RTS(CalcHandle *handle, uint32_t varsize, uint8_t
 
 /* TI-92, receive functions */
 TIEXPORT3 int TICALL ti92_recv_VAR(CalcHandle *handle, uint32_t * varsize, uint8_t * vartype, char *varname);
+TIEXPORT3 int TICALL ti92_recv_VAR_sized(CalcHandle *handle, uint32_t * varsize, uint8_t * vartype, char *varname, size_t varname_capacity);
 TIEXPORT3 int TICALL ti92_recv_CTS(CalcHandle *handle);
 static inline int ti92_recv_SKP(CalcHandle* handle, uint8_t *rej_code) { return ti68k_recv_SKP(handle, rej_code); }
 static inline int ti92_recv_XDP(CalcHandle* handle, uint16_t *length, uint8_t *data) { return ti68k_recv_XDP(handle, length, data); }
+static inline int ti92_recv_XDP_sized(CalcHandle* handle, uint16_t *length, uint8_t *data, size_t capacity) { return ti68k_recv_XDP_sized(handle, length, data, capacity); }
 TIEXPORT3 int TICALL ti92_recv_ACK(CalcHandle *handle, uint16_t * status);
 static inline int ti92_recv_CNT(CalcHandle *handle) { return ti68k_recv_CNT(handle); }
 static inline int ti92_recv_EOT(CalcHandle* handle) { return ti68k_recv_EOT(handle); }
 TIEXPORT3 int TICALL ti92_recv_RTS(CalcHandle *handle, uint32_t * varsize, uint8_t * vartype, char *varname);
+TIEXPORT3 int TICALL ti92_recv_RTS_sized(CalcHandle *handle, uint32_t * varsize, uint8_t * vartype, char *varname, size_t varname_capacity);
 
 #ifdef __cplusplus
 }

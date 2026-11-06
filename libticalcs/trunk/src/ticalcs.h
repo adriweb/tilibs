@@ -1260,8 +1260,10 @@ typedef struct
 	// dbus_pkt.c
 	TIEXPORT3 int TICALL dbus_send(CalcHandle *handle, uint8_t target, uint8_t cmd, uint16_t length, uint8_t* data);
 	TIEXPORT3 int TICALL dbus_recv(CalcHandle *handle, uint8_t* host, uint8_t* cmd, uint16_t* length, uint8_t* data);
+	TIEXPORT3 int TICALL dbus_recv_sized(CalcHandle *handle, uint8_t* host, uint8_t* cmd, uint16_t* length, uint8_t* data, size_t capacity);
 	TIEXPORT3 int TICALL dbus_recv_header(CalcHandle *handle, uint8_t* host, uint8_t* cmd, uint16_t* length);
 	TIEXPORT3 int TICALL dbus_recv_data(CalcHandle *handle, uint16_t* length, uint8_t* data);
+	TIEXPORT3 int TICALL dbus_recv_data_sized(CalcHandle *handle, uint16_t* length, uint8_t* data, size_t capacity);
 
 	// dusb_rpkt.c
 	TIEXPORT3 int TICALL dusb_send(CalcHandle *handle, DUSBRawPacket* pkt);

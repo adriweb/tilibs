@@ -415,15 +415,20 @@ int TICALL ti89_send_DEL(CalcHandle* handle, uint32_t varsize, uint8_t vartype, 
 	return dbus_send(handle, ti68k_handle_to_dbus_mid(handle), DBUS_CMD_DEL, 6 + len, buffer);
 }
 
-int TICALL ti89_recv_VAR(CalcHandle* handle, uint32_t * varsize, uint8_t * vartype, char *varname)
+static int ti68k_recv_VAR_sized(CalcHandle* handle, uint32_t * varsize, uint8_t * vartype, char *varname, size_t varname_capacity, uint8_t is_92)
 {
 	uint8_t host = 0, cmd = 0;
 	uint16_t length = 0;
+	char received_name[18];
 
 	VALIDATE_HANDLE(handle);
 	VALIDATE_NONNULL(varsize);
 	VALIDATE_NONNULL(vartype);
 	VALIDATE_NONNULL(varname);
+	if (varname_capacity == 0)
+	{
+		return ERR_INVALID_PARAMETER;
+	}
 
 	uint8_t* buffer = (uint8_t*)handle->buffer;
 	const int ret = dbus_recv(handle, &host, &cmd, &length, buffer);
@@ -439,82 +444,81 @@ int TICALL ti89_recv_VAR(CalcHandle* handle, uint32_t * varsize, uint8_t * varty
 	}
 	if (cmd == DBUS_CMD_SKP)
 	{
-		return ERR_CALC_ERROR1 + err_code(buffer);
+		if (is_92)
+		{
+			return ERR_VAR_REJECTED;
+		}
+		return length >= 3 ? ERR_CALC_ERROR1 + err_code(buffer) : ERR_INVALID_PACKET;
 	}
 	if (cmd != DBUS_CMD_VAR)
 	{
 		return ERR_INVALID_CMD;
 	}
 
-	*varsize = buffer[0] | (((uint32_t)buffer[1]) << 8) | (((uint32_t)buffer[2]) << 16) | (((uint32_t)buffer[3]) << 24);
-	*vartype = buffer[4];
+	if (length < 6)
+	{
+		return ERR_INVALID_PACKET;
+	}
 	const uint8_t strl = buffer[5];
-	memcpy(varname, buffer + 6, strl);
-	varname[strl] = '\0';
-	const uint8_t flag = buffer[6 + strl];
+	if (strl > sizeof(received_name) - 1)
+	{
+		return ERR_INVALID_PACKET;
+	}
+	const uint16_t name_packet_size = (uint16_t)(6U + strl);
+	if (is_92 ? (length != name_packet_size) : (length != name_packet_size && length != name_packet_size + 1U))
+	{
+		return ERR_INVALID_PACKET;
+	}
+	if (memchr(buffer + 6, '\0', strl) != nullptr)
+	{
+		return ERR_INVALID_PACKET;
+	}
+	memcpy(received_name, buffer + 6, strl);
+	received_name[strl] = '\0';
+	const uint8_t flag = length == name_packet_size + 1U ? buffer[name_packet_size] : 0;
 
-	if ((length != (6 + strlen(varname))) && (length != (7 + strlen(varname))))
+	if (!is_92)
+	{
+		const char* varname_nofldname = tifiles_get_varname(received_name);
+		if (varname_nofldname != received_name)
+		{
+			// This variable name contains a folder name. Erase it.
+			ticalcs_info(" TI->PC: VAR: the variable name contains a folder name, stripping it.");
+			memmove(received_name, varname_nofldname, strlen(varname_nofldname) + 1);
+		}
+	}
+	const size_t final_length = strlen(received_name);
+	if (final_length >= varname_capacity)
 	{
 		return ERR_INVALID_PACKET;
 	}
 
+	*varsize = buffer[0] | (((uint32_t)buffer[1]) << 8) | (((uint32_t)buffer[2]) << 16) | (((uint32_t)buffer[3]) << 24);
+	*vartype = buffer[4];
+	memcpy(varname, received_name, final_length + 1);
 	ticalcs_info(" TI->PC: VAR (size=0x%08X=%i, id=%02X, name=%s, flag=%i)", *varsize, *varsize, *vartype, varname, flag);
-	const char* varname_nofldname = tifiles_get_varname(varname);
-	if (varname_nofldname != varname)
-	{
-		// This variable name contains a folder name. Erase it.
-		ticalcs_info(" TI->PC: VAR: the variable name contains a folder name, stripping it.");
-		memmove(varname, varname_nofldname, strlen(varname_nofldname)+1);
-	}
 
 	return 0;
 }
 
+int TICALL ti89_recv_VAR_sized(CalcHandle* handle, uint32_t * varsize, uint8_t * vartype, char *varname, size_t varname_capacity)
+{
+	return ti68k_recv_VAR_sized(handle, varsize, vartype, varname, varname_capacity, 0);
+}
+
+int TICALL ti89_recv_VAR(CalcHandle* handle, uint32_t * varsize, uint8_t * vartype, char *varname)
+{
+	return ti89_recv_VAR_sized(handle, varsize, vartype, varname, 18);
+}
+
+int TICALL ti92_recv_VAR_sized(CalcHandle* handle, uint32_t * varsize, uint8_t * vartype, char *varname, size_t varname_capacity)
+{
+	return ti68k_recv_VAR_sized(handle, varsize, vartype, varname, varname_capacity, 1);
+}
+
 int TICALL ti92_recv_VAR(CalcHandle* handle, uint32_t * varsize, uint8_t * vartype, char *varname)
 {
-	uint8_t host = 0, cmd = 0;
-	uint16_t length = 0;
-
-	VALIDATE_HANDLE(handle);
-	VALIDATE_NONNULL(varsize);
-	VALIDATE_NONNULL(vartype);
-	VALIDATE_NONNULL(varname);
-
-	uint8_t* buffer = (uint8_t*)handle->buffer;
-	const int ret = dbus_recv(handle, &host, &cmd, &length, buffer);
-	if (ret)
-	{
-		return ret;
-	}
-
-	if (cmd == DBUS_CMD_EOT)
-	{
-		ticalcs_info(" TI->PC: EOT");
-		return ERR_EOT;		// not really an error
-	}
-	if (cmd == DBUS_CMD_SKP)
-	{
-		return ERR_VAR_REJECTED;
-	}
-	if (cmd != DBUS_CMD_VAR)
-	{
-		return ERR_INVALID_CMD;
-	}
-
-	*varsize = buffer[0] | (((uint32_t)buffer[1]) << 8) | (((uint32_t)buffer[2]) << 16) | (((uint32_t)buffer[3]) << 24);
-	*vartype = buffer[4];
-	const uint8_t strl = buffer[5];
-	memcpy(varname, buffer + 6, strl);
-	varname[strl] = '\0';
-
-	if (length != (6 + strlen(varname)))
-	{
-		return ERR_INVALID_PACKET;
-	}
-
-	ticalcs_info(" TI->PC: VAR (size=0x%08X=%i, id=%02X, name=%s)", *varsize, *varsize, *vartype, varname);
-
-	return 0;
+	return ti92_recv_VAR_sized(handle, varsize, vartype, varname, 18);
 }
 
 static int ti68k_recv_CTS(CalcHandle* handle, uint8_t is_92)
@@ -533,7 +537,7 @@ static int ti68k_recv_CTS(CalcHandle* handle, uint8_t is_92)
 
 	if (cmd == DBUS_CMD_SKP)
 	{
-		return is_92 ? ERR_VAR_REJECTED : ERR_CALC_ERROR1 + err_code(buffer);
+		return is_92 ? ERR_VAR_REJECTED : (length >= 3 ? ERR_CALC_ERROR1 + err_code(buffer) : ERR_INVALID_PACKET);
 	}
 	else if (cmd != DBUS_CMD_CTS)
 	{
@@ -585,6 +589,10 @@ int TICALL ti68k_recv_SKP(CalcHandle* handle, uint8_t * rej_code)
 			}
 			else
 			{
+				if (length < 1)
+				{
+					return ERR_INVALID_PACKET;
+				}
 				ticalcs_info(" TI->PC: SKP (rejection code = %i)", buffer[0]);
 				if (rej_code != nullptr)
 				{
@@ -597,7 +605,7 @@ int TICALL ti68k_recv_SKP(CalcHandle* handle, uint8_t * rej_code)
 	return retval;
 }
 
-int TICALL ti68k_recv_XDP(CalcHandle* handle, uint16_t * length, uint8_t * data)
+int TICALL ti68k_recv_XDP_sized(CalcHandle* handle, uint16_t * length, uint8_t * data, size_t capacity)
 {
 	uint8_t host = 0, cmd = 0;
 	uint16_t len = 0;
@@ -605,7 +613,7 @@ int TICALL ti68k_recv_XDP(CalcHandle* handle, uint16_t * length, uint8_t * data)
 	VALIDATE_HANDLE(handle);
 	VALIDATE_NONNULL(length);
 
-	const int err = dbus_recv(handle, &host, &cmd, &len, data);
+	const int err = dbus_recv_sized(handle, &host, &cmd, &len, data, capacity);
 	*length = len;
 
 	if (cmd != DBUS_CMD_XDP)
@@ -619,6 +627,11 @@ int TICALL ti68k_recv_XDP(CalcHandle* handle, uint16_t * length, uint8_t * data)
 	}
 
 	return err;
+}
+
+int TICALL ti68k_recv_XDP(CalcHandle* handle, uint16_t * length, uint8_t * data)
+{
+	return ti68k_recv_XDP_sized(handle, length, data, UINT16_MAX);
 }
 
 /* ACK: receive acknowledge
@@ -642,7 +655,7 @@ static int ti68k_recv_ACK(CalcHandle* handle, uint16_t * status, uint8_t is_92)
 
 	if (!is_92 && cmd == DBUS_CMD_SKP)
 	{
-		return ERR_CALC_ERROR1 + err_code(buffer);
+		return length >= 3 ? ERR_CALC_ERROR1 + err_code(buffer) : ERR_INVALID_PACKET;
 	}
 
 	if (status != nullptr)
@@ -725,15 +738,20 @@ int TICALL ti68k_recv_EOT(CalcHandle* handle)
 	return 0;
 }
 
-static int ti68k_recv_RTS(CalcHandle* handle, uint32_t * varsize, uint8_t * vartype, char *varname, uint8_t is_92)
+static int ti68k_recv_RTS_sized(CalcHandle* handle, uint32_t * varsize, uint8_t * vartype, char *varname, size_t varname_capacity, uint8_t is_92)
 {
 	uint8_t host = 0, cmd = 0;
 	uint16_t length = 0;
+	char received_name[18];
 
 	VALIDATE_HANDLE(handle);
 	VALIDATE_NONNULL(varsize);
 	VALIDATE_NONNULL(vartype);
 	VALIDATE_NONNULL(varname);
+	if (varname_capacity == 0)
+	{
+		return ERR_INVALID_PARAMETER;
+	}
 
 	uint8_t* buffer = (uint8_t*)handle->buffer;
 	const int ret = dbus_recv(handle, &host, &cmd, &length, buffer);
@@ -748,24 +766,32 @@ static int ti68k_recv_RTS(CalcHandle* handle, uint32_t * varsize, uint8_t * vart
 	}
 	else if (cmd == DBUS_CMD_SKP)
 	{
-		return is_92 ? ERR_VAR_REJECTED : ERR_CALC_ERROR1 + err_code(buffer);
+		return is_92 ? ERR_VAR_REJECTED : (length >= 3 ? ERR_CALC_ERROR1 + err_code(buffer) : ERR_INVALID_PACKET);
 	}
 	else if (cmd != DBUS_CMD_VAR)
 	{
 		return ERR_INVALID_CMD;
 	}
 
-	*varsize = buffer[0] | (((uint32_t)buffer[1]) << 8) | (((uint32_t)buffer[2]) << 16) | (((uint32_t)buffer[3]) << 24);
-	*vartype = buffer[4];
+	if (length < 6)
+	{
+		return ERR_INVALID_PACKET;
+	}
 	const uint8_t strl = buffer[5];
-	memcpy(varname, buffer + 6, strl);
-	varname[strl] = '\0';
-
-	if (length != (6 + strlen(varname)))
+	if (strl > sizeof(received_name) - 1 || length != 6U + strl || memchr(buffer + 6, '\0', strl) != nullptr)
+	{
+		return ERR_INVALID_PACKET;
+	}
+	memcpy(received_name, buffer + 6, strl);
+	received_name[strl] = '\0';
+	if ((size_t)strl >= varname_capacity)
 	{
 		return ERR_INVALID_PACKET;
 	}
 
+	*varsize = buffer[0] | (((uint32_t)buffer[1]) << 8) | (((uint32_t)buffer[2]) << 16) | (((uint32_t)buffer[3]) << 24);
+	*vartype = buffer[4];
+	memcpy(varname, received_name, (size_t)strl + 1);
 	ticalcs_info(" TI->PC: RTS (size=0x%08X=%i, id=%02X, name=%s)", *varsize, *varsize, *vartype, varname);
 
 	return 0;
@@ -773,10 +799,20 @@ static int ti68k_recv_RTS(CalcHandle* handle, uint32_t * varsize, uint8_t * vart
 
 int TICALL ti89_recv_RTS(CalcHandle* handle, uint32_t * varsize, uint8_t * vartype, char *varname)
 {
-	return ti68k_recv_RTS(handle, varsize, vartype, varname, 0);
+	return ti89_recv_RTS_sized(handle, varsize, vartype, varname, 18);
+}
+
+int TICALL ti89_recv_RTS_sized(CalcHandle* handle, uint32_t * varsize, uint8_t * vartype, char *varname, size_t varname_capacity)
+{
+	return ti68k_recv_RTS_sized(handle, varsize, vartype, varname, varname_capacity, 0);
 }
 
 int TICALL ti92_recv_RTS(CalcHandle* handle, uint32_t * varsize, uint8_t * vartype, char *varname)
 {
-	return ti68k_recv_RTS(handle, varsize, vartype, varname, 1);
+	return ti92_recv_RTS_sized(handle, varsize, vartype, varname, 18);
+}
+
+int TICALL ti92_recv_RTS_sized(CalcHandle* handle, uint32_t * varsize, uint8_t * vartype, char *varname, size_t varname_capacity)
+{
+	return ti68k_recv_RTS_sized(handle, varsize, vartype, varname, varname_capacity, 1);
 }

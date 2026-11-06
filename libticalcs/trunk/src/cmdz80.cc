@@ -1140,6 +1140,10 @@ int TICALL tiz80_recv_SKP(CalcHandle* handle, uint8_t * rej_code)
 	{
 		return ERR_INVALID_CMD;
 	}
+	if (length < 1)
+	{
+		return ERR_INVALID_PACKET;
+	}
 
 	*rej_code = buffer[0];
 	ticalcs_info(" TI->PC: SKP (rejection code = %d)", *rej_code);
@@ -1147,13 +1151,13 @@ int TICALL tiz80_recv_SKP(CalcHandle* handle, uint8_t * rej_code)
 	return 0;
 }
 
-static int tiz80_recv_XDP(CalcHandle* handle, uint16_t * length, uint8_t * data, uint8_t is_73)
+static int tiz80_recv_XDP_sized(CalcHandle* handle, uint16_t * length, uint8_t * data, size_t capacity, uint8_t is_73)
 {
 	uint8_t host = 0, cmd = 0;
 
 	VALIDATE_HANDLE(handle);
 
-	const int ret = dbus_recv(handle, &host, &cmd, length, data);
+	const int ret = dbus_recv_sized(handle, &host, &cmd, length, data, capacity);
 	if (ret)
 	{
 		return ret;
@@ -1176,29 +1180,55 @@ static int tiz80_recv_XDP(CalcHandle* handle, uint16_t * length, uint8_t * data,
 
 int TICALL ti73_recv_XDP(CalcHandle* handle, uint16_t * length, uint8_t * data)
 {
-	return tiz80_recv_XDP(handle, length, data, 1);
+	return ti73_recv_XDP_sized(handle, length, data, UINT16_MAX);
+}
+
+int TICALL ti73_recv_XDP_sized(CalcHandle* handle, uint16_t * length, uint8_t * data, size_t capacity)
+{
+	return tiz80_recv_XDP_sized(handle, length, data, capacity, 1);
 }
 
 int TICALL ti82_recv_XDP(CalcHandle* handle, uint16_t * length, uint8_t * data)
 {
-	return tiz80_recv_XDP(handle, length, data, 0);
+	return ti82_recv_XDP_sized(handle, length, data, UINT16_MAX);
+}
+
+int TICALL ti82_recv_XDP_sized(CalcHandle* handle, uint16_t * length, uint8_t * data, size_t capacity)
+{
+	return tiz80_recv_XDP_sized(handle, length, data, capacity, 0);
 }
 
 int TICALL ti85_recv_XDP(CalcHandle* handle, uint16_t * length, uint8_t * data)
 {
-	return tiz80_recv_XDP(handle, length, data, 0);
+	return ti85_recv_XDP_sized(handle, length, data, UINT16_MAX);
+}
+
+int TICALL ti85_recv_XDP_sized(CalcHandle* handle, uint16_t * length, uint8_t * data, size_t capacity)
+{
+	return tiz80_recv_XDP_sized(handle, length, data, capacity, 0);
 }
 
 int TICALL ti80_recv_XDP(CalcHandle* handle, uint16_t * length, uint8_t * data)
 {
-	return tiz80_recv_XDP(handle, length, data, 0);
+	return ti80_recv_XDP_sized(handle, length, data, UINT16_MAX);
+}
+
+int TICALL ti80_recv_XDP_sized(CalcHandle* handle, uint16_t * length, uint8_t * data, size_t capacity)
+{
+	return tiz80_recv_XDP_sized(handle, length, data, capacity, 0);
 }
 
 int TICALL ti73_recv_SID(CalcHandle* handle, uint16_t * length, uint8_t * data)
+
+{
+	return ti73_recv_SID_sized(handle, length, data, UINT16_MAX);
+}
+
+int TICALL ti73_recv_SID_sized(CalcHandle* handle, uint16_t * length, uint8_t * data, size_t capacity)
 {
 	uint8_t host = 0, cmd = 0;
 
-	const int ret = dbus_recv(handle, &host, &cmd, length, data);
+	const int ret = dbus_recv_sized(handle, &host, &cmd, length, data, capacity);
 	if (ret)
 	{
 		return ret;

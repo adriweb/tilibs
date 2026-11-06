@@ -737,13 +737,17 @@ int TICALL dusb_recv_data_varsize(CalcHandle* handle, DUSBVirtualPacket* vtl, ui
 {
 	DUSBRawPacket raw;
 	int i = 0;
-	unsigned long alloc_size;
+	size_t alloc_size;
 	int ret = 0;
 	CalcEventData event;
 
 	VALIDATE_HANDLE(handle);
 	VALIDATE_NONNULL(vtl);
 	VALIDATE_NONNULL(declared_size);
+	if (est_size > DUSB_VIRTUAL_PACKET_MAX_SIZE)
+	{
+		return ERR_INVALID_PARAMETER;
+	}
 
 	memset(&raw, 0, sizeof(raw));
 
@@ -788,6 +792,12 @@ int TICALL dusb_recv_data_varsize(CalcHandle* handle, DUSBVirtualPacket* vtl, ui
 				}
 
 				*declared_size = (((uint32_t)raw.data[0]) << 24) | (((uint32_t)raw.data[1]) << 16) | (((uint32_t)raw.data[2]) << 8) | (((uint32_t)raw.data[3]) << 0);
+				if (*declared_size > DUSB_VIRTUAL_PACKET_MAX_SIZE)
+				{
+					ticalcs_critical("Virtual packet is too large: %u bytes", *declared_size);
+					ret = ERR_INVALID_PACKET;
+					break;
+				}
 				alloc_size = (*declared_size > 10000 ? 10000 : *declared_size);
 
 				if (alloc_size < raw.size - DUSB_DH_SIZE)
@@ -796,8 +806,14 @@ int TICALL dusb_recv_data_varsize(CalcHandle* handle, DUSBVirtualPacket* vtl, ui
 				}
 
 				vtl->type = (((uint16_t)raw.data[4]) << 8) | (raw.data[5] << 0);
-				vtl->data = (uint8_t *)g_realloc(vtl->data, alloc_size);
-				if (vtl->data != nullptr)
+				uint8_t *new_data = (uint8_t *)g_realloc(vtl->data, alloc_size);
+				if (new_data == nullptr && alloc_size != 0)
+				{
+					ret = ERR_MALLOC;
+					break;
+				}
+				vtl->data = new_data;
+				if (raw.size > DUSB_DH_SIZE)
 				{
 					memcpy(vtl->data, &raw.data[DUSB_DH_SIZE], raw.size - DUSB_DH_SIZE);
 				}
@@ -812,7 +828,7 @@ int TICALL dusb_recv_data_varsize(CalcHandle* handle, DUSBVirtualPacket* vtl, ui
 #elif (VPKT_DBG == 1)
 				ticalcs_info("  TI->PC: %s", dusb_vpkt_type2name(vtl->type));
 #endif
-				if (vtl->data != nullptr && vtl->type == 0xEE00)
+				if (vtl->size >= 2 && vtl->data != nullptr && vtl->type == DUSB_VPKT_ERROR)
 				{
 					ticalcs_info("    Error Code : %04x\n", (((int)vtl->data[0]) << 8) | vtl->data[1]);
 				}
@@ -821,21 +837,36 @@ int TICALL dusb_recv_data_varsize(CalcHandle* handle, DUSBVirtualPacket* vtl, ui
 			{
 				// others have more data
 
-				if (vtl->size + raw.size > alloc_size)
+				if (!dusb_vpkt_append_size_valid(vtl->size, raw.size))
 				{
-					if (vtl->size + raw.size <= est_size)
+					ticalcs_critical("Virtual packet exceeds the receive limit");
+					ret = ERR_INVALID_PACKET;
+					break;
+				}
+
+				const uint32_t new_size = vtl->size + raw.size;
+				if (new_size > alloc_size)
+				{
+					if (new_size <= est_size)
 					{
 						alloc_size = est_size;
 					}
 					else
 					{
-						alloc_size = (vtl->size + raw.size) * 2;
+						alloc_size = new_size <= DUSB_VIRTUAL_PACKET_MAX_SIZE / 2U
+							? new_size * 2U : DUSB_VIRTUAL_PACKET_MAX_SIZE;
 					}
-					vtl->data = (uint8_t *)g_realloc(vtl->data, alloc_size);
+					uint8_t *new_data = (uint8_t *)g_realloc(vtl->data, alloc_size);
+					if (new_data == nullptr)
+					{
+						ret = ERR_MALLOC;
+						break;
+					}
+					vtl->data = new_data;
 				}
 
 				memcpy(vtl->data + vtl->size, raw.data, raw.size);
-				vtl->size += raw.size;
+				vtl->size = new_size;
 #if (VPKT_DBG == 2)
 				ticalcs_info("  TI->PC: %s", raw.type == DUSB_RPKT_VIRT_DATA_LAST ? "Virtual Packet Data Final" : "Virtual Packet Data with Continuation");
 #endif
