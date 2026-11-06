@@ -258,6 +258,27 @@ static void check_dbus_flash_gc()
 	}
 }
 
+static void check_dusb_cancellation()
+{
+	for (uint16_t raw : {0xcccc, 0xcccd}) {
+		for (bool virtual_packet : {false, true}) {
+			MockCalculator calc(CALC_TI84PCE_USB);
+			if (virtual_packet) dusb_packet(DUSB_VPKT_ERROR, {(uint8_t)(raw >> 8), (uint8_t)raw});
+			else incoming = {0, 0, 0, 2, 5, (uint8_t)(raw >> 8), (uint8_t)raw};
+			const int result = virtual_packet ? dusb_cmd_r_data_ack(calc.handle) : dusb_recv_acknowledge(calc.handle);
+			uint16_t decoded = 0;
+			CHECK(ticalcs_error_get_raw_protocol_code(result, &decoded) == 0 && decoded == raw);
+			CHECK(calc.handle->priv.dusb_needs_mode_set == 1);
+			CHECK(received == incoming.size());
+		}
+	}
+	for (uint16_t raw : {0xe000, 0xe001, 0x0100}) {
+		MockCalculator calc(CALC_TI84PCE_USB);
+		incoming = {0, 0, 0, 2, 5, (uint8_t)(raw >> 8), (uint8_t)raw};
+		CHECK(dusb_recv_acknowledge(calc.handle) == (raw == 0xe000 ? 0 : ERR_INVALID_PACKET));
+	}
+}
+
 // Independent packet framing expectations from the TI link guide.
 static void append_wire_packet(std::vector<uint8_t> &wire, uint8_t mid, uint8_t command,
                                const std::vector<uint8_t> &payload = {})
@@ -931,6 +952,7 @@ int main(int argc, char **argv)
 	CHECK(ticalcs_library_init() == 1);
 	check_dusb_gc_waits();
 	check_dusb_greet_recovery();
+	check_dusb_cancellation();
 	check_dbus_flash_gc();
 	check_commands();
 	check_send_backup_models();
