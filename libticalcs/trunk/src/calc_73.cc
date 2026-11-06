@@ -49,6 +49,20 @@
 #include "romdump.h"
 #include "keys83p.h"
 
+// TI's Flash sender allows six minutes for the calculator to erase/compact
+// its archive. Restore the ordinary packet deadline on every return path.
+struct FlashTimeout
+{
+	CableHandle *cable;
+	unsigned int timeout;
+	FlashTimeout(CalcHandle *handle, bool extend = true)
+	    : cable(handle->cable), timeout(ticables_get_timeout(cable))
+	{
+		if (extend && timeout < 3600) ticables_options_set_timeout(cable, 3600);
+	}
+	~FlashTimeout() { ticables_options_set_timeout(cable, timeout); }
+};
+
 #define SEND_RDY ti73_send_RDY
 #define SEND_KEY ti73_send_KEY
 #define SEND_SCR ti73_send_SCR
@@ -629,6 +643,12 @@ static int		send_var	(CalcHandle* handle, CalcMode mode, FileContent* content)
 	int ret = 0;
 	uint8_t rej_code;
 	uint16_t status;
+	bool archived = false;
+	for (unsigned int i = 0; i < content->num_entries; i++)
+	{
+		if (content->entries[i] && content->entries[i]->attr == ATTRB_ARCHIVED) archived = true;
+	}
+	FlashTimeout timeout(handle, archived);
 
 	handle->updat->cnt2 = 0;
 	handle->updat->max2 = content->num_entries;
@@ -858,6 +878,7 @@ static int		send_flash	(CalcHandle* handle, FlashContent* content)
 
 	ticalcs_info(_("FLASH name: \"%s\""), ptr->name);
 	ticalcs_info(_("FLASH size: %u bytes."), ptr->data_length);
+	FlashTimeout timeout(handle);
 
 	ticonv_varname_to_utf8_sn(handle->model, ptr->name, handle->updat->text, sizeof(handle->updat->text), ptr->data_type);
 	ticalcs_update_label(handle);
@@ -905,7 +926,7 @@ static int		send_flash	(CalcHandle* handle, FlashContent* content)
 					ret = SEND_XDP(handle, size, data);
 					if (!ret)
 					{
-						ret = RECV_ACK(handle, nullptr);
+						ret = ptr->data_type == TI83p_APPL ? ti73_recv_flash_ack(handle) : RECV_ACK(handle, nullptr);
 						if (!ret)
 						{
 							handle->updat->cnt2 += size;

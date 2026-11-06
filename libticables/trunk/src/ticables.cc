@@ -27,6 +27,9 @@
 #include <stdlib.h>
 #include <string.h>
 #include <errno.h>
+#ifdef __EMSCRIPTEN__
+#include <emscripten.h>
+#endif
 #if defined(__WIN32__)
 #include <windows.h>
 #endif
@@ -407,6 +410,11 @@ unsigned int TICALL ticables_options_set_timeout(CableHandle* handle, unsigned i
 		const unsigned int old_timeout = handle->timeout;
 
 		handle->timeout = timeout;
+#ifdef __EMSCRIPTEN__
+		// Protocol WAIT/Flash GC can extend this from inside libticalcs.
+		// WebUSB's own deadline must follow the native deadline too.
+		EM_ASM({ Module.__cableTimeoutMs = $0; }, timeout * 100);
+#endif
 		const CableFncts* cable = handle->cable;
 
 		if(!handle->open)

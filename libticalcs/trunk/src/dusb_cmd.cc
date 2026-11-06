@@ -1220,30 +1220,48 @@ int dusb_dissect_cmd_data(CalcModel model, FILE *f, const uint8_t * data, uint32
 
 /////////////----------------
 
-#define CATCH_DELAY() CATCH_DELAY_VARSIZE(NULL, 0)
-
-#define CATCH_DELAY_VARSIZE(ds, es)                   \
-	if (pkt->type == DUSB_VPKT_DELAY_ACK) \
-	{ \
-		uint32_t delay = (((uint32_t)pkt->data[0]) << 24) | (((uint32_t)pkt->data[1]) << 16) | (((uint32_t)pkt->data[2]) << 8) | (pkt->data[3] << 0); \
-		ticalcs_info("    delay = %u", delay); \
-		if (delay > 400000) \
-		{ \
-			delay = 400000; \
-			ticalcs_info("    (absurdly high delay, clamping to a more reasonable value)"); \
-		} \
-\
-		PAUSE(delay/1000); \
-\
-		dusb_vtl_pkt_del(handle, pkt); \
-		pkt = dusb_vtl_pkt_new_ex(handle, 0, 0, NULL); \
-\
-		retval = (ds == NULL ? dusb_recv_data(handle, pkt) : dusb_recv_data_varsize(handle, pkt, ds, es)); \
-		if (retval) \
-		{ \
-			goto end; \
-		} \
+// WAIT carries a big-endian timeout in milliseconds. TI Connect CE extends
+// the next receive deadline and keeps receiving, including further WAITs.
+// Sleeping here both delays a prompt ACK and leaves a long Flash GC subject
+// to the ordinary cable timeout.
+static int dusb_wait_ack(CalcHandle *handle, DUSBVirtualPacket *&pkt, uint32_t *declared_size, uint32_t expected_size)
+{
+	if (pkt->type != DUSB_VPKT_DELAY_ACK) return 0;
+	struct RestoreTimeout {
+		CableHandle *cable;
+		unsigned int timeout;
+		~RestoreTimeout() { ticables_options_set_timeout(cable, timeout); }
+	} restore{handle->cable, ticables_get_timeout(handle->cable)};
+	const gint64 deadline = g_get_monotonic_time() + G_GINT64_CONSTANT(400000000);
+	unsigned int waits = 0;
+	while (pkt->type == DUSB_VPKT_DELAY_ACK)
+	{
+		if (pkt->size != 4) return ERR_INVALID_PACKET;
+		if (ticalcs_update_canceled(handle)) return ERR_ABORT;
+		const gint64 remaining_ms = (deadline - g_get_monotonic_time()) / 1000;
+		if (remaining_ms <= 0 || ++waits > 1024) return ERROR_READ_TIMEOUT;
+		uint32_t delay = (((uint32_t)pkt->data[0]) << 24) | (((uint32_t)pkt->data[1]) << 16)
+		               | (((uint32_t)pkt->data[2]) << 8) | pkt->data[3];
+		if (delay > (uint32_t)remaining_ms) delay = (uint32_t)remaining_ms;
+		ticalcs_info("    waiting for calculator, timeout = %u ms", delay);
+		const unsigned int timeout = (delay + 99) / 100;
+		ticables_options_set_timeout(handle->cable, timeout > restore.timeout ? timeout : restore.timeout);
+		ticalcs_update_refresh(handle);
+		dusb_vtl_pkt_del(handle, pkt);
+		pkt = dusb_vtl_pkt_new_ex(handle, 0, 0, nullptr);
+		const int ret = declared_size == nullptr ? dusb_recv_data(handle, pkt)
+		    : dusb_recv_data_varsize(handle, pkt, declared_size, expected_size);
+		if (ret) return ret;
 	}
+	return 0;
+}
+
+#define CATCH_DELAY() CATCH_DELAY_VARSIZE(nullptr, 0)
+#define CATCH_DELAY_VARSIZE(ds, es) \
+	do { \
+		retval = dusb_wait_ack(handle, pkt, ds, es); \
+		if (retval) goto end; \
+	} while (0)
 
 // 0x0001: set mode or ping
 int TICALL dusb_cmd_s_mode_set(CalcHandle *handle, const DUSBModeSet mode)
