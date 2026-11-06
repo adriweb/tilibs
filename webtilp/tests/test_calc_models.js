@@ -45,6 +45,7 @@ const context = {
     isGrayLinkSerialDevice: () => false,
     bindSerialPortToModule() {}, log() {}, updateDeviceModelDisplay() {},
     installTiUsbTransport: () => null,
+    bindWebUsbDeviceSelection() {},
     hasSilverlinkConnected: () => false,
     deviceMatches: (left, right) => left === right
 };
@@ -117,6 +118,7 @@ async function main() {
     context.getAuthorizedEvoSerialDevice = async () => serialEvo;
     for (const model of evoModels) {
         context.state.settings = { calcModel: String(model), cableModel: 'auto' };
+        context.state.authorizedDevice = null;
         assert.equal(await context.authorizeDevice(), serialEvo, 'manual Evo selection prefers the authorized Evo');
     }
     context.navigator.usb = undefined;

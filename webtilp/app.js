@@ -40,6 +40,37 @@ const TI_USB_DEVICES = [
 ];
 const TI_USB_PRODUCT_IDS = new Set(TI_USB_DEVICES.map(device => device.productId));
 
+// Keep discovery unfiltered, while libusb's navigator.usb.getDevices() sees
+// only the calculator selected for this session. Native probing otherwise
+// opens PORT_1, regardless of the device chosen in the browser's picker.
+const webUsbSelections = new WeakMap();
+const evoSerialPortsByUsb = new WeakMap();
+async function getAuthorizedWebUsbDevices() {
+    const usb = navigator.usb;
+    if (!usb) return [];
+    const selection = webUsbSelections.get(usb);
+    return selection ? selection.getDevices() : usb.getDevices();
+}
+
+function bindWebUsbDeviceSelection(device) {
+    const usb = navigator.usb;
+    if (!usb) return;
+    let selection = webUsbSelections.get(usb);
+    if (!selection) {
+        selection = { getDevices: usb.getDevices.bind(usb), device: null };
+        webUsbSelections.set(usb, selection);
+        usb.getDevices = async () => {
+            const selected = selection.device;
+            const devices = await selection.getDevices();
+            // A disconnected/replaced selection must never fall through to
+            // another permitted calculator, even during an in-flight probe.
+            if (selected !== selection.device) return [];
+            return selected ? devices.filter(candidate => candidate === selected) : devices;
+        };
+    }
+    selection.device = device || null;
+}
+
 function getWebUsbDeviceFamily(device) {
     if (isHPPrimeDevice(device)) {
         return DEVICE_FAMILY_HP_PRIME;
@@ -90,7 +121,7 @@ async function getAuthorizedSupportedWebUsbDevices() {
         return [];
     }
     try {
-        return (await navigator.usb.getDevices()).filter(device =>
+        return (await getAuthorizedWebUsbDevices()).filter(device =>
             getWebUsbDeviceFamily(device) !== null
         );
     } catch (error) {
@@ -223,8 +254,7 @@ async function getAuthorizedNumWorksDevices() {
     if (!navigator.usb) {
         return [];
     }
-    const Backend = getNumWorksBackendClass();
-    return Backend.getAuthorizedDevices();
+    return (await getAuthorizedWebUsbDevices()).filter(isNumWorksDevice);
 }
 
 /**
@@ -274,8 +304,8 @@ async function getAuthorizedDevices() {
     }
 
     try {
-        const devices = await navigator.usb.getDevices();
-        const tiDevices = devices.filter(device => device.vendorId === TI_VENDOR_ID);
+        const devices = await getAuthorizedWebUsbDevices();
+        const tiDevices = devices.filter(device => getWebUsbDeviceFamily(device) === DEVICE_FAMILY_TI);
 
         console.log("Found", tiDevices.length, "authorized TI device(s)");
         tiDevices.forEach((device, index) => {
@@ -310,6 +340,7 @@ function serialPortToDevice(port, options = {}) {
         transport: 'serial',
         serialKind,
         serialPort: port,
+        usbDevice,
         vendorId: resolvedVendorId,
         productId: resolvedProductId,
         productName: usbDevice?.productName || productName,
@@ -348,7 +379,8 @@ async function requestTIEvoSerialDevice(usbDevice = null) {
         const port = await navigator.serial.requestPort({
             filters: [{ usbVendorId: TI_VENDOR_ID, usbProductId: PID_TI84_EVO_SERIAL }]
         });
-        return serialPortToDevice(port, { serialKind: SERIAL_KIND_EVO, productName: 'TI-83/84 Evo' });
+        if (usbDevice) evoSerialPortsByUsb.set(usbDevice, port);
+        return serialPortToDevice(port, { usbDevice, serialKind: SERIAL_KIND_EVO, productName: 'TI-83/84 Evo' });
     } catch (error) {
         if (usbDevice && error?.name === 'SecurityError'
             && /user gesture|user activation/i.test(error.message)) {
@@ -367,7 +399,7 @@ async function requestTIEvoSerialDevice(usbDevice = null) {
 
 async function getAuthorizedSerialDevices() {
     if (await shouldUseEvoWebUsbSerial()) {
-        const devices = await navigator.usb.getDevices();
+        const devices = await getAuthorizedWebUsbDevices();
         return devices.filter(isEvoUsbDevice).map(evoWebUsbSerialDevice);
     }
     if (!navigator.serial) {
@@ -389,12 +421,16 @@ async function getAuthorizedEvoSerialDevice(usbDevice = null) {
         return evoWebUsbSerialDevice(usbDevice);
     }
     const serialDevices = await getAuthorizedSerialDevices();
-    if (!serialDevices || !serialDevices.length) {
+    const mappedPort = usbDevice && evoSerialPortsByUsb.get(usbDevice);
+    const mappedDevice = mappedPort && serialDevices?.find(device => device.serialPort === mappedPort);
+    if (mappedDevice) return serialPortToDevice(mappedPort, { usbDevice, serialKind: SERIAL_KIND_EVO });
+    if (!serialDevices || serialDevices.length !== 1) {
         return null;
     }
     if (!usbDevice) {
         return serialDevices[0];
     }
+    if ((await getAuthorizedWebUsbDevices()).filter(isEvoUsbDevice).length > 1) return null;
     return serialPortToDevice(serialDevices[0].serialPort, { usbDevice, serialKind: SERIAL_KIND_EVO, productName: 'TI-83/84 Evo' });
 }
 
@@ -3978,6 +4014,7 @@ async function applyWebUsbDeviceCableHint(module, device) {
     if (!device || !module) {
         return;
     }
+    bindWebUsbDeviceSelection(isSerialDevice(device) ? device.usbDevice : device);
     const transport = installTiUsbTransport(device);
     if (transport) {
         if (transport.needsRecovery) await transport.recover();
@@ -4121,16 +4158,16 @@ function deviceMatches(a, b) {
     if (!a || !b) {
         return false;
     }
+    if (a === b) return true;
     if (isSerialDevice(a) || isSerialDevice(b)) {
         return isSerialDevice(a)
             && isSerialDevice(b)
             && a.serialKind === b.serialKind
-            && a.vendorId === b.vendorId
-            && a.productId === b.productId;
+            && a.serialPort === b.serialPort;
     }
     return a.vendorId === b.vendorId
         && a.productId === b.productId
-        && (a.productName || '') === (b.productName || '');
+        && Boolean(a.serialNumber) && a.serialNumber === b.serialNumber;
 }
 
 function getEvoCalcModelForDevice(device) {
@@ -5382,6 +5419,11 @@ async function authorizeDevice(forcePrompt = false, selectedUsbDevice = null) {
         updateDeviceModelDisplay();
         return device;
     }
+    // Operations on an established session must keep the explicit choice.
+    // Re-enumerating here used to silently replace it with devices[0].
+    if (!mustPrompt && state.authorizedDevice && (state.connected || state.cableOpen || state.handle)) {
+        return state.authorizedDevice;
+    }
     if (!navigator.usb) {
         let device = null;
         if (!mustPrompt) {
@@ -5409,9 +5451,15 @@ async function authorizeDevice(forcePrompt = false, selectedUsbDevice = null) {
     if (!mustPrompt && getAuthorizedDevices) {
         const devices = await getAuthorizedDevices();
         if (devices && devices.length) {
-            const usbDevice = wantsEvoSerial
-                ? (devices.find(isEvoUsbDevice) || devices[0])
-                : devices[0];
+            const selected = state.authorizedDevice?.usbDevice || state.authorizedDevice;
+            const candidates = wantsEvoSerial ? devices.filter(isEvoUsbDevice) : devices;
+            const usbDevice = devices.find(device => deviceMatches(selected, device))
+                || (!selected && candidates.length === 1 ? candidates[0] : null);
+            if (!usbDevice) {
+                // Ambiguous permission inventory: use the browser's existing
+                // calculator chooser rather than picking the first entry.
+                return authorizeDevice(true);
+            }
             const device = isEvoUsbDevice(usbDevice)
                 ? await getAuthorizedEvoSerialDevice(usbDevice)
                 : usbDevice;
@@ -5458,7 +5506,8 @@ async function authorizeHPPrimeDevice(forcePrompt = false, discoveryUsbDevice = 
         : null;
     if (!device && !forcePrompt) {
         const devices = await getAuthorizedHPPrimeDevices(discoveryUsbDevice);
-        device = devices[0] || null;
+        device = devices.length === 1 ? devices[0] : null;
+        if (devices.length > 1) device = await requestHPPrimeDevice(discoveryUsbDevice);
     }
     if (!device && forcePrompt) {
         device = await requestHPPrimeDevice(discoveryUsbDevice);
@@ -5660,7 +5709,7 @@ async function authorizeNumWorksDevice(forcePrompt = false) {
         : null;
     if (!device && !forcePrompt) {
         const devices = await getAuthorizedNumWorksDevices();
-        device = devices[0] || null;
+        device = devices.length === 1 ? devices[0] : null;
     }
     if (!device) {
         device = await requestNumWorksDevice();
@@ -5800,6 +5849,7 @@ async function autoConnectIfAuthorized() {
     let autoDetectedTiDevice = null;
     const devices = navigator.usb ? await getAuthorizedSupportedWebUsbDevices() : [];
     if (devices.length > 1) {
+        setStatus('status_select_device', false);
         return;
     }
     if (devices.length === 1) {
@@ -6169,6 +6219,36 @@ async function connectTI(forcePrompt = true, selectedUsbDevice = null) {
     log('Device connected.');
 }
 
+async function releaseDeviceForSwitch(device) {
+    const previous = state.authorizedDevice;
+    if (!previous || deviceMatches(previous, device)) return;
+    const module = state.module;
+    try {
+        await state.numWorksBackend?.close();
+        if (module) {
+            await getModuleCallState(module).tail;
+            if (isHPPrimeActive()) {
+                await ccallAsync(module, 'hp_prime_disconnect', 'number', [], []);
+            }
+            await ccallAsync(module, 'cleanup', 'number', [], []);
+        }
+    } finally {
+        retireModule(module, 'calculator changed');
+        state.module = null;
+        state.handle = 0;
+        state.handlePromise = null;
+        state.cableOpen = false;
+        state.authorizedDevice = null;
+        state.numWorksBackend = null;
+        state.progressHooked = false;
+        state.progressTickPtr = null;
+        state.needsReauthorize = false;
+        state.silentReconnectInProgress = false;
+        clearDeviceData();
+        setConnected(false);
+    }
+}
+
 async function connect() {
     if (['casio-rm7000', 'casio-rm9000'].includes(state.settings?.calcModel)) {
         window.location.href = 'rm-loader.html';
@@ -6177,8 +6257,10 @@ async function connect() {
     if (state.connectInProgress) {
         return;
     }
+    if (state.progressOps?.size) return;
     setButtonLoading(els.btnConnect, true);
     const hadWorkingConnection = state.connected || state.cableOpen || Boolean(state.handle);
+    let switchedDevice = false;
     try {
         state.connectInProgress = true;
         const wantsGrayLink = String(state.settings?.cableModel ?? 'auto') === CABLE_GRAYLINK;
@@ -6196,6 +6278,8 @@ async function connect() {
             }
             device.productName = usbDevice.productName || device.productName;
             state.pendingEvoUsbDevice = null;
+            switchedDevice = Boolean(state.authorizedDevice && !deviceMatches(state.authorizedDevice, device));
+            await releaseDeviceForSwitch(device);
             await connectTI(false, device);
             return;
         }
@@ -6208,7 +6292,11 @@ async function connect() {
             }
             state.pendingEvoUsbDevice = null;
             const detectedFamily = getWebUsbDeviceFamily(device);
-            state.authorizedDevice = device;
+            const selectedDevice = detectedFamily === DEVICE_FAMILY_TI
+                ? await requestEvoSerialForUsbDevice(device) : device;
+            switchedDevice = Boolean(state.authorizedDevice && !deviceMatches(state.authorizedDevice, selectedDevice));
+            await releaseDeviceForSwitch(selectedDevice);
+            state.authorizedDevice = selectedDevice;
             if (detectedFamily === DEVICE_FAMILY_NUMWORKS) {
                 await connectNumWorks(false);
                 return;
@@ -6218,7 +6306,7 @@ async function connect() {
                 return;
             }
             if (detectedFamily === DEVICE_FAMILY_TI) {
-                await connectTI(false, device);
+                await connectTI(false, selectedDevice);
                 return;
             }
             throw new Error('The selected WebUSB calculator is not supported.');
@@ -6236,7 +6324,7 @@ async function connect() {
             alert(t('alert_evo_serial_authorization_required'));
             return;
         }
-        if (hadWorkingConnection) {
+        if (hadWorkingConnection && !switchedDevice) {
             setStatus('status_connected', true);
         } else {
             state.activeFamily = DEVICE_FAMILY_TI;
@@ -12091,7 +12179,18 @@ bootstrap().catch(err => {
     console.error('[WebTILP] Bootstrap failed', err);
 });
 
+function isUnrelatedTransportEvent(event) {
+    if (!event) return false;
+    const selected = state.authorizedDevice;
+    if (!selected) return Boolean(state.connectInProgress);
+    const port = event.port || (event.target?.getInfo ? event.target : null);
+    if (port) return !isSerialDevice(selected) || selected.serialPort !== port;
+    if (!event.device) return false;
+    return !deviceMatches(selected.usbDevice || selected.serialPort?.device || selected, event.device);
+}
+
 function handleTransportDisconnect(event = null) {
+    if (isUnrelatedTransportEvent(event)) return;
     const numWorksBackend = state.numWorksBackend;
     if (numWorksBackend && event?.device && event.device !== numWorksBackend.device) {
         return;
@@ -12122,6 +12221,7 @@ function handleTransportDisconnect(event = null) {
 }
 
 function handleTransportConnect(event = null) {
+    if (isUnrelatedTransportEvent(event)) return;
     const numWorksBackend = state.numWorksBackend;
     if (numWorksBackend && event?.device
         && event.device !== numWorksBackend.device) {

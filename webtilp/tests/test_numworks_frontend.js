@@ -132,6 +132,7 @@ async function testTransportConnectClosesMatchingBackendOnly() {
         applyActiveFamilyUiState() {}
     };
     vm.createContext(context);
+    vm.runInContext(extractFunction('isUnrelatedTransportEvent'), context);
     vm.runInContext(extractFunction('handleTransportConnect'), context);
 
     context.handleTransportConnect({ device: { productName: 'Another USB device' } });
@@ -235,6 +236,9 @@ async function testAutoConnectDispatchesSelectedWebUsbFamily() {
         hasHPPrimeWebHidTransport() { return true; },
         hasEvoWebSerialTransport() { return true; },
         async requestSupportedWebUsbDevice() { return selected; },
+        async requestEvoSerialForUsbDevice(device) { return device; },
+        async releaseDeviceForSwitch() {},
+        deviceMatches: (a, b) => a === b,
         getWebUsbDeviceFamily(device) {
             if (device === numWorks) return 'numworks';
             if (device === hpPrime) return 'hp-prime';
