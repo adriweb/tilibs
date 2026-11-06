@@ -1677,9 +1677,10 @@ async function withTimeout(promise, label, timeoutMs = CCALL_TIMEOUT_MS) {
  * @param {string} label
  * @param {number|null} timeoutMs
  * @param {number} pollMs
+ * @param {any} module
  * @returns {Promise<T>}
  */
-async function withProgressTimeout(promise, label, timeoutMs = CCALL_TIMEOUT_MS, pollMs = 100) {
+async function withProgressTimeout(promise, label, timeoutMs = CCALL_TIMEOUT_MS, pollMs = 100, module = null) {
     let done = false;
     let value;
     let error;
@@ -1697,6 +1698,7 @@ async function withProgressTimeout(promise, label, timeoutMs = CCALL_TIMEOUT_MS,
     let lastTick = readProgressTick();
     while (!done) {
         await sleep(pollMs);
+        if (done) break; // Native completion may also restore a shorter deadline.
         const tick = readProgressTick();
         if (tick !== null && tick !== lastTick) {
             lastTick = tick;
@@ -1706,7 +1708,10 @@ async function withProgressTimeout(promise, label, timeoutMs = CCALL_TIMEOUT_MS,
         if (state.lastProgressTs > lastProgress) {
             lastProgress = state.lastProgressTs;
         }
-        if (timeoutMs !== null && Date.now() - lastProgress > timeoutMs) {
+        // A protocol WAIT or Flash GC can extend the native packet deadline.
+        // Keep the JS watchdog from aborting a receive the calculator requested.
+        const idleTimeout = Math.max(timeoutMs, module?.__cableTimeoutMs || 0);
+        if (timeoutMs !== null && Date.now() - lastProgress > idleTimeout) {
             const timeoutErr = new Error(`${label} timed out`);
             timeoutErr.ccallTimeout = true;
             throw timeoutErr;
@@ -1820,7 +1825,7 @@ async function ccallAsync(module, name, returnType, argTypes, args, options = {}
         }
         startProgress(progressLabel);
         try {
-            const value = await withProgressTimeout(visible, progressLabel, timeoutMs);
+            const value = await withProgressTimeout(visible, progressLabel, timeoutMs, 100, module);
             throwIfCancelled();
             return value;
         } catch (err) {

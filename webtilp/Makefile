@@ -157,6 +157,7 @@ test:
 	node tests/test_backup_frontend.js
 	node tests/test_silverlink_recovery.js
 	node tests/test_var_send_frontend.js
+	node tests/test_flash_gc_frontend.js
 	node tests/test_var_names_frontend.js
 	node tests/test_source_conversion.js
 	node tests/test_python_bytecode.cjs
@@ -178,6 +179,11 @@ test-var-send-wasm:
 	$(EMCC) $(CXXFLAGS) tests/test_var_send_wasm.cpp hp_prime_bridge.cpp hp_prime_app.cpp $(INCLUDES) $(LIBS) -o "$$test_dir/var_send.js" $(EMCCFLAGS); \
 	node tests/test_var_send_wasm.cjs "$$test_dir/var_send.js"
 
+test-flash-gc-wasm:
+	@set -e; test_dir=$$(mktemp -d); trap 'rm -rf "$$test_dir"' EXIT; \
+	$(EMCC) $(CXXFLAGS) tests/test_flash_gc_wasm.cpp hp_prime_bridge.cpp hp_prime_app.cpp $(INCLUDES) $(LIBS) -o "$$test_dir/flash_gc.js" $(EMCCFLAGS); \
+	node tests/test_flash_gc_wasm.cjs "$$test_dir/flash_gc.js"
+
 test-var-names-wasm:
 	@set -e; test_dir=$$(mktemp -d); trap 'rm -rf "$$test_dir"' EXIT; \
 	$(EMCC) $(CXXFLAGS) tests/test_var_names_wasm.cpp hp_prime_bridge.cpp hp_prime_app.cpp $(INCLUDES) $(LIBS) -o "$$test_dir/var_names.js" $(EMCCFLAGS); \
@@ -194,4 +200,4 @@ test-silverlink-wasm: $(TARGET)
 clean:
 	rm -f $(TARGET) webtilp.wasm webtilp.worker.js sw.js version.json $(APP_JS_BUNDLE) $(NUMWORKS_JS_BUNDLE) $(BUILD_PROFILE_CSS) $(PYTHON_CONVERTER_ASSETS)
 
-.PHONY: all dev prod prepare_dev prepare_prod prepare_python_converters test test-python-bytecode-wasm test-preview-wasm test-var-send-wasm test-var-names-wasm test-ti86-os-wasm clean stamp
+.PHONY: all dev prod prepare_dev prepare_prod prepare_python_converters test test-python-bytecode-wasm test-preview-wasm test-var-send-wasm test-flash-gc-wasm test-var-names-wasm test-ti86-os-wasm clean stamp
