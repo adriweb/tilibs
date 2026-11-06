@@ -261,7 +261,7 @@ static int		get_dirlist	(CalcHandle* handle, GNode** vars, GNode** apps)
 		for (;;)
 		{
 			DUSBCalcAttr** attr = dusb_ca_new_array(handle, size);
-			ret = dusb_cmd_r_var_header(handle, fldname, varname, attr);
+			ret = dusb_cmd_r_var_header(handle, fldname, sizeof(fldname), varname, sizeof(varname), size, attr);
 			if (ret)
 			{
 				// Not a real error.
@@ -519,7 +519,7 @@ static int		recv_var	(CalcHandle* handle, CalcMode mode, FileContent* content, V
 	if (!ret)
 	{
 		attrs = dusb_ca_new_array(handle, naids);
-		ret = dusb_cmd_r_var_header(handle, fldname, varname, attrs);
+		ret = dusb_cmd_r_var_header(handle, fldname, sizeof(fldname), varname, sizeof(varname), naids, attrs);
 		if (!ret)
 		{
 			ret = dusb_cmd_r_var_content(handle, nullptr, &data);
@@ -757,7 +757,7 @@ static int		recv_flash	(CalcHandle* handle, FlashContent* content, VarRequest* v
 	if (!ret)
 	{
 		attrs = dusb_ca_new_array(handle, naids);
-		ret = dusb_cmd_r_var_header(handle, fldname, varname, attrs);
+		ret = dusb_cmd_r_var_header(handle, fldname, sizeof(fldname), varname, sizeof(varname), naids, attrs);
 		if (!ret)
 		{
 			ret = dusb_cmd_r_var_content(handle, &data_length, &data);
@@ -836,7 +836,7 @@ static int		recv_flash_834pce	(CalcHandle* handle, FlashContent* content, VarReq
 	if (!ret)
 	{
 		attrs = dusb_ca_new_array(handle, naids);
-		ret = dusb_cmd_r_var_header(handle, fldname, varname, attrs);
+		ret = dusb_cmd_r_var_header(handle, fldname, sizeof(fldname), varname, sizeof(varname), naids, attrs);
 		if (!ret)
 		{
 			ret = dusb_cmd_r_var_content(handle, &data_length, &data);
@@ -1212,7 +1212,7 @@ static int		recv_idlist	(CalcHandle* handle, uint8_t* id)
 	if (!ret)
 	{
 		attrs = dusb_ca_new_array(handle, naids);
-		ret = dusb_cmd_r_var_header(handle, folder, name, attrs);
+		ret = dusb_cmd_r_var_header(handle, folder, sizeof(folder), name, sizeof(name), naids, attrs);
 		if (!ret)
 		{
 			ret = dusb_cmd_r_var_content(handle, &varsize, &data);
