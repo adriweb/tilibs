@@ -78,6 +78,7 @@ TIEXPORT3 int TICALL ti8586_send_REQ_lab_equipment_data(CalcHandle* handle, uint
 TIEXPORT3 int TICALL tiz80_recv_CTS(CalcHandle* handle, uint16_t length);
 TIEXPORT3 int TICALL tiz80_recv_SKP(CalcHandle* handle, uint8_t * rej_code);
 TIEXPORT3 int TICALL tiz80_recv_ACK(CalcHandle* handle, uint16_t * status);
+TIEXPORT3 int TICALL ti73_recv_flash_ack(CalcHandle* handle);
 
 
 /* TI-80 (not Z80-based, in fact), send functions */

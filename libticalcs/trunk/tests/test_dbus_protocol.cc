@@ -4,11 +4,14 @@
 #include <string.h>
 #include <string>
 #include <vector>
+#include <algorithm>
 
 #include "../src/ticalcs.h"
 #include "../src/dbus_pkt.h"
 #include "../src/cmdz80.h"
 #include "../src/error.h"
+#include "../src/dusb_cmd.h"
+#include "../src/dusb_vpkt.h"
 
 #define CHECK(condition) \
 	do { \
@@ -22,9 +25,11 @@ static std::vector<uint8_t> incoming, outgoing;
 static size_t received;
 static int receive_failure, send_failure;
 static unsigned int zero_length_writes;
+static std::vector<unsigned int> receive_timeouts;
 
-static int cable_recv(CableHandle *, uint8_t *data, uint32_t length)
+static int cable_recv(CableHandle *cable, uint8_t *data, uint32_t length)
 {
+	receive_timeouts.push_back(cable->timeout);
 	CHECK(received <= incoming.size());
 	if (received == incoming.size() && receive_failure) return receive_failure;
 	CHECK(length <= incoming.size() - received);
@@ -69,10 +74,12 @@ struct MockCalculator
 		receive_failure = 0;
 		send_failure = 0;
 		zero_length_writes = 0;
+		receive_timeouts.clear();
 		functions.recv = cable_recv;
 		functions.send = cable_send;
 		cable.cable = &functions;
 		cable.open = 1;
+		cable.timeout = 50;
 		handle = ticalcs_handle_new(model);
 		CHECK(handle);
 		handle->updat->cancel = 0;
@@ -86,6 +93,96 @@ struct MockCalculator
 		ticalcs_handle_del(handle);
 	}
 };
+
+static void dusb_packet(uint16_t type, const std::vector<uint8_t> &data)
+{
+	const unsigned int size = data.size() + 6;
+	incoming.insert(incoming.end(), {0, 0, (uint8_t)(size >> 8), (uint8_t)size, 4,
+	    0, 0, (uint8_t)(data.size() >> 8), (uint8_t)data.size(), (uint8_t)(type >> 8), (uint8_t)type});
+	incoming.insert(incoming.end(), data.begin(), data.end());
+}
+
+static void check_dusb_gc_waits()
+{
+	{
+		MockCalculator calc(CALC_TI84P_USB);
+		dusb_packet(DUSB_VPKT_DELAY_ACK, {0, 5, 0x7e, 0x40}); // 360000 ms
+		dusb_packet(DUSB_VPKT_DELAY_ACK, {0, 0, 0x13, 0x89}); // 5001 ms (round up)
+		dusb_packet(DUSB_VPKT_DATA_ACK, {1});
+		CHECK(dusb_cmd_r_data_ack(calc.handle) == 0);
+		CHECK(received == incoming.size());
+		CHECK(calc.cable.timeout == 50);
+		CHECK(std::find(receive_timeouts.begin(), receive_timeouts.end(), 3600) != receive_timeouts.end());
+		CHECK(std::find(receive_timeouts.begin(), receive_timeouts.end(), 51) != receive_timeouts.end());
+		std::vector<uint8_t> expected;
+		for (int i = 0; i < 3; i++) expected.insert(expected.end(), {0, 0, 0, 2, 5, 0xe0, 0});
+		CHECK(outgoing == expected); // Only transport ACKs, no restarted RTS/data.
+	}
+	for (bool timeout : {false, true})
+	{
+		MockCalculator calc(CALC_TI84PCE_USB);
+		dusb_packet(DUSB_VPKT_DELAY_ACK, {0xff, 0xff, 0xff, 0xff});
+		if (timeout) receive_failure = ERROR_READ_TIMEOUT;
+		else dusb_packet(DUSB_VPKT_ERROR, {0, 0x0c}); // Real memory exhaustion still fails.
+		const int result = dusb_cmd_r_data_ack(calc.handle);
+		if (timeout) CHECK(result == ERROR_READ_TIMEOUT);
+		else {
+			uint16_t raw = 0;
+			CHECK(ticalcs_error_get_raw_protocol_code(result, &raw) == 0 && raw == 0x0c);
+		}
+		CHECK(calc.cable.timeout == 50);
+		CHECK(*std::max_element(receive_timeouts.begin(), receive_timeouts.end()) <= 4000);
+	}
+	{
+		MockCalculator calc(CALC_TI84P_USB);
+		dusb_packet(DUSB_VPKT_DELAY_ACK, {0, 0, 1});
+		CHECK(dusb_cmd_r_data_ack(calc.handle) == ERR_INVALID_PACKET);
+		CHECK(calc.cable.timeout == 50);
+	}
+}
+
+static void check_dbus_flash_gc()
+{
+	for (int status : {0, 2, 3, -1})
+	{
+		MockCalculator calc(CALC_TI73);
+		packet(0x74, DBUS_CMD_ACK);
+		packet(0x74, DBUS_CMD_CTS);
+		if (status == 0) packet(0x74, DBUS_CMD_ACK);
+		else packet(0x74, DBUS_CMD_SKP, {0, 0, (uint8_t)(status < 0 ? 2 : status)});
+		if (status == 2) packet(0x74, DBUS_CMD_ACK); // GC completed, continue the current block.
+		if (status >= 0 && status != 3) packet(0x74, DBUS_CMD_ACK); // EOT ACK
+		else receive_failure = ERROR_READ_TIMEOUT;
+		uint8_t data[128] = {};
+		FlashPage page{};
+		page.addr = 0x4000;
+		page.size = sizeof(data);
+		page.data = data;
+		FlashPage *pages[] = {&page};
+		FlashContent content{};
+		content.model = CALC_TI73;
+		content.data_type = TI83p_APPL;
+		content.num_pages = 1;
+		content.data_length = sizeof(data);
+		content.pages = pages;
+		const int result = ticalcs_calc_send_app(calc.handle, &content);
+		CHECK(result == (status == 3 ? ERR_VAR_REJECTED : status < 0 ? ERROR_READ_TIMEOUT : 0));
+		CHECK(received == incoming.size());
+		CHECK(calc.cable.timeout == 50);
+		CHECK(std::find(receive_timeouts.begin(), receive_timeouts.end(), 3600) != receive_timeouts.end());
+		std::vector<uint8_t> commands;
+		for (size_t off = 0; off < outgoing.size();) {
+			commands.push_back(outgoing[off + 1]);
+			const unsigned int size = outgoing[off + 2] | (unsigned(outgoing[off + 3]) << 8);
+			off += 4 + (size ? size + 2 : 0);
+		}
+		std::vector<uint8_t> expected = {DBUS_CMD_VAR, DBUS_CMD_ACK, DBUS_CMD_XDP};
+		if (status != 0) expected.push_back(DBUS_CMD_ACK);
+		if (status != 0) expected.push_back(DBUS_CMD_ACK);
+		if (status >= 0 && status != 3) expected.push_back(DBUS_CMD_EOT);
+		CHECK(commands == expected);
+	}
+}
 
 // Independent packet framing expectations from the TI link guide.
 static void append_wire_packet(std::vector<uint8_t> &wire, uint8_t mid, uint8_t command,
@@ -758,6 +855,8 @@ static void check_commands()
 int main(int argc, char **argv)
 {
 	CHECK(ticalcs_library_init() == 1);
+	check_dusb_gc_waits();
+	check_dbus_flash_gc();
 	check_commands();
 	check_send_backup_models();
 	check_send_chunk_boundaries();
