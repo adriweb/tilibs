@@ -141,6 +141,80 @@ static void check_dusb_gc_waits()
 	}
 }
 
+static void greet_reply(uint16_t error)
+{
+	incoming.insert(incoming.end(), {0, 0, 0, 4, 2, 0, 0, 4, 0}); // Buffer allocation
+	incoming.insert(incoming.end(), {0, 0, 0, 2, 5, 0xe0, 0}); // PING transport ACK
+	if (error) dusb_packet(DUSB_VPKT_ERROR, {(uint8_t)(error >> 8), (uint8_t)error});
+	else dusb_packet(DUSB_VPKT_MODE_SET, {0, 0, 7, 0xd0});
+}
+
+static std::vector<DUSBModeSet> sent_greets()
+{
+	std::vector<DUSBModeSet> result;
+	for (size_t off = 0; off < outgoing.size();) {
+		CHECK(off + 5 <= outgoing.size());
+		const uint32_t size = ((uint32_t)outgoing[off] << 24) | ((uint32_t)outgoing[off+1] << 16)
+		    | ((uint32_t)outgoing[off+2] << 8) | outgoing[off+3];
+		CHECK(off + 5 + size <= outgoing.size());
+		if (outgoing[off+4] == 4 && size == 16 && outgoing[off+9] == 0 && outgoing[off+10] == 1) {
+			const uint8_t *p = outgoing.data() + off + 11;
+			result.push_back({uint16_t((p[0] << 8) | p[1]), uint16_t((p[2] << 8) | p[3]),
+			    uint16_t((p[4] << 8) | p[5]), uint16_t((p[6] << 8) | p[7]), uint16_t((p[8] << 8) | p[9])});
+		}
+		off += 5 + size;
+	}
+	return result;
+}
+
+static void check_dusb_greet_recovery()
+{
+	for (CalcModel model : {CALC_TI84P_USB, CALC_TI84PCE_USB, CALC_TI89T_USB})
+	{
+		for (uint16_t error : {0x001c, 0x001e, 0x0009}) {
+			MockCalculator calc(model);
+			greet_reply(error); greet_reply(0);
+			CHECK(ticalcs_calc_isready(calc.handle) == 0);
+			const auto modes = sent_greets();
+			CHECK(modes.size() == 2);
+			CHECK(modes[0].arg1 == 3 && modes[0].arg2 == 1 && modes[0].arg3 == 0 && modes[0].arg5 == 2000);
+			CHECK(modes[1].arg1 == (error == 9 ? 2 : 3));
+			CHECK(modes[1].arg2 == (error == 0x1e ? 0 : 1));
+			CHECK(modes[1].arg3 == (error == 0x1e ? 9 : 0));
+			CHECK(modes[1].arg5 == (error == 0x1c ? 2500 : 2000));
+			CHECK(received == incoming.size() && calc.cable.timeout == 50);
+			CHECK(calc.handle->priv.dusb_needs_mode_set == 0);
+		}
+	}
+	{
+		MockCalculator calc(CALC_TI84P_USB);
+		greet_reply(0x1d); greet_reply(0);
+		DUSBModeSet mode = DUSB_MODE_BASIC;
+		mode.arg5 = 3000;
+		CHECK(dusb_cmd_negotiate_mode(calc.handle, mode) == 0);
+		const auto modes = sent_greets();
+		CHECK(modes.size() == 2 && modes[1].arg1 == 2 && modes[1].arg5 == 2500);
+	}
+	for (const auto &errors : std::vector<std::vector<uint16_t>>{
+	    {0x1c, 0x1d}, {0x0c}, {0xcccc}, {9, 9}, std::vector<uint16_t>(11, 0x1e), std::vector<uint16_t>(32, 0x1c)})
+	{
+		MockCalculator calc(CALC_TI84PCE_USB);
+		for (uint16_t error : errors) greet_reply(error);
+		const int result = ticalcs_calc_isready(calc.handle);
+		uint16_t raw = 0;
+		CHECK(ticalcs_error_get_raw_protocol_code(result, &raw) == 0 && raw == errors.back());
+		CHECK(sent_greets().size() == errors.size());
+		CHECK(received == incoming.size() && calc.cable.timeout == 50);
+	}
+	{
+		MockCalculator calc(CALC_TI89T_USB);
+		greet_reply(9);
+		const DUSBModeSet basic = DUSB_MODE_BASIC;
+		CHECK(dusb_cmd_negotiate_mode(calc.handle, basic) != 0);
+		CHECK(sent_greets().size() == 1); // OS receive stays in BASIC.
+	}
+}
+
 static void check_dbus_flash_gc()
 {
 	for (int status : {0, 2, 3, -1})
@@ -856,6 +930,7 @@ int main(int argc, char **argv)
 {
 	CHECK(ticalcs_library_init() == 1);
 	check_dusb_gc_waits();
+	check_dusb_greet_recovery();
 	check_dbus_flash_gc();
 	check_commands();
 	check_send_backup_models();

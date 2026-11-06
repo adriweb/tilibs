@@ -63,14 +63,7 @@ static int		is_ready	(CalcHandle* handle)
 {
 	static const DUSBModeSet mode = DUSB_MODE_NORMAL;
 
-	int ret = dusb_cmd_s_mode_set(handle, mode);
-	if (!ret)
-	{
-		// use PID_HOMESCREEN to return status ?
-		ret = dusb_cmd_r_mode_ack(handle);
-	}
-
-	return ret;
+	return dusb_cmd_negotiate_mode(handle, mode);
 }
 
 static int		send_key_noack	(CalcHandle* handle, uint32_t key)
@@ -966,12 +959,7 @@ static int		send_os    (CalcHandle* handle, FlashContent* content)
 		const int size = sizeof(pids) / sizeof(uint16_t);
 
 		// switch to BASIC mode
-		ret = dusb_cmd_s_mode_set(handle, mode);
-		if (ret)
-		{
-			break;
-		}
-		ret = dusb_cmd_r_mode_ack(handle);
+		ret = dusb_cmd_negotiate_mode(handle, mode);
 		if (ret)
 		{
 			break;
@@ -1143,12 +1131,7 @@ static int		send_os_834pce    (CalcHandle* handle, FlashContent* content)
 	do
 	{
 		// switch to BASIC mode
-		ret = dusb_cmd_s_mode_set(handle, mode);
-		if (ret)
-		{
-			break;
-		}
-		ret = dusb_cmd_r_mode_ack(handle);
+		ret = dusb_cmd_negotiate_mode(handle, mode);
 		if (ret)
 		{
 			break;

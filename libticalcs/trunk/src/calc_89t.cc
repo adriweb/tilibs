@@ -56,13 +56,7 @@ static int		is_ready	(CalcHandle* handle)
 {
 	static const DUSBModeSet mode = DUSB_MODE_NORMAL;
 
-	int ret = dusb_cmd_s_mode_set(handle, mode);
-	if (!ret)
-	{
-		ret = dusb_cmd_r_mode_ack(handle);
-	}
-
-	return ret;
+	return dusb_cmd_negotiate_mode(handle, mode);
 }
 
 static int		send_key	(CalcHandle* handle, uint32_t key)
@@ -624,12 +618,7 @@ static int		send_os    (CalcHandle* handle, FlashContent* content)
 	do
 	{
 		// switch to BASIC mode
-		ret = dusb_cmd_s_mode_set(handle, mode);
-		if (ret)
-		{
-			break;
-		}
-		ret = dusb_cmd_r_mode_ack(handle);
+		ret = dusb_cmd_negotiate_mode(handle, mode);
 		if (ret)
 		{
 			break;
