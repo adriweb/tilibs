@@ -9229,6 +9229,12 @@ async function performTransfers(plan, module, options) {
     const handle = await ensureCableOpen();
     const model = getActiveCalcModelId();
     const needsEot = model === 2 || model === 6; // TI-82 / TI-85
+    const isCancelled = result => {
+        if (result === 256) return true; // ERR_ABORT
+        const raw = module?._get_raw_protocol_code?.(result) || 0;
+        return raw === 0xCCCC || raw === 0xCCCD
+            || ((raw === 0x434E || raw === 0x5155) && result === TICALCS_EVO_ERROR); // CN / QU
+    };
     let pendingEot = false;
     const finishVarSend = async () => {
         if (!pendingEot) return;
@@ -9431,6 +9437,13 @@ async function performTransfers(plan, module, options) {
                     });
                 }
             } else {
+                if (isCancelled(result)) {
+                    const message = `Transfer cancelled on calculator: ${formatErrorResult(module, result)}`;
+                    log(message);
+                    const error = new Error(message);
+                    error.silent = true;
+                    throw error;
+                }
                 if (needsEot) {
                     throw new Error(`Failed to send ${displayName}: ${formatErrorResult(module, result)}.${getNativeWarningSuffix(result)}`);
                 }
