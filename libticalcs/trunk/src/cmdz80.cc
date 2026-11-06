@@ -1333,6 +1333,32 @@ int TICALL tiz80_recv_ACK(CalcHandle* handle, uint16_t * status)
 	return 0;
 }
 
+// Flash EOR has a three- or five-byte payload, unlike a regular one-byte
+// SKP. When replacing an app, code 2 is followed by GC and a delayed ACK.
+// TI's DBUS sender acknowledges EOR twice before waiting for that ACK.
+int TICALL ti73_recv_flash_ack(CalcHandle* handle)
+{
+	VALIDATE_HANDLE(handle);
+	uint8_t host = 0, cmd = 0;
+	uint16_t length = 0;
+	uint8_t *buffer = (uint8_t *)handle->buffer;
+	int ret = dbus_recv(handle, &host, &cmd, &length, buffer);
+	if (ret) return ret;
+	if (cmd == DBUS_CMD_ACK) return length == 0 ? 0 : ERR_NACK;
+	if (cmd != DBUS_CMD_SKP) return ERR_INVALID_CMD;
+	if (length != 3 && length != 5) return ERR_INVALID_PACKET;
+	const uint8_t code = buffer[2];
+	ticalcs_info(" TI->PC: Flash EOR (code = %u)", code);
+	ret = ti73_send_ACK(handle);
+	if (ret) return ret;
+	ret = ti73_send_ACK(handle);
+	if (ret) return ret;
+	if (code != 2) return ERR_VAR_REJECTED;
+	ticalcs_info("Waiting for Flash app replacement / garbage collection");
+	ticalcs_update_refresh(handle);
+	return tiz80_recv_ACK(handle, nullptr);
+}
+
 int TICALL ti82_recv_ERR(CalcHandle* handle, uint16_t * status)
 {
 	uint8_t host = 0, cmd = 0;
