@@ -28,6 +28,7 @@ function setup({ activation = true, authorized = false, serialError = null } = {
     const state = { settings: { cableModel: 'auto' }, connected: false, handle: 0 };
     const context = {
         state, DOMException,
+        webUsbSelections: new WeakMap(), evoSerialPortsByUsb: new WeakMap(),
         console: { log() {}, warn() {}, error(...args) { errors.push(args); } },
         self: { isSecureContext: true },
         navigator: {
@@ -66,10 +67,13 @@ function setup({ activation = true, authorized = false, serialError = null } = {
         async ensureCableOpen() { calls.push('open cable'); state.cableOpen = true; },
         async updateCapabilities() {}, async getDeviceInfo() {},
         isTi92Selected: () => false,
-        hasSilverlinkConnected: () => false
+        hasSilverlinkConnected: () => false,
+        retireModule() {}, clearDeviceData() {},
+        getModuleCallState: () => ({ tail: Promise.resolve() })
     };
     vm.createContext(context);
-    for (const name of ['serialPortToDevice', 'isSerialDevice', 'isEvoUsbDevice',
+    for (const name of ['getAuthorizedWebUsbDevices', 'deviceMatches', 'releaseDeviceForSwitch',
+        'serialPortToDevice', 'isSerialDevice', 'isEvoUsbDevice',
         'isEvoSerialDeviceInfo', 'requestTIEvoSerialDevice', 'getAuthorizedSerialDevices',
         'getAuthorizedEvoSerialDevice', 'shouldUseEvoWebUsbSerial', 'evoWebUsbSerialDevice', 'requestEvoSerialForUsbDevice',
         'bindSerialPortToModule', 'authorizeDevice', 'connectTI', 'connect']) {
@@ -223,7 +227,7 @@ async function main() {
         };
         await automatic.context.connect();
         assert.equal(automatic.state.connected, true, 'accept automatic authorization when the browser allows it');
-        assert.deepEqual(automatic.calls, ['usb chooser', 'module', 'serial chooser', 'open cable']);
+        assert.deepEqual(automatic.calls, ['usb chooser', 'serial chooser', 'module', 'open cable']);
         assert.equal(automatic.state.authorizedDevice.productName, automatic.usbDevice.productName);
         assert.deepEqual(automatic.alerts, []);
     }
@@ -252,6 +256,16 @@ async function main() {
     const directSelection = direct.context.requestTIEvoSerialDevice();
     assert.deepEqual(direct.calls, ['serial chooser'], 'serial-only authorization prompts before any await');
     assert.equal((await directSelection).serialPort, direct.port);
+
+    const multiple = setup({authorized: true});
+    const secondPort = {getInfo: multiple.port.getInfo};
+    multiple.context.navigator.serial.getPorts = async () => [multiple.port, secondPort];
+    assert.equal(await multiple.context.getAuthorizedEvoSerialDevice(), null,
+        'multiple authorized Evo ports require an explicit choice');
+    const selectedPort = await multiple.context.requestTIEvoSerialDevice(multiple.usbDevice);
+    assert.equal(selectedPort.serialPort, multiple.port);
+    assert.equal((await multiple.context.getAuthorizedEvoSerialDevice(multiple.usbDevice)).serialPort, multiple.port,
+        'a previously chosen Evo USB/serial association survives other authorized ports');
 
     const expired = setup({ activation: false });
     await expired.context.connect();
