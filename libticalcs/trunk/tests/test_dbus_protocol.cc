@@ -9,6 +9,7 @@
 #include "../src/ticalcs.h"
 #include "../src/dbus_pkt.h"
 #include "../src/cmdz80.h"
+#include "../src/cmd68k.h"
 #include "../src/error.h"
 #include "../src/dusb_cmd.h"
 #include "../src/dusb_vpkt.h"
@@ -318,7 +319,287 @@ static void check_transfer_error_details()
 	}
 }
 
+static std::vector<uint8_t> sent_dbus_commands()
+{
+	std::vector<uint8_t> commands;
+	for (size_t off = 0; off < outgoing.size();) {
+		CHECK(outgoing.size() - off >= 4);
+		commands.push_back(outgoing[off + 1]);
+		const unsigned int size = outgoing[off + 2] | (unsigned(outgoing[off + 3]) << 8);
+		off += 4 + (size ? size + 2 : 0);
+		CHECK(off <= outgoing.size());
+	}
+	return commands;
+}
+
+static void check_68k_flash_waits()
+{
+	for (CalcModel model : {CALC_TI89, CALC_TI89T, CALC_TI92P, CALC_V200}) {
+		const uint8_t mid = (model == CALC_TI89 || model == CALC_TI89T) ? 0x98 : 0x88;
+		for (bool archived : {false, true}) {
+			for (int failure : {0, 1, 2, 3, 4, 5}) {
+				MockCalculator calc(model);
+				for (int phase = 1; phase <= 4; phase++) {
+					if (failure == 5 && phase == 2) { receive_failure = ERROR_READ_TIMEOUT; break; }
+					if (failure == phase) { packet(mid, DBUS_CMD_SKP, {0, 0, 12}); break; }
+					packet(mid, phase == 2 ? DBUS_CMD_CTS : DBUS_CMD_ACK);
+				}
+				uint8_t data[3] = {1, 2, 3};
+				VarEntry entry{};
+				strcpy(entry.name, "TEST");
+				entry.type = TI89_PRGM;
+				entry.attr = archived ? ATTRB_ARCHIVED : ATTRB_NONE;
+				entry.size = sizeof(data);
+				entry.data = data;
+				VarEntry *entries[] = {&entry};
+				FileContent content{};
+				content.model = model;
+				content.num_entries = 1;
+				content.entries = entries;
+				const int result = ticalcs_calc_send_var(calc.handle, MODE_NORMAL, &content);
+				CHECK(result == (!failure ? 0 : failure == 5 ? ERROR_READ_TIMEOUT : ERR_DBUS_ERROR));
+				CHECK(received == incoming.size() && calc.cable.timeout == 50);
+				for (unsigned int timeout : receive_timeouts) CHECK(timeout == (archived ? 3600u : 50u));
+				std::vector<uint8_t> expected = {DBUS_CMD_RTS};
+				if (failure != 1 && failure != 2 && failure != 5) {
+					expected.push_back(DBUS_CMD_ACK);
+					expected.push_back(DBUS_CMD_XDP);
+					if (failure != 3) expected.push_back(DBUS_CMD_EOT);
+				}
+				if (failure >= 1 && failure <= 4) expected.push_back(DBUS_CMD_ACK);
+				CHECK(sent_dbus_commands() == expected);
+			}
+		}
+		for (int failure : {0, 1, 2, 3, 4, 5}) {
+			MockCalculator calc(model);
+			for (int phase = 1; phase <= 4; phase++) {
+				if (failure == 5 && phase == 3) { receive_failure = ERROR_READ_TIMEOUT; break; }
+				if (failure == phase) { packet(mid, DBUS_CMD_SKP, {0, 0, 12}); break; }
+				packet(mid, phase == 2 ? DBUS_CMD_CTS : DBUS_CMD_ACK);
+			}
+			uint8_t data[128] = {};
+			FlashContent content{};
+			content.model = model;
+			content.data_type = TI89_APPL;
+			strcpy(content.name, "TEST");
+			content.data_length = sizeof(data);
+			content.data_part = data;
+			const int result = ticalcs_calc_send_app(calc.handle, &content);
+			CHECK(result == (!failure ? 0 : failure == 5 ? ERROR_READ_TIMEOUT : ERR_DBUS_ERROR));
+			CHECK(received == incoming.size() && calc.cable.timeout == 50);
+			for (unsigned int timeout : receive_timeouts) CHECK(timeout == 3600);
+			std::vector<uint8_t> expected = {DBUS_CMD_RTS};
+			if (failure != 1 && failure != 2) {
+				expected.push_back(DBUS_CMD_ACK);
+				expected.push_back(DBUS_CMD_XDP);
+				if (failure != 3 && failure != 5) expected.push_back(DBUS_CMD_EOT);
+			}
+			if (failure >= 1 && failure <= 4) expected.push_back(DBUS_CMD_ACK);
+			CHECK(sent_dbus_commands() == expected);
+		}
+	}
+	for (bool cts : {false, true}) {
+		for (uint8_t code : {3, 0x25, 0x1e, 0x21, 7, 0x24, 8, 0xfe}) {
+			MockCalculator calc(CALC_TI89);
+			packet(0x98, DBUS_CMD_SKP, {0, 0, code});
+			const int result = cts ? ti89_recv_CTS(calc.handle) : ti89_recv_ACK(calc.handle, nullptr);
+			uint16_t raw = 0;
+			CHECK(ticalcs_error_get_raw_protocol_code(result, &raw) == 0 && raw == code);
+			CHECK(sent_dbus_commands() == std::vector<uint8_t>({DBUS_CMD_ACK}));
+			CHECK(code == 0xfe ? result == ERR_DBUS_ERROR : result > ERR_CALC_ERROR1 && result <= ERR_CALC_ERROR1 + 7);
+		}
+	}
+	for (const auto &payload : std::vector<std::vector<uint8_t>>{{1}, {0, 12}}) {
+		MockCalculator calc(CALC_TI89);
+		packet(0x98, DBUS_CMD_SKP, payload);
+		CHECK(ti89_recv_ACK(calc.handle, nullptr) == ERR_INVALID_PACKET);
+		CHECK(outgoing.empty());
+	}
+}
+
+struct DeleteCalculator : MockCalculator
+{
+	std::string version;
+	int version_result;
+	CalcFncts *original, *replacement;
+	DeleteCalculator(CalcModel model, const char *os = "2.09", int result = 0)
+	    : MockCalculator(model), version(os), version_result(result)
+	{
+		original = handle->calc;
+		auto callbacks = original->fncts;
+		callbacks.get_version = [](CalcHandle *h, CalcInfos *info) {
+			auto *self = static_cast<DeleteCalculator *>(h->unused1);
+			memset(info, 0, sizeof(*info));
+			strncpy(info->os_version, self->version.c_str(), sizeof(info->os_version) - 1);
+			return self->version_result;
+		};
+		replacement = new CalcFncts{model, "test", "test", "test", original->features,
+		    original->product_id, {}, callbacks};
+		handle->calc = replacement;
+		handle->unused1 = this;
+	}
+	~DeleteCalculator() { handle->calc = original; delete replacement; }
+};
+
+static void check_68k_delete()
+{
+	for (CalcModel model : {CALC_TI89, CALC_TI89T, CALC_TI92P, CALC_V200}) {
+		const uint8_t mid = (model == CALC_TI89 || model == CALC_TI89T) ? 0x98 : 0x88;
+		for (uint8_t type : {TI89_EXPR, TI89_PRGM, TI89_APPL}) {
+			for (int failure : {0, 1, 2, 3}) {
+				DeleteCalculator calc(model);
+				if (failure != 1) packet(mid, DBUS_CMD_ACK);
+				if (failure == 1 || failure == 2) packet(mid, DBUS_CMD_SKP, {0, 0, 3});
+				else if (failure == 3) receive_failure = ERROR_READ_TIMEOUT;
+				else packet(mid, DBUS_CMD_ACK);
+				VarEntry request{};
+				request.type = type;
+				strcpy(request.name, type == TI89_APPL ? "TIFRA" : "test");
+				if (type != TI89_APPL) strcpy(request.folder, "main");
+				CHECK(ticalcs_calc_del_var(calc.handle, &request) ==
+				    (failure == 3 ? ERROR_READ_TIMEOUT : failure ? ERR_CALC_ERROR1 + 1 : 0));
+				CHECK(received == incoming.size() && calc.cable.timeout == 50);
+				for (unsigned int timeout : receive_timeouts) CHECK(timeout == (type == TI89_APPL ? 3600u : 50u));
+				// AMS dispatches DEL by the wire type, not just the name.
+				const std::string name = type == TI89_APPL ? "TIFRA" : "main\\test";
+				std::vector<uint8_t> payload = {0, 0, 0, 0, type, (uint8_t)name.size()};
+				payload.insert(payload.end(), name.begin(), name.end());
+				std::vector<uint8_t> expected = {8, DBUS_CMD_DEL, (uint8_t)payload.size(), 0};
+				expected.insert(expected.end(), payload.begin(), payload.end());
+				const uint16_t sum = tifiles_checksum(payload.data(), payload.size());
+				expected.push_back(sum & 0xff);
+				expected.push_back(sum >> 8);
+				if (failure == 1 || failure == 2) expected.insert(expected.end(), {8, DBUS_CMD_ACK, 0, 0});
+				CHECK(outgoing == expected);
+			}
+		}
+	}
+}
+
+static void check_68k_delete_folder()
+{
+	for (CalcModel model : {CALC_TI89, CALC_TI89T, CALC_TI92P, CALC_V200}) {
+		const uint8_t mid = (model == CALC_TI89 || model == CALC_TI89T) ? 0x98 : 0x88;
+		for (const char *folder : {"asdasd", "\x80"}) {
+			for (int failure : {0, 1, 2, 3}) {
+				DeleteCalculator calc(model);
+				if (failure != 1) packet(mid, DBUS_CMD_ACK);
+				if (failure == 1 || failure == 2) packet(mid, DBUS_CMD_SKP, {0, 0, (uint8_t)(failure == 1 ? 0x22 : 0x23)});
+				else if (failure == 3) receive_failure = ERROR_READ_TIMEOUT;
+				else packet(mid, DBUS_CMD_ACK);
+				VarEntry request{};
+				strcpy(request.folder, folder);
+				strcpy(request.name, "ignored");
+				CHECK(ticalcs_calc_del_fld(calc.handle, &request) ==
+				    (failure == 3 ? ERROR_READ_TIMEOUT : failure ? ERR_DBUS_ERROR : 0));
+				CHECK(!strcmp(request.folder, folder) && !strcmp(request.name, "ignored") && request.type == 0);
+				CHECK(received == incoming.size() && calc.cable.timeout == 50);
+				std::vector<uint8_t> payload = {0, 0, 0, 0, TI89_DIR, (uint8_t)strlen(folder)};
+				payload.insert(payload.end(), folder, folder + strlen(folder));
+				std::vector<uint8_t> expected = {8, DBUS_CMD_DEL, (uint8_t)payload.size(), 0};
+				expected.insert(expected.end(), payload.begin(), payload.end());
+				const uint16_t sum = tifiles_checksum(payload.data(), payload.size());
+				expected.push_back(sum & 0xff);
+				expected.push_back(sum >> 8);
+				if (failure == 1 || failure == 2) expected.insert(expected.end(), {8, DBUS_CMD_ACK, 0, 0});
+				CHECK(outgoing == expected);
+			}
+		}
+		DeleteCalculator calc(model);
+		VarEntry empty{};
+		CHECK(ticalcs_calc_del_fld(calc.handle, &empty) == ERR_INVALID_PARAMETER);
+		CHECK(outgoing.empty());
+	}
+}
+
+static void check_ti92_delete_keys()
+{
+	for (bool folder : {false, true}) {
+		const std::string text = folder ? "delfold asdasd" : "delvar main\\test";
+		std::vector<uint16_t> keys = {267, 264, 264, 264, 4360, 4360, 8273, 263, 263};
+		for (unsigned char byte : text) keys.push_back(byte);
+		keys.push_back(13);
+		for (int failure : {-1, 0, 9, (int)keys.size() - 1}) {
+			MockCalculator calc(CALC_TI92);
+			const size_t completed = failure < 0 ? keys.size() : (size_t)failure;
+			for (size_t i = 0; i < completed; i++) packet(0x89, DBUS_CMD_ACK);
+			if (failure >= 0) receive_failure = ERROR_READ_TIMEOUT;
+			VarEntry request{};
+			strcpy(request.folder, folder ? "asdasd" : "main");
+			strcpy(request.name, "test");
+			request.type = TI89_PRGM;
+			const int result = folder ? ticalcs_calc_del_fld(calc.handle, &request)
+			                          : ticalcs_calc_del_var(calc.handle, &request);
+			CHECK(result == (failure < 0 ? 0 : ERROR_READ_TIMEOUT));
+			CHECK(!strcmp(request.folder, folder ? "asdasd" : "main") && !strcmp(request.name, "test") && request.type == TI89_PRGM);
+			std::vector<uint8_t> expected;
+			for (size_t i = 0; i < keys.size() && i <= completed; i++)
+				expected.insert(expected.end(), {9, DBUS_CMD_KEY, (uint8_t)keys[i], (uint8_t)(keys[i] >> 8)});
+			CHECK(outgoing == expected && received == incoming.size());
+		}
+	}
+	MockCalculator calc(CALC_TI92);
+	VarEntry empty{};
+	CHECK(ticalcs_calc_del_fld(calc.handle, &empty) == ERR_INVALID_PARAMETER);
+	CHECK(outgoing.empty());
+}
+
 // Independent packet framing expectations from the TI link guide.
+static void check_68k_legacy_delete_keys()
+{
+	for (CalcModel model : {CALC_TI89, CALC_TI89T, CALC_TI92P, CALC_V200}) {
+		const uint8_t mid = (model == CALC_TI89 || model == CALC_TI89T) ? 0x98 : 0x88;
+		for (const char *version : {"1.05", "2.05", "2.08"}) {
+			for (bool folder : {false, true}) {
+				const std::string text = folder ? "delfold asdasd" : "delvar main\\test";
+				std::vector<uint16_t> keys = {267, 264, 264, 264, 4360, 4360,
+				    (uint16_t)(model == CALC_TI89 || model == CALC_TI89T ? 277 : 8273), 263, 263};
+				for (unsigned char byte : text) keys.push_back(byte);
+				keys.push_back(13);
+				for (int failure : {-1, 0, 9, (int)keys.size() - 1}) {
+					DeleteCalculator calc(model, version);
+					const size_t completed = failure < 0 ? keys.size() : (size_t)failure;
+					for (size_t i = 0; i < completed; i++) packet(mid, DBUS_CMD_ACK);
+					if (failure >= 0) receive_failure = ERROR_READ_TIMEOUT;
+					VarEntry request{};
+					strcpy(request.folder, folder ? "asdasd" : "main");
+					strcpy(request.name, "test");
+					request.type = TI89_PRGM;
+					CHECK((folder ? ticalcs_calc_del_fld(calc.handle, &request)
+					              : ticalcs_calc_del_var(calc.handle, &request)) ==
+					    (failure < 0 ? 0 : ERROR_READ_TIMEOUT));
+					CHECK(!strcmp(request.folder, folder ? "asdasd" : "main") && !strcmp(request.name, "test"));
+					std::vector<uint8_t> expected;
+					for (size_t i = 0; i < keys.size() && i <= completed; i++)
+						expected.insert(expected.end(), {8, DBUS_CMD_KEY, (uint8_t)keys[i], (uint8_t)(keys[i] >> 8)});
+					CHECK(outgoing == expected && received == incoming.size());
+				}
+			}
+			DeleteCalculator calc(model, version);
+			VarEntry app{}; app.type = TI89_APPL; strcpy(app.name, "TIFRA");
+			CHECK(ticalcs_calc_del_var(calc.handle, &app) == ERR_UNSUPPORTED);
+			CHECK(outgoing.empty());
+		}
+		for (int failure : {0, (int)ERROR_READ_TIMEOUT, (int)ERR_ABORT, (int)ERR_INVALID_PACKET}) {
+			DeleteCalculator calc(model, "", failure);
+			VarEntry folder{}; strcpy(folder.folder, "asdasd");
+			if (failure == ERROR_READ_TIMEOUT) receive_failure = ERROR_READ_TIMEOUT;
+			CHECK(ticalcs_calc_del_fld(calc.handle, &folder) == (failure ? failure : ERR_INVALID_PACKET));
+			CHECK(outgoing == (failure == ERROR_READ_TIMEOUT
+			    ? std::vector<uint8_t>{8, DBUS_CMD_RDY, 0, 0} : std::vector<uint8_t>{}));
+		}
+		// No VER support: require RDY before the first mutating key.
+		{
+			DeleteCalculator calc(model, "", ERROR_READ_TIMEOUT);
+			packet(mid, DBUS_CMD_ACK);
+			receive_failure = ERROR_READ_TIMEOUT;
+			VarEntry folder{}; strcpy(folder.folder, "asdasd");
+			CHECK(ticalcs_calc_del_fld(calc.handle, &folder) == ERROR_READ_TIMEOUT);
+			CHECK(outgoing == (std::vector<uint8_t>{8, DBUS_CMD_RDY, 0, 0, 8, DBUS_CMD_KEY, 0x0b, 1}));
+		}
+	}
+}
+
 static void append_wire_packet(std::vector<uint8_t> &wire, uint8_t mid, uint8_t command,
                                const std::vector<uint8_t> &payload = {})
 {
@@ -993,6 +1274,11 @@ int main(int argc, char **argv)
 	check_dusb_greet_recovery();
 	check_dusb_cancellation();
 	check_transfer_error_details();
+	check_68k_flash_waits();
+	check_68k_delete();
+	check_68k_delete_folder();
+	check_ti92_delete_keys();
+	check_68k_legacy_delete_keys();
 	check_dbus_flash_gc();
 	check_commands();
 	check_send_backup_models();
