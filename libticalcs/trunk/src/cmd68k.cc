@@ -129,22 +129,28 @@ unsigned int ticalcs_dbus_error_count(void)
 	return (unsigned int)(sizeof(dbus_errors) / sizeof(dbus_errors[0]));
 }
 
-static int err_code(uint8_t *data)
+static int ti89_rejected(CalcHandle *handle, const uint8_t *data, uint16_t length, bool acknowledge = true)
 {
+	if (length < 3) return ERR_INVALID_PACKET;
 	const int code = data[2];
 
-	ticalcs_info(" TI->PC: SKP (%02x)", data[0]);
+	// Graph Link's EOR handler acknowledges once, then terminates the
+	// failed exchange. This is not the Z80 duplicate-app/GC handshake.
+	if (acknowledge)
+	{
+		const int ret = ti89_send_ACK(handle);
+		if (ret) return ret;
+	}
+	ticalcs_info(" TI->PC: EOR (%02x)", code);
 	for (int i = 0; i < (int)(sizeof(dbus_errors) / sizeof(dbus_errors[0])); i++)
 	{
 		if(dbus_errors[i] == code)
 		{
-			return i+1;
+			return ERR_CALC_ERROR1 + i+1;
 		}
 	}
 
-	ticalcs_warning("D-BUS error code not found in list. Please report it at <tilp-devel@lists.sf.net>.");
-
-	return 0;
+	return ticalcs_dbus_error_set(code);
 }
 
 int TICALL ti68k_send_VAR(CalcHandle* handle, uint32_t varsize, uint8_t vartype, const char *varname, uint8_t target)
@@ -481,7 +487,7 @@ static int ti68k_recv_VAR_sized(CalcHandle* handle, uint32_t * varsize, uint8_t 
 		{
 			return ERR_VAR_REJECTED;
 		}
-		return length >= 3 ? ERR_CALC_ERROR1 + err_code(buffer) : ERR_INVALID_PACKET;
+		return ti89_rejected(handle, buffer, length, false);
 	}
 	if (cmd != DBUS_CMD_VAR)
 	{
@@ -571,7 +577,7 @@ static int ti68k_recv_CTS(CalcHandle* handle, uint8_t is_92)
 
 	if (cmd == DBUS_CMD_SKP)
 	{
-		return is_92 ? ERR_VAR_REJECTED : (length >= 3 ? ERR_CALC_ERROR1 + err_code(buffer) : ERR_INVALID_PACKET);
+		return is_92 ? ERR_VAR_REJECTED : ti89_rejected(handle, buffer, length);
 	}
 	else if (cmd != DBUS_CMD_CTS)
 	{
@@ -691,7 +697,7 @@ static int ti68k_recv_ACK(CalcHandle* handle, uint16_t * status, uint8_t is_92)
 
 	if (!is_92 && cmd == DBUS_CMD_SKP)
 	{
-		return length >= 3 ? ERR_CALC_ERROR1 + err_code(buffer) : ERR_INVALID_PACKET;
+		return ti89_rejected(handle, buffer, length);
 	}
 
 	if (status != nullptr)
@@ -802,7 +808,7 @@ static int ti68k_recv_RTS_sized(CalcHandle* handle, uint32_t * varsize, uint8_t 
 	}
 	else if (cmd == DBUS_CMD_SKP)
 	{
-		return is_92 ? ERR_VAR_REJECTED : (length >= 3 ? ERR_CALC_ERROR1 + err_code(buffer) : ERR_INVALID_PACKET);
+		return is_92 ? ERR_VAR_REJECTED : ti89_rejected(handle, buffer, length, false);
 	}
 	else if (cmd != DBUS_CMD_VAR)
 	{

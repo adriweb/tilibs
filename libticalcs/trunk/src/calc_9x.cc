@@ -46,6 +46,21 @@
 #include "keys89.h"
 #include "keys92p.h"
 
+// Archive compaction and Flash installation can leave the link quiet. Keep
+// waiting in the current exchange, with the same six-minute cap as Z80 Flash.
+struct FlashTimeout
+{
+	CableHandle *cable;
+	unsigned int timeout;
+	FlashTimeout(CalcHandle *handle, bool extend = true)
+	    : cable(handle->cable), timeout(ticables_get_timeout(cable))
+	{
+		if (extend && handle->model != CALC_TI92 && timeout < 3600)
+			ticables_options_set_timeout(cable, 3600);
+	}
+	~FlashTimeout() { ticables_options_set_timeout(cable, timeout); }
+};
+
 #define SEND_RDY(handle) (handle->model != CALC_TI92 ? ti89_send_RDY(handle) : ti92_send_RDY(handle))
 #define SEND_KEY(handle, scancode) (handle->model != CALC_TI92 ? ti89_send_KEY(handle, scancode) : ti92_send_KEY(handle, scancode))
 #define SEND_SCR(handle) (handle->model != CALC_TI92 ? ti89_send_SCR(handle) : ti92_send_SCR(handle))
@@ -874,6 +889,7 @@ static int		send_var	(CalcHandle* handle, CalcMode mode, FileContent* content)
 			size = 65535;
 		}
 
+		FlashTimeout timeout(handle, vartype == 0x27);
 		ret = SEND_RTS(handle, size, vartype, varname);
 		if (!ret)
 		{
@@ -1242,6 +1258,7 @@ error:
 static int		send_flash	(CalcHandle* handle, FlashContent* content)
 {
 	int ret = 0;
+	FlashTimeout timeout(handle);
 
 	// send all headers except license
 	for (FlashContent* ptr = content; !ret && ptr != nullptr; ptr = ptr->next)
@@ -1695,6 +1712,7 @@ static int		get_clock	(CalcHandle* handle, CalcClock* _clock)
 static int		del_var		(CalcHandle* handle, VarRequest* vr)
 {
 	char varname[18];
+	FlashTimeout timeout(handle, vr->type == TI89_APPL);
 
 	tifiles_build_fullname(handle->model, varname, vr->folder, vr->name);
 	char* utf8 = ticonv_varname_to_utf8(handle->model, varname, vr->type);
