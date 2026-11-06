@@ -270,6 +270,7 @@ static inline void dusb_ca_type_set_bytes(const DUSBCalcAttr* attr, DUSBCATypeMo
 
 // Command wrappers
 TIEXPORT3 int TICALL dusb_cmd_s_mode_set(CalcHandle *handle, const DUSBModeSet mode);
+TIEXPORT3 int TICALL dusb_cmd_negotiate_mode(CalcHandle *handle, const DUSBModeSet mode);
 
 TIEXPORT3 int TICALL dusb_cmd_s_os_begin(CalcHandle *handle, uint32_t size);
 TIEXPORT3 int TICALL dusb_cmd_r_os_ack(CalcHandle *handle, uint32_t *size);
