@@ -1627,6 +1627,10 @@ a {
     text-transform: capitalize;
 }
 
+.transfer-type.custom-type {
+    text-transform: none;
+}
+
 .transfer-size {
     width: 90px;
     white-space: nowrap;
