@@ -307,6 +307,8 @@
   "confirm_download_items_from_folders": "Ladda ner {items} objekt från {folders} mapp(ar)?",
   "confirm_delete_items": "Ta bort {count} objekt från kalkylatorn?",
   "confirm_delete_entry": "Ta bort {kind} {name}?",
+  "confirm_delete_folder_contents": "Ta bort mappen {name} och allt dess innehåll?",
+  "confirm_delete_items_with_contents": "Ta bort {count} valda objekt, inklusive allt innehåll i valda mappar?",
   "confirm_download_items_from_target": "Ladda ner {count} objekt från {target}?",
   "prompt_rename_entry": "Byt namn på {kind}:",
   "kind_folder": "mapp",

@@ -160,6 +160,7 @@ test:
 	node tests/test_var_send_frontend.js
 	node tests/test_flash_gc_frontend.js
 	node tests/test_var_names_frontend.js
+	node tests/test_folder_delete_frontend.js
 	node tests/test_source_conversion.js
 	node tests/test_python_bytecode.cjs
 	node tests/test_numworks_backend.js

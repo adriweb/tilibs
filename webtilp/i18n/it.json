@@ -307,6 +307,8 @@
   "confirm_download_items_from_folders": "Scaricare {items} elemento/i da {folders} cartella/e?",
   "confirm_delete_items": "Eliminare {count} elemento/i dalla calcolatrice?",
   "confirm_delete_entry": "Eliminare {kind} {name}?",
+  "confirm_delete_folder_contents": "Eliminare la cartella {name} e tutto il suo contenuto?",
+  "confirm_delete_items_with_contents": "Eliminare i {count} elementi selezionati, incluso tutto il contenuto delle cartelle selezionate?",
   "confirm_download_items_from_target": "Scaricare {count} elemento/i da {target}?",
   "prompt_rename_entry": "Rinomina {kind}:",
   "kind_folder": "cartella",

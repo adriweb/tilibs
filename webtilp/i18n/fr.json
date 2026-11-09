@@ -307,6 +307,8 @@
   "confirm_download_items_from_folders": "Télécharger {items} élément(s) depuis {folders} dossier(s) ?",
   "confirm_delete_items": "Supprimer {count} élément(s) de la calculatrice ?",
   "confirm_delete_entry": "Supprimer {kind} {name} ?",
+  "confirm_delete_folder_contents": "Supprimer le dossier {name} et tout son contenu ?",
+  "confirm_delete_items_with_contents": "Supprimer les {count} éléments sélectionnés, y compris tout le contenu des dossiers sélectionnés ?",
   "confirm_download_items_from_target": "Télécharger {count} élément(s) depuis {target} ?",
   "prompt_rename_entry": "Renommer {kind} :",
   "kind_folder": "dossier",

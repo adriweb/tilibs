@@ -307,6 +307,8 @@
   "confirm_download_items_from_folders": "{items} item(s) downloaden uit {folders} map(pen)?",
   "confirm_delete_items": "{count} item(s) van de rekenmachine verwijderen?",
   "confirm_delete_entry": "{kind} {name} verwijderen?",
+  "confirm_delete_folder_contents": "Map {name} en alle inhoud verwijderen?",
+  "confirm_delete_items_with_contents": "{count} geselecteerde items verwijderen, inclusief alle inhoud van geselecteerde mappen?",
   "confirm_download_items_from_target": "{count} item(s) downloaden uit {target}?",
   "prompt_rename_entry": "{kind} hernoemen:",
   "kind_folder": "map",

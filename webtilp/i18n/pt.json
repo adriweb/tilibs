@@ -307,6 +307,8 @@
   "confirm_download_items_from_folders": "Transferir {items} item(ns) de {folders} pasta(s)?",
   "confirm_delete_items": "Eliminar {count} item(ns) da calculadora?",
   "confirm_delete_entry": "Eliminar {kind} {name}?",
+  "confirm_delete_folder_contents": "Eliminar a pasta {name} e todo o seu conteúdo?",
+  "confirm_delete_items_with_contents": "Eliminar os {count} itens selecionados, incluindo todo o conteúdo das pastas selecionadas?",
   "confirm_download_items_from_target": "Transferir {count} item(ns) de {target}?",
   "prompt_rename_entry": "Renomear {kind}:",
   "kind_folder": "pasta",

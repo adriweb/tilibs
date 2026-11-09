@@ -10,6 +10,7 @@ CalcFncts* name_test_original_calc;
 CalcFncts* name_test_capture_calc;
 VarEntry name_test_old, name_test_new;
 int name_test_calls;
+char name_test_os_version[32] = "3.10";
 int capture_name(CalcHandle*, VarRequest* request) {
     name_test_old = *request;
     name_test_new = {};
@@ -38,7 +39,7 @@ int capture_attr(CalcHandle* handle, VarRequest* request, FileAttr) {
 }
 int name_test_version(CalcHandle*, CalcInfos* infos) {
     *infos = {};
-    strcpy(infos->os_version, "3.10");
+    strcpy(infos->os_version, name_test_os_version);
     return 0;
 }
 int name_test_send(CableHandle*, uint8_t* data, uint32_t size) {
@@ -51,6 +52,7 @@ int name_test_recv(CableHandle*, uint8_t*, uint32_t) { return TICABLES_ERR_READ_
 extern "C" EMSCRIPTEN_KEEPALIVE const char* test_var_name_setup(int model, int type,
                                                                const char* raw_hex,
                                                                const char* folder_hex) {
+    strcpy(name_test_os_version, "3.10");
     g_calc_model = static_cast<CalcModel>(model);
     g_cable_handle = ticables_handle_new(CABLE_NUL, PORT_1);
     name_test_original_cable = g_cable_handle->cable;
@@ -100,6 +102,11 @@ extern "C" EMSCRIPTEN_KEEPALIVE void test_var_name_capture() {
 }
 
 extern "C" EMSCRIPTEN_KEEPALIVE int test_var_name_calls() { return name_test_calls; }
+
+extern "C" EMSCRIPTEN_KEEPALIVE void test_var_name_version(const char* version) {
+    assert(strlen(version) < sizeof(name_test_os_version));
+    strcpy(name_test_os_version, version);
+}
 
 extern "C" EMSCRIPTEN_KEEPALIVE void test_var_name_real_folder_delete() {
     auto callbacks = name_test_original_calc->fncts;
