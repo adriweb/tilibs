@@ -307,6 +307,8 @@
   "confirm_download_items_from_folders": "¿Descargar {items} elemento(s) de {folders} carpeta(s)?",
   "confirm_delete_items": "¿Eliminar {count} elemento(s) de la calculadora?",
   "confirm_delete_entry": "¿Eliminar {kind} {name}?",
+  "confirm_delete_folder_contents": "¿Eliminar la carpeta {name} y todo su contenido?",
+  "confirm_delete_items_with_contents": "¿Eliminar los {count} elementos seleccionados, incluido todo el contenido de las carpetas seleccionadas?",
   "confirm_download_items_from_target": "¿Descargar {count} elemento(s) de {target}?",
   "prompt_rename_entry": "Renombrar {kind}:",
   "kind_folder": "carpeta",

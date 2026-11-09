@@ -15,7 +15,7 @@ function extract(name) {
 async function check() {
     const calls = [], errors = [];
     let selected = [];
-    const module = {FS: {analyzePath: () => ({exists: true}), unlink() {}}};
+    const module = {FS: {analyzePath: () => ({exists: true}), unlink() {}, readFile: () => JSON.stringify({vars: state.dirlist, apps: []})}};
     const state = {activeFamily: 'ti', dirlist: [], settings: {}};
     const context = vm.createContext({
         state, console, Number, Error, URL,
@@ -47,7 +47,7 @@ async function check() {
         }
     });
     vm.runInContext(['buildSelectionKey', 'buildEntryFromCheckbox', 'getTiFolderRequestHex', 'receiveSelected',
-        'deleteSelected', 'renameEntry', 'deleteEntry', 'downloadEntry', 'previewEntry',
+        'deleteSelected', 'isSameDeleteFolder', 'getEntryFolderPath', 'readTiDeletionDirlist', 'deleteEntriesWithSession', 'renameEntry', 'deleteEntry', 'downloadEntry', 'previewEntry',
         'downloadFolderEntriesWithSession', 'performTransfers'].map(extract).join('\n'), context);
     const checkbox = {dataset: {
         name: 'L₁', folder: 'α', type: '1', kind: 'var',

@@ -307,6 +307,8 @@
   "confirm_download_items_from_folders": "{folders} 個のフォルダーから {items} 個の項目をダウンロードしますか？",
   "confirm_delete_items": "電卓から {count} 個の項目を削除しますか？",
   "confirm_delete_entry": "{kind} {name} を削除しますか？",
+  "confirm_delete_folder_contents": "フォルダー {name} とそのすべての内容を削除しますか？",
+  "confirm_delete_items_with_contents": "選択した {count} 個の項目と、選択したフォルダー内のすべての内容を削除しますか？",
   "confirm_download_items_from_target": "{target} から {count} 個の項目をダウンロードしますか？",
   "prompt_rename_entry": "{kind} の新しい名前:",
   "kind_folder": "フォルダー",
