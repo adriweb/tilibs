@@ -1542,17 +1542,16 @@ static int		del_var		(CalcHandle* handle, VarRequest* vr)
 	return ret;
 }
 
-static int		del_var_92		(CalcHandle* handle, VarRequest* vr)
+static int		del_var_keys		(CalcHandle* handle, VarRequest* vr)
 {
 	int ret = 0;
 	unsigned int i;
 	static const uint16_t keys[] = {
 		KEY92P_ON, KEY92P_ESC, KEY92P_ESC, KEY92P_ESC,
-		KEY92P_2ND + KEY92P_ESC, KEY92P_2ND + KEY92P_ESC, KEY92P_CTRL + KEY92P_Q, KEY92P_CLEAR, KEY92P_CLEAR,
-		'd', 'e', 'l', 'v', 'a', 'r',
-		KEY92P_SPACE
+		KEY92P_2ND + KEY92P_ESC, KEY92P_2ND + KEY92P_ESC, KEY92P_CTRL + KEY92P_Q, KEY92P_CLEAR, KEY92P_CLEAR
 	};
 	char varname[18];
+	const char *command = vr->type == TI89_DIR ? "delfold " : "delvar ";
 
 	tifiles_build_fullname(handle->model, varname, vr->folder, vr->name);
 	char* utf8 = ticonv_varname_to_utf8(handle->model, varname, vr->type);
@@ -1562,7 +1561,11 @@ static int		del_var_92		(CalcHandle* handle, VarRequest* vr)
 
 	for (i = 0; !ret && i < sizeof(keys) / sizeof(keys[0]); i++)
 	{
-		ret = send_key(handle, (uint32_t)(keys[i]));
+		ret = send_key(handle, i == 6 && (handle->model == CALC_TI89 || handle->model == CALC_TI89T) ? KEY89_HOME : (uint32_t)keys[i]);
+	}
+	for (i = 0; !ret && command[i]; i++)
+	{
+		ret = send_key(handle, (uint32_t)(uint8_t)command[i]);
 	}
 	for (i = 0; !ret && i < strlen(varname); i++)
 	{
@@ -1575,6 +1578,40 @@ static int		del_var_92		(CalcHandle* handle, VarRequest* vr)
 	}
 
 	return ret;
+}
+
+// Keep AMS compatibility decisions in the library for all Flash DBUS models.
+static int del_var_ams(CalcHandle* handle, VarRequest* vr)
+{
+	CalcInfos infos{};
+	int ret = handle->calc->fncts.get_version(handle, &infos);
+	if (ret == ERROR_READ_TIMEOUT)
+	{
+		// AMS 1.x also predates VER. Require a successful RDY exchange
+		// before falling back; a disconnected cable must not send keys.
+		ret = is_ready(handle);
+		if (ret) return ret;
+	}
+	else
+	{
+		if (ret) return ret;
+		if (!infos.os_version[0]) return ERR_INVALID_PACKET;
+		if (strcmp(infos.os_version, "2.09") >= 0) return del_var(handle, vr);
+	}
+	// Flash apps cannot be removed with the Home-screen DelVar command.
+	if (vr->type == TI89_APPL) return ERR_UNSUPPORTED;
+	return del_var_keys(handle, vr);
+}
+
+static int		del_folder		(CalcHandle* handle, VarRequest* vr)
+{
+	if (!vr->folder[0]) return ERR_INVALID_PARAMETER;
+
+	// Name the folder itself, without a trailing variable separator.
+	VarRequest request{};
+	request.type = TI89_DIR;
+	ticalcs_strlcpy(request.name, vr->folder, sizeof(request.name));
+	return handle->calc->fncts.del_var(handle, &request);
 }
 
 static int		new_folder  (CalcHandle* handle, VarRequest* vr)
@@ -1616,7 +1653,7 @@ static int		new_folder  (CalcHandle* handle, VarRequest* vr)
 									PAUSE(250);
 									// delete 'a1234567' variable
 									ticalcs_strlcpy(vr->name, "a1234567", sizeof(vr->name));
-									ret = ((handle->model != CALC_TI92) ? del_var : del_var_92)(handle, vr);
+									ret = handle->calc->fncts.del_var(handle, vr);
 								}
 							}
 						}
@@ -1824,7 +1861,7 @@ extern const CalcFncts calc_89 =
 	&dump_rom_2,
 	&set_clock,
 	&get_clock,
-	&del_var,
+	&del_var_ams,
 	&new_folder,
 	&get_version,
 	&send_cert,
@@ -1836,7 +1873,7 @@ extern const CalcFncts calc_89 =
 	&noop_control_lab_equipment,
 	&tixx_send_lab_equipment_data_legacy,
 	&tixx_get_lab_equipment_data_legacy,
-	&noop_del_folder,
+	&del_folder,
 	&noop_recv_os,
 };
 
@@ -1905,7 +1942,7 @@ extern const CalcFncts calc_92p =
 	&dump_rom_2,
 	&set_clock,
 	&get_clock,
-	&del_var,
+	&del_var_ams,
 	&new_folder,
 	&get_version,
 	&send_cert,
@@ -1917,7 +1954,7 @@ extern const CalcFncts calc_92p =
 	&noop_control_lab_equipment,
 	&tixx_send_lab_equipment_data_legacy,
 	&tixx_get_lab_equipment_data_legacy,
-	&noop_del_folder,
+	&del_folder,
 	&noop_recv_os,
 };
 
@@ -1986,7 +2023,7 @@ extern const CalcFncts calc_89t =
 	&dump_rom_2,
 	&set_clock,
 	&get_clock,
-	&del_var,
+	&del_var_ams,
 	&new_folder,
 	&get_version,
 	&send_cert,
@@ -1998,7 +2035,7 @@ extern const CalcFncts calc_89t =
 	&noop_control_lab_equipment,
 	&tixx_send_lab_equipment_data_legacy,
 	&tixx_get_lab_equipment_data_legacy,
-	&noop_del_folder,
+	&del_folder,
 	&noop_recv_os,
 };
 
@@ -2067,7 +2104,7 @@ extern const CalcFncts calc_v2 =
 	&dump_rom_2,
 	&set_clock,
 	&get_clock,
-	&del_var,
+	&del_var_ams,
 	&new_folder,
 	&get_version,
 	&send_cert,
@@ -2079,7 +2116,7 @@ extern const CalcFncts calc_v2 =
 	&noop_control_lab_equipment,
 	&tixx_send_lab_equipment_data_legacy,
 	&tixx_get_lab_equipment_data_legacy,
-	&noop_del_folder,
+	&del_folder,
 	&noop_recv_os,
 };
 
@@ -2147,7 +2184,7 @@ extern const CalcFncts calc_92 =
 	&dump_rom_2,
 	&noop_set_clock,
 	&noop_get_clock,
-	&del_var_92,
+	&del_var_keys,
 	&new_folder,
 	&get_version_92,
 	&noop_send_cert,
@@ -2159,7 +2196,7 @@ extern const CalcFncts calc_92 =
 	&noop_control_lab_equipment,
 	&tixx_send_lab_equipment_data_legacy,
 	&tixx_get_lab_equipment_data_legacy,
-	&noop_del_folder,
+	&del_folder,
 	&noop_recv_os,
 };
 
