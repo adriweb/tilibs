@@ -158,6 +158,34 @@ const timeout = setTimeout(() => { console.error('Variable-name WASM test timed 
         module.ccall('test_var_name_teardown', null, [], []);
         console.log(`Model ${fixture.model}: receive/app/delete/attributes/rename/move preserve ${fixture.folder}/${fixture.raw}`);
     }
+    // The bridge leaves legacy deletion selection to the library on every Flash DBUS model.
+    for (const legacyModel of [8, 9, 11, 12]) {
+        module.ccall('test_var_name_setup', 'string', ['number', 'number', 'string', 'string'], [legacyModel, 0, '41', '']);
+        module.ccall('test_var_name_version', null, ['string'], ['2.05']);
+        module.ccall('test_var_name_real_folder_delete', null, [], []);
+        const oldHandle = module.ccall('test_var_name_handle', 'number', [], []);
+        assert.equal(await module.ccall('calc_del_var', 'number',
+            ['number', 'string', 'string', 'number', 'string', 'string'],
+            [oldHandle, '', 'TIFRA', 0x24, '', '5449465241'], {async: true}), 271);
+        assert.equal(module.ccall('test_var_name_sent_hex', 'string', [], []), '', 'no DelVar keys for Flash apps');
+        assert.equal(await module.ccall('calc_del_folder', 'number', ['number', 'string', 'string'],
+            [oldHandle, 'display', '80'], {async: true}), 4);
+        assert.equal(module.ccall('test_var_name_sent_hex', 'string', [], []), '08870b01');
+        module.ccall('test_var_name_teardown', null, [], []);
+        // Creation must also reach the library on older AMS; the real callback
+        // starts by sending its temporary variable and times out on its ACK here.
+        module.ccall('test_var_name_setup', 'string', ['number', 'number', 'string', 'string'], [legacyModel, 0, '41', '']);
+        module.ccall('test_var_name_version', null, ['string'], ['2.05']);
+        module.ccall('test_var_name_real_folder_delete', null, [], []);
+        const createHandle = module.ccall('test_var_name_handle', 'number', [], []);
+        assert.equal(await module.ccall('calc_new_folder', 'number', ['number', 'string'],
+            [createHandle, 'legacy'], {async: true}), 4);
+        const createPacket = Buffer.from(module.ccall('test_var_name_sent_hex', 'string', [], []), 'hex');
+        assert.equal(createPacket[0], 8);
+        assert.equal(createPacket[1], 0xc9);
+        module.ccall('test_var_name_teardown', null, [], []);
+    }
+
     // Use the production folder callback: the old no-op returned success and
     // sent nothing, even though the frontend and bridge supplied the name.
     for (const model of [8, 9, 10, 11, 12]) {
@@ -185,7 +213,7 @@ const timeout = setTimeout(() => { console.error('Variable-name WASM test timed 
             module.ccall('test_var_name_teardown', null, [], []);
         }
     }
-    console.log('68k folder deletion uses type 0x1f or original TI-92 remote keys.');
+    console.log('68k folder deletion preserves type/name and selects DEL or legacy keys by model/AMS.');
     clearTimeout(timeout);
     process.exit(0);
 })().catch(error => { console.error(error); process.exit(1); });

@@ -2005,10 +2005,6 @@ int calc_del_var(CableHandle* cable_handle, const char* folder, const char* name
         return ready_result;
     }
 
-    if (tilp_calc_check_version("2.09") < 0) {
-        return -3;
-    }
-
     VarEntry req{};
     if (!set_var_request(req, folder, name, type, folder_hex, name_hex)) return ERR_WEB_INVALID_ARGUMENT;
 
@@ -2031,10 +2027,6 @@ int calc_new_folder(CableHandle* cable_handle, const char* folder_path) {
         return ready_result;
     }
 
-    if (tilp_calc_check_version("2.09") < 0) {
-        return -3;
-    }
-
     VarEntry req{};
     if (!copy_calc_name(req.folder, sizeof(req.folder), folder_path, nullptr, 0, false)) return ERR_WEB_INVALID_ARGUMENT;
 
@@ -2055,10 +2047,6 @@ int calc_del_folder(CableHandle* cable_handle, const char* folder_path, const ch
     const int ready_result = ensure_calc_ready(cable_handle, 0);
     if (ready_result != 0) {
         return ready_result;
-    }
-
-    if (tilp_calc_check_version("2.09") < 0) {
-        return -3;
     }
 
     VarEntry req{};

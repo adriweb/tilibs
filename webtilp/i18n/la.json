@@ -307,6 +307,8 @@
   "confirm_download_items_from_folders": "{items} res ex {folders} capsis deponere?",
   "confirm_delete_items": "{count} res e machina delere?",
   "confirm_delete_entry": "{kind} {name} delere?",
+  "confirm_delete_folder_contents": "Directorium {name} et omnia quae continet delere?",
+  "confirm_delete_items_with_contents": "{count} res selectas, cum omnibus quae directoria selecta continent, delere?",
   "confirm_download_items_from_target": "{count} res ex {target} deponere?",
   "prompt_rename_entry": "Renomina {kind}:",
   "kind_folder": "capsa",

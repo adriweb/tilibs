@@ -929,6 +929,8 @@ const I18N_EN = {
     "confirm_download_items_from_folders": "Download {items} item(s) from {folders} folder(s)?",
     "confirm_delete_items": "Delete {count} item(s) from the calculator?",
     "confirm_delete_entry": "Delete {kind} {name}?",
+    "confirm_delete_folder_contents": "Delete folder {name} and all its contents?",
+    "confirm_delete_items_with_contents": "Delete {count} selected item(s), including all contents of selected folders?",
     "confirm_download_items_from_target": "Download {count} item(s) from {target}?",
     "prompt_rename_entry": "Rename {kind}:",
     "kind_folder": "folder",
@@ -10245,6 +10247,98 @@ async function receiveSelected() {
     }
 }
 
+function isSameDeleteFolder(entry, folder) {
+    const raw = entry.is_folder === 1 || entry.isFolder
+        ? getTiFolderRequestHex(entry) : entry.folder_hex;
+    const targetRaw = getTiFolderRequestHex(folder);
+    if (raw != null && targetRaw != null) {
+        return raw.toLowerCase() === targetRaw.toLowerCase();
+    }
+    const path = entry.is_folder === 1 || entry.isFolder
+        ? (entry.folderPath || getEntryFolderPath(entry)) : entry.folder;
+    return normalizeFolderPath(path) === normalizeFolderPath(folder.folderPath || folder.name);
+}
+
+async function readTiDeletionDirlist(module, handle) {
+    const result = await ccallAsync(module, 'calc_dirlist_json', 'number', ['number', 'string'],
+        [handle, '/dirlist.json'], { timeoutMs: null, useProgress: true, progressLabel: 'Loading directory listing' });
+    if (result !== 0) {
+        throw new Error(`Cannot read folder contents (${formatErrorResult(module, result)}).`);
+    }
+    const parsed = JSON.parse(module.FS.readFile('/dirlist.json', { encoding: 'utf8' }));
+    return parsed.vars;
+}
+
+async function deleteEntriesWithSession(module, handle, selections) {
+    const model = getActiveCalcModelId();
+    const ti68k = [8, 9, 10, 11, 12, 14].includes(model);
+    const verifyDeletes = ti68k && model !== 14;
+    try {
+        // Use a fresh, unfiltered listing. Flash apps are global, including
+        // those returned alongside each folder's variables by AMS.
+        const vars = ti68k && selections.some(entry => entry.isFolder)
+            ? await readTiDeletionDirlist(module, handle) : [];
+        const plan = [];
+        const seen = new Set();
+        const append = entry => {
+            const key = JSON.stringify([!!entry.isFolder, entry.kind,
+                entry.folder_hex ?? entry.folder, entry.name_hex ?? entry.name, entry.type]);
+            if (!seen.has(key)) {
+                seen.add(key);
+                plan.push(entry);
+            }
+        };
+        for (const entry of selections) {
+            if (ti68k && entry.isFolder) {
+                if (!normalizeFolderPath(entry.folderPath || entry.name)) {
+                    throw new Error('No folder name provided.');
+                }
+                vars.filter(child => child.kind === 'var' && child.is_folder !== 1
+                    && isSameDeleteFolder(child, entry)).forEach(append);
+            }
+            append(entry);
+        }
+        for (const entry of plan) {
+            const folderPath = entry.folderPath || entry.name;
+            const label = entry.isFolder ? `folder ${folderPath}` : entry.name;
+            const result = entry.isFolder
+                ? await ccallAsync(module, 'calc_del_folder', 'number', ['number', 'string', 'string'],
+                    [handle, folderPath, getTiFolderRequestHex(entry)],
+                    { timeoutMs: PROGRESS_IDLE_TIMEOUT_MS, useProgress: true, progressLabel: `Deleting ${folderPath}` })
+                : await ccallAsync(module, 'calc_del_var', 'number', ['number', 'string', 'string', 'number', 'string', 'string'],
+                    [handle, entry.folder, entry.name, entry.type, entry.folder_hex, entry.name_hex],
+                    { timeoutMs: PROGRESS_IDLE_TIMEOUT_MS, useProgress: true, progressLabel: `Deleting ${entry.name}` });
+            if (result !== 0) {
+                log(`Failed to delete ${label} (${formatErrorResult(module, result)}).`);
+                return false;
+            }
+            // Older DBUS models may only acknowledge remote deletion keys.
+            // Check the actual result before deleting another variable or folder.
+            if (verifyDeletes && entry.kind !== 'app') {
+                const remaining = await readTiDeletionDirlist(module, handle);
+                const exists = remaining.some(candidate => entry.isFolder
+                    ? candidate.is_folder === 1 && isSameDeleteFolder(candidate, entry)
+                    : candidate.kind === 'var' && candidate.is_folder !== 1
+                        && candidate.type === entry.type
+                        && (candidate.name_hex != null && entry.name_hex != null
+                            ? candidate.name_hex.toLowerCase() === entry.name_hex.toLowerCase()
+                            : candidate.name === entry.name)
+                        && (candidate.folder_hex != null && entry.folder_hex != null
+                            ? candidate.folder_hex.toLowerCase() === entry.folder_hex.toLowerCase()
+                            : normalizeFolderPath(candidate.folder) === normalizeFolderPath(entry.folder)));
+                if (exists) {
+                    log(`Failed to delete ${label}: it is still present on the calculator.`);
+                    return false;
+                }
+            }
+            log(`Deleted ${label}.`);
+        }
+        return true;
+    } finally {
+        await refreshDirlist();
+    }
+}
+
 async function deleteSelected() {
     const selections = getSelectedVarInputs()
         .map(buildEntryFromCheckbox);
@@ -10252,7 +10346,8 @@ async function deleteSelected() {
         log('No variables selected.');
         return;
     }
-    if (!confirm(tFormat('confirm_delete_items', { count: selections.length }))) {
+    if (!confirm(tFormat(selections.some(entry => entry.isFolder)
+        ? 'confirm_delete_items_with_contents' : 'confirm_delete_items', { count: selections.length }))) {
         return;
     }
     setButtonLoading(els.btnDeleteSelected, true);
@@ -10267,25 +10362,7 @@ async function deleteSelected() {
         await authorizeDevice();
         const module = await initModule();
         const handle = await ensureHandle();
-        for (const entry of selections) {
-            if (entry.isFolder) {
-                const folderPath = entry.folderPath || entry.name;
-                const result = await ccallAsync(module, 'calc_del_folder', 'number', ['number', 'string', 'string'], [handle, folderPath, getTiFolderRequestHex(entry)], { timeoutMs: PROGRESS_IDLE_TIMEOUT_MS, useProgress: true, progressLabel: `Deleting ${folderPath}` });
-                if (result === 0) {
-                    log(`Deleted folder ${folderPath}.`);
-                } else {
-                    log(`Failed to delete folder ${folderPath} (${formatErrorResult(module, result)}).`);
-                }
-            } else {
-                const result = await ccallAsync(module, 'calc_del_var', 'number', ['number', 'string', 'string', 'number', 'string', 'string'], [handle, entry.folder, entry.name, entry.type, entry.folder_hex, entry.name_hex], { timeoutMs: PROGRESS_IDLE_TIMEOUT_MS, useProgress: true, progressLabel: `Deleting ${entry.name}` });
-                if (result === 0) {
-                    log(`Deleted ${entry.name}.`);
-                } else {
-                    log(`Failed to delete ${entry.name} (${formatErrorResult(module, result)}).`);
-                }
-            }
-        }
-        await refreshDirlist();
+        await deleteEntriesWithSession(module, handle, selections);
     } catch (err) {
         logError(err, 'Delete selected failed');
     } finally {
@@ -10388,7 +10465,7 @@ async function renameEntry(entry) {
 }
 
 async function deleteEntry(entry) {
-    if (!confirm(tFormat('confirm_delete_entry', {
+    if (!confirm(tFormat(entry.isFolder ? 'confirm_delete_folder_contents' : 'confirm_delete_entry', {
         kind: t(entry.isFolder ? 'kind_folder' : 'kind_item'),
         name: entry.name
     }))) {
@@ -10442,23 +10519,7 @@ async function deleteEntry(entry) {
         await authorizeDevice();
         const module = await initModule();
         const handle = await ensureHandle();
-        if (entry.isFolder) {
-            const folderPath = entry.folderPath || entry.name;
-            const result = await ccallAsync(module, 'calc_del_folder', 'number', ['number', 'string', 'string'], [handle, folderPath, getTiFolderRequestHex(entry)], { timeoutMs: PROGRESS_IDLE_TIMEOUT_MS, useProgress: true, progressLabel: `Deleting ${folderPath}` });
-            if (result === 0) {
-                log(`Deleted folder ${folderPath}.`);
-            } else {
-                log(`Failed to delete folder ${folderPath} (${formatErrorResult(module, result)}).`);
-            }
-        } else {
-            const result = await ccallAsync(module, 'calc_del_var', 'number', ['number', 'string', 'string', 'number', 'string', 'string'], [handle, entry.folder, entry.name, entry.type, entry.folder_hex, entry.name_hex], { timeoutMs: PROGRESS_IDLE_TIMEOUT_MS, useProgress: true, progressLabel: `Deleting ${entry.name}` });
-            if (result === 0) {
-                log(`Deleted ${entry.name}.`);
-            } else {
-                log(`Failed to delete ${entry.name} (${formatErrorResult(module, result)}).`);
-            }
-        }
-        await refreshDirlist();
+        await deleteEntriesWithSession(module, handle, [entry]);
     } catch (err) {
         logError(err, 'Delete failed');
     } finally {
