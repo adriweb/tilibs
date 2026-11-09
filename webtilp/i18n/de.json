@@ -307,6 +307,8 @@
   "confirm_download_items_from_folders": "{items} Eintrag/Einträge aus {folders} Ordner(n) herunterladen?",
   "confirm_delete_items": "{count} Eintrag/Einträge vom Rechner löschen?",
   "confirm_delete_entry": "{kind} {name} löschen?",
+  "confirm_delete_folder_contents": "Ordner {name} und seinen gesamten Inhalt löschen?",
+  "confirm_delete_items_with_contents": "{count} ausgewählte Einträge einschließlich des gesamten Inhalts ausgewählter Ordner löschen?",
   "confirm_download_items_from_target": "{count} Eintrag/Einträge aus {target} herunterladen?",
   "prompt_rename_entry": "{kind} umbenennen:",
   "kind_folder": "Ordner",

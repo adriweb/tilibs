@@ -307,6 +307,8 @@
   "confirm_download_items_from_folders": "从 {folders} 个文件夹下载 {items} 个项目？",
   "confirm_delete_items": "从计算器删除 {count} 个项目？",
   "confirm_delete_entry": "删除{kind} {name}？",
+  "confirm_delete_folder_contents": "删除文件夹 {name} 及其全部内容？",
+  "confirm_delete_items_with_contents": "删除选中的 {count} 个项目，包括所选文件夹中的全部内容？",
   "confirm_download_items_from_target": "从 {target} 下载 {count} 个项目？",
   "prompt_rename_entry": "重命名{kind}：",
   "kind_folder": "文件夹",
