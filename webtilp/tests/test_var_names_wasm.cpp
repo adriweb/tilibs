@@ -158,6 +158,27 @@ extern "C" EMSCRIPTEN_KEEPALIVE void test_var_name_teardown() {
     g_cable_handle = nullptr;
 }
 
+extern "C" EMSCRIPTEN_KEEPALIVE const char* test_other_subtype_json(int model, int type, const char* hex, int container) {
+    assert(strlen(hex) % 2 == 0);
+    std::vector<uint8_t> data(strlen(hex) / 2);
+    for (size_t i = 0; i < data.size(); ++i) {
+        unsigned value;
+        assert(sscanf(hex + 2 * i, "%2x", &value) == 1);
+        data[i] = value;
+    }
+    VarEntry entry{};
+    strcpy(entry.name, "test");
+    entry.type = type;
+    entry.size = data.size();
+    entry.data = data.data();
+    GString* json = g_string_new(nullptr);
+    append_var_entry_json_with_container(json, &entry, static_cast<CalcModel>(model), container ? "var" : nullptr, 0);
+    static std::string result;
+    result = json->str;
+    g_string_free(json, TRUE);
+    return result.c_str();
+}
+
 extern "C" EMSCRIPTEN_KEEPALIVE void test_var_name_files() {
     // Write through the legacy model so the file header holds literal bytes,
     // independently of the USB name conversion exercised when sending it.

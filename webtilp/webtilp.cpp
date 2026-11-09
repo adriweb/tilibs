@@ -2170,6 +2170,26 @@ static unsigned int compute_location_mask_for_entry(const VarEntry* ve) {
     return (LOC_RAM | LOC_ARCHIVE);
 }
 
+// TI-68k Other variables end in NUL, a custom type string, NUL, OTH_TAG.
+// Read the parsed payload, independently of the container's filename extension.
+static std::string ti68k_other_subtype(const VarEntry* ve, CalcModel model) {
+    if (!ticonv_model_is_ti68k(model) || ve->type != TI89_OTH || !ve->data || ve->size < 6) {
+        return {};
+    }
+    const size_t end = ve->size - 2;
+    if (ve->data[end] != 0 || ve->data[end + 1] != 0xf8) {
+        return {};
+    }
+    size_t start = end;
+    // The first two bytes belong to the size word, not the custom type.
+    while (start > 2 && ve->data[start - 1] != 0) {
+        if (!g_ascii_isprint(ve->data[start - 1])) return {};
+        --start;
+    }
+    if (start <= 2 || start == end) return {};
+    return std::string(reinterpret_cast<const char*>(ve->data + start), end - start);
+}
+
 static void append_var_entry_json_with_container(GString* out, const VarEntry* ve, CalcModel name_model, const char* container_type, int container_index) {
     if (!out || !ve) {
         return;
@@ -2203,6 +2223,12 @@ static void append_var_entry_json_with_container(GString* out, const VarEntry* v
     g_string_append(out, ",\"type_name\":\"");
     json_append_escaped(out, type_name ? type_name : "");
     g_string_append(out, "\"");
+    const std::string subtype = ti68k_other_subtype(ve, name_model);
+    if (!subtype.empty()) {
+        g_string_append(out, ",\"type_subtype\":\"");
+        json_append_escaped(out, subtype.c_str());
+        g_string_append(out, "\"");
+    }
     g_string_append(out, ",\"attr\":");
     g_string_append_printf(out, "%u", ve->attr);
     g_string_append(out, ",\"location_mask\":");
