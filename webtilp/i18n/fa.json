@@ -307,6 +307,8 @@
   "confirm_download_items_from_folders": "{items} مورد از {folders} پوشه دانلود شود؟",
   "confirm_delete_items": "{count} مورد از ماشین‌حساب حذف شود؟",
   "confirm_delete_entry": "{kind} {name} حذف شود؟",
+  "confirm_delete_folder_contents": "پوشهٔ {name} و تمام محتوای آن حذف شود؟",
+  "confirm_delete_items_with_contents": "{count} مورد انتخاب‌شده، شامل تمام محتوای پوشه‌های انتخاب‌شده، حذف شود؟",
   "confirm_download_items_from_target": "{count} مورد از {target} دانلود شود؟",
   "prompt_rename_entry": "تغییر نام {kind}:",
   "kind_folder": "پوشه",

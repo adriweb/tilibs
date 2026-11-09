@@ -307,6 +307,8 @@
   "confirm_download_items_from_folders": "تنزيل {items} عنصرًا من {folders} مجلدًا؟",
   "confirm_delete_items": "حذف {count} عنصرًا من الآلة الحاسبة؟",
   "confirm_delete_entry": "حذف {kind} {name}؟",
+  "confirm_delete_folder_contents": "هل تريد حذف المجلد {name} وجميع محتوياته؟",
+  "confirm_delete_items_with_contents": "هل تريد حذف العناصر المحددة وعددها {count}، بما في ذلك جميع محتويات المجلدات المحددة؟",
   "confirm_download_items_from_target": "تنزيل {count} عنصرًا من {target}؟",
   "prompt_rename_entry": "إعادة تسمية {kind}:",
   "kind_folder": "مجلد",
