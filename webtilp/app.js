@@ -8764,6 +8764,7 @@ async function buildTransferPlanFromFsEntries(entries, module) {
                 entryName: baseName,
                 entryType: null,
                 entryTypeName: '',
+                entryTypeSubtype: '',
                 entryFolder: '',
                 entryAttr: 0,
                 entrySize: null,
@@ -8803,6 +8804,7 @@ async function buildTransferPlanFromFsEntries(entries, module) {
                 entryName: defaultName,
                 entryType: entryInfo.type ?? null,
                 entryTypeName: entryInfo.type_name ?? '',
+                entryTypeSubtype: entryInfo.type_subtype || '',
                 entryFolder: defaultFolder,
                 entryAttr: entryInfo.attr ?? 0,
                 entrySize,
@@ -8962,9 +8964,11 @@ function openTransferModal(plan, options) {
         const entryLabel = item.entryCount > 1
             ? `${item.entryCount} entries`
             : (item.entryName || item.file.name);
-        const typeLabel = item.entryTypeName
-            || (!(["unknown","single","regular"].includes(item.fileClass)) ? item.fileClass : null)
-            || (item.entryType != null ? `(type ${item.entryType})` : '-');
+        const typeLabel = item.entryTypeSubtype
+            ? `Other (${item.entryTypeSubtype})`
+            : item.entryTypeName
+                || (!(["unknown","single","regular"].includes(item.fileClass)) ? item.fileClass : null)
+                || (item.entryType != null ? `(type ${item.entryType})` : '-');
         const hasParsedSize = item.entrySize !== null && item.entrySize !== undefined && item.entrySize !== '';
         const parsedSize = hasParsedSize ? Number(item.entrySize) : NaN;
         const sizeLabel = Number.isFinite(parsedSize) && parsedSize >= 0 ? formatBytes(parsedSize) : '-';
@@ -9008,7 +9012,7 @@ function openTransferModal(plan, options) {
             <td>${escapeHtml(item.file.name)}</td>
             <td>${escapeHtml(entryLabel)}</td>
             <td class="transfer-size">${escapeHtml(sizeLabel)}</td>
-            <td class="transfer-type">${escapeHtml(typeLabel)}</td>
+            <td class="transfer-type${item.entryTypeSubtype ? ' custom-type' : ''}">${escapeHtml(typeLabel)}</td>
             ${locationCell}
             ${folderCell}
         `;
