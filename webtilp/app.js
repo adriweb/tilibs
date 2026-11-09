@@ -8934,7 +8934,11 @@ function openTransferModal(plan, options) {
     if (els.transferOverwriteAll) {
         els.transferOverwriteAll.checked = false;
     }
-    const folders = options.folders || [];
+    // Files can target folders that are not on the calculator yet.
+    const folders = [...new Set([
+        ...(options.folders || []),
+        ...plan.filter(item => isVarFileClass(item.fileClass)).map(item => item.entryFolder)
+    ].filter(Boolean))];
 
     document.querySelectorAll('.transfer-location').forEach(cell => {
         cell.classList.toggle('hidden', !options.hasArchive);
