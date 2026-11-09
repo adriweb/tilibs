@@ -407,7 +407,7 @@ int TICALL ti89_send_DEL(CalcHandle* handle, uint32_t varsize, uint8_t vartype, 
 	buffer[1] = 0;
 	buffer[2] = 0;
 	buffer[3] = 0;
-	buffer[4] = 0;
+	buffer[4] = vartype;
 	buffer[5] = len;
 	memcpy(buffer + 6, varname, len);
 
