@@ -5,6 +5,38 @@ const timeout = setTimeout(() => { console.error('Variable-name WASM test timed 
 (async () => {
     const module = await createModule({print() {}, printErr() {}});
     await module.ccall('init', 'number', [], [], {async: true});
+    const subtypeMetadata = (bytes, model = 8, type = 0x1c, container = 0) => JSON.parse(
+        module.ccall('test_other_subtype_json', 'string', ['number', 'number', 'string', 'number'],
+            [model, type, Buffer.from(bytes).toString('hex'), container]));
+    const otherPayload = tag => {
+        const data = Buffer.concat([Buffer.from([0xab, 0xcd, 0]), Buffer.from(tag), Buffer.from([0, 0xf8])]);
+        const size = Buffer.alloc(2); size.writeUInt16BE(data.length);
+        return Buffer.concat([size, data]);
+    };
+    for (const model of [8, 9, 10, 11, 12, 14]) {
+        for (const tag of ['ppg', 'MLEV', 'MTXT', '<"&>']) {
+            for (const container of [0, 1]) {
+                const metadata = subtypeMetadata(otherPayload(tag), model, 0x1c, container);
+                assert.equal(metadata.type_subtype, tag);
+                assert.equal(metadata.type, 0x1c, 'custom subtype does not replace the wire type');
+                assert.ok(metadata.type_name);
+                if (container) assert.equal(metadata.container_type, 'var');
+            }
+        }
+    }
+    const tagged = otherPayload('ppg');
+    for (let end = 0; end < tagged.length; end++) {
+        assert.equal(subtypeMetadata(tagged.subarray(0, end)).type_subtype, undefined, 'truncated footer');
+    }
+    for (const bytes of [
+        otherPayload(''), otherPayload(Buffer.from([0x80])), otherPayload(Buffer.from([1])),
+        Buffer.from([0, 7, 0xab, 0xcd, 0x70, 0x70, 0x67, 0, 0xf8]), // no leading delimiter
+        Buffer.from([0, 5, 0, 0x70, 0x70, 0x67, 0xf8]), // no trailing delimiter
+        Buffer.from([0, 6, 0, 0x70, 0x70, 0x67, 0, 0xf3]) // an ASM tag, not Other
+    ]) assert.equal(subtypeMetadata(bytes).type_subtype, undefined);
+    assert.equal(subtypeMetadata(tagged, 13).type_subtype, undefined, 'Z80 data is not TI-68k');
+    assert.equal(subtypeMetadata(tagged, 8, 0x21).type_subtype, undefined, 'wire type must be Other');
+    console.log('TI-68k Other subtypes preserve case, wire types and container metadata; malformed footers are ignored.');
     module.ccall('test_var_name_files', null, [], []);
     // AppVar headers are literal even when a leading lowercase byte coincides
     // with a built-in token, or the whole name looks like a picture/GDB/string.
