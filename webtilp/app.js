@@ -10020,7 +10020,7 @@ async function dumpRom() {
         }
 
         log('Receiving ROM image...');
-        const target = '/downloads/romdump.bin';
+        const target = '/downloads/calculator_dump.rom';
         result = await ccallAsync(module, 'calc_dump_rom_2', 'number', ['number', 'number', 'string'], [handle, 0, target], { timeoutMs: null, useProgress: true, progressLabel: 'Dumping ROM' });
         if (result !== 0) {
             log(`ROM dump step 2 failed (${formatErrorResult(module, result)}).`);
