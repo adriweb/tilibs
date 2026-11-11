@@ -196,10 +196,17 @@ test-ti86-os-wasm:
 	$(EMCC) $(CXXFLAGS) tests/test_ti86_os_wasm.cpp hp_prime_bridge.cpp hp_prime_app.cpp $(INCLUDES) $(LIBS) -o "$$test_dir/ti86_os.js" $(EMCCFLAGS); \
 	node tests/test_ti86_os_wasm.cjs "$$test_dir/ti86_os.js"
 
+test-receive-bounds-wasm:
+	@set -e; test_dir=$$(mktemp -d); trap 'rm -rf "$$test_dir"' EXIT; \
+	$(EMCC) $(CXXFLAGS) $(LIBTICALCS_DIR)/tests/test_receive_bounds.cc $(INCLUDES) $(LIBS) \
+		-o "$$test_dir/receive_bounds.js" --bind -sASYNCIFY=1 -sALLOW_MEMORY_GROWTH=1 \
+		-sSTACK_SIZE=5242880 -sEXIT_RUNTIME=1 -sPTHREAD_POOL_SIZE=2 -sPROXY_TO_PTHREAD=1; \
+	node "$$test_dir/receive_bounds.js"
+
 test-silverlink-wasm: $(TARGET)
 	node tests/test_silverlink_recovery.js $(TARGET)
 
 clean:
 	rm -f $(TARGET) webtilp.wasm webtilp.worker.js sw.js version.json $(APP_JS_BUNDLE) $(NUMWORKS_JS_BUNDLE) $(BUILD_PROFILE_CSS) $(PYTHON_CONVERTER_ASSETS)
 
-.PHONY: all dev prod prepare_dev prepare_prod prepare_python_converters test test-python-bytecode-wasm test-preview-wasm test-var-send-wasm test-flash-gc-wasm test-var-names-wasm test-ti86-os-wasm clean stamp
+.PHONY: all dev prod prepare_dev prepare_prod prepare_python_converters test test-python-bytecode-wasm test-preview-wasm test-var-send-wasm test-flash-gc-wasm test-var-names-wasm test-ti86-os-wasm test-receive-bounds-wasm clean stamp
