@@ -1584,17 +1584,38 @@ static int		dump_rom_2	(CalcHandle* handle, CalcDumpSize size, const char *filen
 	return ret;
 }
 
+static int get_clock(CalcHandle* handle, CalcClock* clock);
+
 static int		set_clock	(CalcHandle* handle, CalcClock* _clock)
 {
 	uint8_t buffer[16];
 	uint16_t status;
+	int ret = 0;
+	int timezone_minutes = _clock->timezone_minutes;
+	if (_clock->timezone_valid)
+	{
+		// AMS clamps UTC dates before the RTC epoch. Reject unrepresentable
+		// civil date/offset pairs before changing the clock.
+		uint32_t civil_seconds;
+		ret = ticalcs_clock_to_dusb(_clock, &civil_seconds);
+		if (ret) return ret;
+		const gint64 utc_seconds = gint64(civil_seconds) - gint64(timezone_minutes) * 60;
+		if (utc_seconds < 0 || utc_seconds > G_MAXUINT32) return ERR_INVALID_PARAMETER;
+	}
+	else
+	{
+		CalcClock current = {};
+		ret = get_clock(handle, &current);
+		if (ret) return ret;
+		timezone_minutes = current.timezone_minutes;
+	}
 
 	buffer[0] = 0;
 	buffer[1] = 0;
 	buffer[2] = 0;
 	buffer[3] = 0;
-	buffer[4] = 0;
-	buffer[5] = 0;
+	buffer[4] = uint8_t(uint16_t(timezone_minutes) >> 8);
+	buffer[5] = uint8_t(timezone_minutes);
 	buffer[6] = (uint8_t)(_clock->year >> 8);
 	buffer[7] = (uint8_t)(_clock->year & 0x00ff);
 	buffer[8] = _clock->month;
@@ -1609,7 +1630,7 @@ static int		set_clock	(CalcHandle* handle, CalcClock* _clock)
 	ticalcs_strlcpy(handle->updat->text, _("Setting clock..."), sizeof(handle->updat->text));
 	ticalcs_update_label(handle);
 
-	int ret = SEND_RTS(handle, 0x10, TI89_CLK, "Clock");
+	ret = SEND_RTS(handle, 0x10, TI89_CLK, "Clock");
 	if (!ret)
 	{
 		ret = RECV_ACK(handle, NULL);
@@ -1687,6 +1708,9 @@ static int		get_clock	(CalcHandle* handle, CalcClock* _clock)
 										ret = SEND_ACK(handle);
 										if (!ret)
 										{
+											const unsigned encoded_timezone = (unsigned(buffer[4]) << 8) | buffer[5];
+											_clock->timezone_minutes = encoded_timezone & 0x8000U ? int(encoded_timezone) - 0x10000 : int(encoded_timezone);
+											_clock->timezone_valid = 1;
 											_clock->year = (((uint16_t)buffer[6]) << 8) | buffer[7];
 											_clock->month = buffer[8];
 											_clock->day = buffer[9];

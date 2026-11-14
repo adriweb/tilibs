@@ -332,6 +332,163 @@ static std::vector<uint8_t> sent_dbus_commands()
 	return commands;
 }
 
+static void clock_68k_reply(uint8_t mid, const std::vector<uint8_t> &payload, bool complete = true)
+{
+	packet(mid, DBUS_CMD_ACK);
+	packet(mid, DBUS_CMD_VAR, {16, 0, 0, 0, TI89_CLK, 5, 'C', 'l', 'o', 'c', 'k', 0});
+	packet(mid, DBUS_CMD_ACK);
+	packet(mid, DBUS_CMD_XDP, payload);
+	if (complete) packet(mid, DBUS_CMD_EOT);
+}
+
+static void check_68k_clock_timezone_preserved()
+{
+	for (CalcModel model : {CALC_TI89, CALC_TI89T, CALC_TI92P, CALC_V200}) {
+		const uint8_t mid = (model == CALC_TI89 || model == CALC_TI89T) ? 0x98 : 0x88;
+		for (int offset : {0, 60, -300, -330, 345}) {
+			MockCalculator calc(model);
+			const uint16_t encoded = uint16_t(offset);
+			const std::vector<uint8_t> current = {0, 0, 0, 0, uint8_t(encoded >> 8), uint8_t(encoded),
+			    0x07, 0xd1, 2, 3, 4, 5, 6, 1, 12, 0xff};
+			clock_68k_reply(mid, current);
+			packet(mid, DBUS_CMD_ACK);
+			packet(mid, DBUS_CMD_CTS);
+			packet(mid, DBUS_CMD_ACK);
+			packet(mid, DBUS_CMD_ACK);
+			CalcClock requested = {};
+			requested.year = 2026;
+			requested.month = 11;
+			requested.day = 14;
+			requested.hours = 17;
+			requested.minutes = 25;
+			requested.seconds = 30;
+			requested.date_format = 3;
+			requested.time_format = 24;
+			CHECK(ticalcs_calc_set_clock(calc.handle, &requested) == 0);
+			CHECK(received == incoming.size() && !calc.handle->busy);
+			unsigned int writes = 0;
+			for (size_t off = 0; off < outgoing.size();) {
+				const size_t size = outgoing[off + 2] | (size_t(outgoing[off + 3]) << 8);
+				if (outgoing[off + 1] == DBUS_CMD_XDP) {
+					const std::vector<uint8_t> expected = {0, 0, 0, 0, uint8_t(encoded >> 8), uint8_t(encoded),
+					    0x07, 0xea, 11, 14, 17, 25, 30, 3, 24, 0xff};
+					CHECK(size == expected.size());
+					CHECK(std::equal(expected.begin(), expected.end(), outgoing.begin() + off + 4));
+					writes++;
+				}
+				off += 4 + (size ? size + 2 : 0);
+			}
+			CHECK(writes == 1);
+		}
+		for (int failure : {0, 1}) {
+			MockCalculator calc(model);
+			if (failure) {
+				clock_68k_reply(mid, std::vector<uint8_t>(15), false);
+			} else {
+				receive_failure = ERROR_READ_TIMEOUT;
+			}
+			CalcClock requested = {};
+			CHECK(ticalcs_calc_set_clock(calc.handle, &requested) ==
+			    (failure ? ERR_INVALID_PACKET : ERROR_READ_TIMEOUT));
+			const auto commands = sent_dbus_commands();
+			CHECK(std::find(commands.begin(), commands.end(), DBUS_CMD_RTS) == commands.end());
+			CHECK(received == incoming.size() && !calc.handle->busy);
+		}
+	}
+}
+
+static void check_68k_clock_timezone_access()
+{
+	for (CalcModel model : {CALC_TI89, CALC_TI89T, CALC_TI92P, CALC_V200}) {
+		const uint8_t mid = (model == CALC_TI89 || model == CALC_TI89T) ? 0x98 : 0x88;
+		for (int offset : {0, -1, 60, -300, -330, 345, -32768, 32767}) {
+			const uint16_t encoded = uint16_t(offset);
+			{
+				MockCalculator calc(model);
+				clock_68k_reply(mid, {0, 0, 0, 0, uint8_t(encoded >> 8), uint8_t(encoded),
+				    0x07, 0xea, 11, 14, 17, 25, 30, 3, 24, 0xff});
+				CalcClock actual = {};
+				CHECK(ticalcs_calc_get_clock(calc.handle, &actual) == 0);
+				CHECK(actual.timezone_valid && actual.timezone_minutes == offset);
+				CHECK(actual.year == 2026 && actual.hours == 17 && actual.minutes == 25);
+				CHECK(received == incoming.size());
+			}
+			{
+				MockCalculator calc(model);
+				packet(mid, DBUS_CMD_ACK);
+				packet(mid, DBUS_CMD_CTS);
+				packet(mid, DBUS_CMD_ACK);
+				packet(mid, DBUS_CMD_ACK);
+				CalcClock requested = {};
+				requested.year = 2026;
+				requested.month = 11;
+				requested.day = 14;
+				requested.hours = 17;
+				requested.minutes = 25;
+				requested.seconds = 30;
+				requested.date_format = 3;
+				requested.time_format = 12;
+				requested.timezone_minutes = offset;
+				requested.timezone_valid = 1;
+				CHECK(ticalcs_calc_set_clock(calc.handle, &requested) == 0);
+				CHECK(received == incoming.size() && !calc.handle->busy);
+				const auto commands = sent_dbus_commands();
+				CHECK(std::find(commands.begin(), commands.end(), DBUS_CMD_REQ) == commands.end());
+				unsigned int writes = 0;
+				for (size_t off = 0; off < outgoing.size();) {
+					const size_t size = outgoing[off + 2] | (size_t(outgoing[off + 3]) << 8);
+					if (outgoing[off + 1] == DBUS_CMD_XDP) {
+						const std::vector<uint8_t> expected = {0, 0, 0, 0, uint8_t(encoded >> 8), uint8_t(encoded),
+						    0x07, 0xea, 11, 14, 17, 25, 30, 3, 12, 0xff};
+						CHECK(size == expected.size());
+						CHECK(std::equal(expected.begin(), expected.end(), outgoing.begin() + off + 4));
+						writes++;
+					}
+					off += 4 + (size ? size + 2 : 0);
+				}
+				CHECK(writes == 1);
+			}
+		}
+		for (int failure : {0, 1, 2}) {
+			MockCalculator calc(model);
+			if (failure) clock_68k_reply(mid, std::vector<uint8_t>(failure == 1 ? 15 : 16), false);
+			receive_failure = ERROR_READ_TIMEOUT;
+			CalcClock actual = {};
+			actual.timezone_minutes = 12345;
+			const int result = ticalcs_calc_get_clock(calc.handle, &actual);
+			CHECK(result == (failure == 1 ? ERR_INVALID_PACKET : ERROR_READ_TIMEOUT));
+			CHECK(actual.timezone_minutes == 12345 && !actual.timezone_valid);
+			CHECK(received == incoming.size() && !calc.handle->busy);
+		}
+	}
+}
+
+static void check_68k_clock_timezone_bounds()
+{
+	for (CalcModel model : {CALC_TI89, CALC_TI89T, CALC_TI92P, CALC_V200}) {
+		for (int offset : {60, 0, -60}) {
+			MockCalculator calc(model);
+			const uint8_t mid = (model == CALC_TI89 || model == CALC_TI89T) ? 0x98 : 0x88;
+			CalcClock requested = {};
+			requested.year = 1997;
+			requested.month = requested.day = 1;
+			requested.time_format = 12;
+			requested.date_format = 1;
+			requested.timezone_minutes = offset;
+			requested.timezone_valid = 1;
+			if (offset <= 0) {
+				packet(mid, DBUS_CMD_ACK);
+				packet(mid, DBUS_CMD_CTS);
+				packet(mid, DBUS_CMD_ACK);
+				packet(mid, DBUS_CMD_ACK);
+			}
+			CHECK(ticalcs_calc_set_clock(calc.handle, &requested) == (offset > 0 ? ERR_INVALID_PARAMETER : 0));
+			CHECK(received == incoming.size() && !calc.handle->busy);
+			if (offset > 0) CHECK(outgoing.empty());
+		}
+	}
+}
+
 static void check_68k_flash_waits()
 {
 	for (CalcModel model : {CALC_TI89, CALC_TI89T, CALC_TI92P, CALC_V200}) {
@@ -1319,6 +1476,9 @@ int main(int argc, char **argv)
 	check_dusb_greet_recovery();
 	check_dusb_cancellation();
 	check_transfer_error_details();
+	check_68k_clock_timezone_preserved();
+	check_68k_clock_timezone_access();
+	check_68k_clock_timezone_bounds();
 	check_68k_flash_waits();
 	check_68k_delete();
 	check_68k_delete_folder();

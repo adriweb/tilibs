@@ -212,6 +212,15 @@ int ticalcs_clock_now(CalcClock* clock, int offset_seconds, gint64 ahead_us)
 	clock->minutes = local.tm_min;
 	clock->seconds = local.tm_sec;
 
+	// Derive the offset from libc's local calendar fields. This also uses the
+	// browser's timezone in Emscripten, without relying on timezone files.
+	GDateTime* civil = g_date_time_new_utc(clock->year, clock->month, clock->day,
+		clock->hours, clock->minutes, clock->seconds);
+	if (!civil) return ERR_INVALID_PARAMETER;
+	clock->timezone_minutes = (g_date_time_to_unix(civil) - gint64(now)) / 60;
+	g_date_time_unref(civil);
+	// Keep timezone_valid: the preceding clock read determines support.
+
 	return 0;
 }
 

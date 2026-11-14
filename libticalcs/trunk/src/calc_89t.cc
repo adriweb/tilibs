@@ -777,7 +777,9 @@ static int		dump_rom_2	(CalcHandle* handle, CalcDumpSize size, const char *filen
 	return ret;
 }
 
-static int set_clock_time(CalcHandle* handle, CalcClock* _clock)
+static int get_clock(CalcHandle* handle, CalcClock* clock);
+
+static int set_clock_time(CalcHandle* handle, CalcClock* _clock, int timezone_minutes, bool write_timezone)
 {
 	uint32_t calc_time;
 	uint8_t data[4];
@@ -785,6 +787,22 @@ static int set_clock_time(CalcHandle* handle, CalcClock* _clock)
 	if (ret)
 	{
 		return ret;
+	}
+	// Titanium's packed clock is UTC; CalcClock contains local civil time.
+	// Unlike CE clocks, PID 0026 participates in the firmware's conversion.
+	const gint64 utc_time = (gint64)calc_time - (gint64)timezone_minutes * 60;
+	if (utc_time < 0 || utc_time > G_MAXUINT32)
+	{
+		return ERR_INVALID_PARAMETER;
+	}
+	calc_time = (uint32_t)utc_time;
+	if (write_timezone)
+	{
+		const uint16_t encoded = uint16_t(timezone_minutes);
+		data[0] = uint8_t(encoded >> 8);
+		data[1] = uint8_t(encoded);
+		ret = dusb_cmd_s_param_set_r_data_ack(handle, DUSB_PID_CLK_TZ, 2, data);
+		if (ret) return ret;
 	}
 
 	data[0] = MSB(MSW(calc_time));
@@ -804,22 +822,42 @@ static int sync_clock(CalcHandle* handle, CalcClock* clock, int offset_seconds)
 	ticalcs_strlcpy(handle->updat->text, _("Setting clock..."), sizeof(handle->updat->text));
 	ticalcs_update_label(handle);
 
-	// Round immediately before the packed write; leave formats and enabled state alone.
+	// Update the offset before the final time sample so its USB request does
+	// not delay the packed write. Leave formats and enabled state alone.
+	const int current_timezone = clock->timezone_minutes;
 	int ret = ticalcs_clock_now(clock, offset_seconds, 500000);
+	if (!ret && clock->timezone_valid && clock->timezone_minutes != current_timezone)
+	{
+		const uint16_t encoded = uint16_t(clock->timezone_minutes);
+		const uint8_t data[] = {uint8_t(encoded >> 8), uint8_t(encoded)};
+		ret = dusb_cmd_s_param_set_r_data_ack(handle, DUSB_PID_CLK_TZ, 2, data);
+	}
 	if (!ret)
 	{
-		ret = set_clock_time(handle, clock);
+		ret = ticalcs_clock_now(clock, offset_seconds, 500000);
+	}
+	if (!ret)
+	{
+		ret = set_clock_time(handle, clock, clock->timezone_minutes, false);
 	}
 	return ret;
 }
 
 static int		set_clock	(CalcHandle* handle, CalcClock* _clock)
 {
+	int timezone_minutes = _clock->timezone_minutes;
+	if (!_clock->timezone_valid)
+	{
+		CalcClock current = {};
+		const int ret = get_clock(handle, &current);
+		if (ret) return ret;
+		timezone_minutes = current.timezone_minutes;
+	}
 	ticalcs_strlcpy(handle->updat->text, _("Setting clock..."), sizeof(handle->updat->text));
 	ticalcs_update_label(handle);
 
 	uint8_t data[1];
-	int ret = set_clock_time(handle, _clock);
+	int ret = set_clock_time(handle, _clock, timezone_minutes, _clock->timezone_valid != 0);
 	if (!ret)
 	{
 		data[0] = _clock->date_format == 3 ? 0 : _clock->date_format;
@@ -841,7 +879,7 @@ static int		set_clock	(CalcHandle* handle, CalcClock* _clock)
 
 static int		get_clock	(CalcHandle* handle, CalcClock* _clock)
 {
-	static const uint16_t pids[5] = { DUSB_PID_CLASSIC_CLK_SUPPORT, DUSB_PID_CLK_ON, DUSB_PID_CLK_SEC_SINCE_1997, DUSB_PID_CLK_DATE_FMT, DUSB_PID_CLK_TIME_FMT };
+	static const uint16_t pids[6] = { DUSB_PID_CLASSIC_CLK_SUPPORT, DUSB_PID_CLK_ON, DUSB_PID_CLK_SEC_SINCE_1997, DUSB_PID_CLK_DATE_FMT, DUSB_PID_CLK_TIME_FMT, DUSB_PID_CLK_TZ };
 	const int size = sizeof(pids) / sizeof(uint16_t);
 
 	// get raw clock
@@ -855,7 +893,12 @@ static int		get_clock	(CalcHandle* handle, CalcClock* _clock)
 		ret = dusb_cmd_r_param_data(handle, size, params);
 		if (!ret)
 		{
-			if (params[0]->ok && params[0]->size == 1)
+			bool valid_ids = true;
+			for (int i = 0; i < size; ++i)
+			{
+				valid_ids = valid_ids && params[i]->id == pids[i];
+			}
+			if (valid_ids && params[0]->ok && params[0]->size == 1)
 			{
 				if (!params[0]->data[0])
 				{
@@ -866,18 +909,25 @@ static int		get_clock	(CalcHandle* handle, CalcClock* _clock)
 					if (   params[1]->ok && params[1]->size == 1
 					    && params[2]->ok && params[2]->size == 4
 					    && params[3]->ok && params[3]->size == 1
-					    && params[4]->ok && params[4]->size == 1)
+					    && params[4]->ok && params[4]->size == 1
+					    && params[5]->ok && params[5]->size == 2)
 					{
 						const uint8_t * data = params[2]->data;
 						const uint32_t calc_time = (((uint32_t)data[0]) << 24) | (((uint32_t)data[1]) << 16) | (((uint32_t)data[2]) << 8) | (data[3] <<  0);
 
 						ticalcs_info("%s", _("Found valid classic clock"));
 
-						ticalcs_clock_from_dusb(calc_time, _clock);
-
+						const int timezone_minutes = (int16_t)(((uint16_t)params[5]->data[0] << 8) | params[5]->data[1]);
+						const gint64 local_time = (gint64)calc_time + (gint64)timezone_minutes * 60;
+						// Match DateAndTime_Get at the RTC bounds: negative offsets
+						// clamp at the epoch; positive overflow wraps the 32-bit RTC.
+						// In particular, a reset clock with a western offset is valid.
+						ticalcs_clock_from_dusb(local_time < 0 ? 0 : (uint32_t)local_time, _clock);
 						_clock->date_format = params[3]->data[0] == 0 ? 3 : params[3]->data[0];
 						_clock->time_format = params[4]->data[0] ? 24 : 12;
 						_clock->state = params[1]->data[0];
+						_clock->timezone_minutes = timezone_minutes;
+						_clock->timezone_valid = 1;
 					}
 					else
 					{

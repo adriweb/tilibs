@@ -565,6 +565,10 @@ typedef struct
  * @seconds:
  * @time_format: 12 or 24
  * @date_format: 1 or 6
+ * @timezone_valid: nonzero if the timezone is present; getters clear it when
+ * unsupported, and setters preserve the calculator's offset when it is zero
+ * @timezone_minutes: fixed UTC offset in minutes, positive east of UTC
+ * @state: 0 if the clock is stopped, 1 if it is running
  *
  * A structure used for clock management.
  **/
@@ -580,6 +584,9 @@ typedef struct
 
 	uint8_t	time_format;
 	uint8_t	date_format;
+
+	uint8_t	timezone_valid;
+	int16_t	timezone_minutes;
 
 	int		state;
 } CalcClock;
