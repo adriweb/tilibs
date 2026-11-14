@@ -1484,7 +1484,7 @@ const char* calc_get_clock_json(CableHandle* cable_handle) {
         return "";
     }
 
-    static char clock_buf[256];
+    static char clock_buf[320];
     CalcClock clock{};
 
     const int result = ticalcs_calc_get_clock(g_calc_handle, &clock);
@@ -1493,12 +1493,14 @@ const char* calc_get_clock_json(CableHandle* cable_handle) {
         return "";
     }
 
+    char timezone_json[16] = "null";
+    if (clock.timezone_valid) snprintf(timezone_json, sizeof(timezone_json), "%d", clock.timezone_minutes);
     snprintf(clock_buf, sizeof(clock_buf),
              "{\"year\":%u,\"month\":%u,\"day\":%u,\"hours\":%u,\"minutes\":%u,\"seconds\":%u,"
-             "\"time_format\":%u,\"date_format\":%u,\"state\":%d}",
+             "\"time_format\":%u,\"date_format\":%u,\"state\":%d,\"timezone_minutes\":%s}",
              (unsigned int)clock.year, (unsigned int)clock.month, (unsigned int)clock.day,
              (unsigned int)clock.hours, (unsigned int)clock.minutes, (unsigned int)clock.seconds,
-             (unsigned int)clock.time_format, (unsigned int)clock.date_format, clock.state);
+             (unsigned int)clock.time_format, (unsigned int)clock.date_format, clock.state, timezone_json);
     return clock_buf;
 }
 
