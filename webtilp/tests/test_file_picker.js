@@ -11,13 +11,14 @@ const queries = [];
 const state = {settings: {calcModel: 'auto', convertScriptFiles: true}, activeFamily: 'ti'};
 const els = {fileInput: {accept: ''}};
 const context = vm.createContext({
-    state, els, console,
+    state, els, console, WebTILPSharp: require('../sharp_backend.js'),
     CABLE_SILVERLINK: '4', CABLE_GRAYLINK: '1',
     getActiveCalcModelId: () => activeModel
 });
 vm.runInContext([
     section('const DEVICE_FAMILY_TI =', '// Known TI USB devices'),
     section('const CE_PYTHON_CALC_MODELS =', 'const PID_SILVERLINK ='),
+    section('function getSharpModelProfile(', 'function sharpSerialDevice('),
     section('function getPythonConversionKind(', 'function getSelectedConversionModelId('),
     section('function isHPPrimeActive(', 'function resetFamilySpecificUiText('),
     section('function isLegacyTivarsConversionCandidate(', 'async function convertLegacyTivarsFileForEvo(')
@@ -120,6 +121,25 @@ state.settings.convertScriptFiles = false;
 context.updateFileInputAccept();
 for (const name of ['demo.bas', 'demo.txt', 'photo.png']) assert.ok(!accepts(name), name);
 assert.ok(accepts('group.g4g'), 'native groups do not depend on conversion setting');
+state.sharpBackend = {capabilities: {send: false, sourceConversion: false}};
+context.updateFileInputAccept();
+assert.equal(els.fileInput.disabled, true, 'a Sharp backend without upload support disables the file picker');
+assert.equal(els.fileInput.accept, '');
+state.sharpBackend = null;
+context.updateFileInputAccept();
+assert.equal(els.fileInput.disabled, false, 'modern Sharp restores file uploads');
+for (const [model, extension] of [['sharp-el9400', 'g2p'], ['sharp-el9450', 'g5p'], ['sharp-el9600', 'g3p'], ['sharp-el9650', 'g3p']]) {
+    state.settings.calcModel = model;
+    for (const family of ['ti', 'sharp']) {
+        state.activeFamily = family;
+        context.updateFileInputAccept();
+        assert.equal(els.fileInput.disabled, false);
+        assert.ok(accepts(`HELLO.${extension.toUpperCase()}`), `${model} native program before and after connection`);
+        for (const wrong of ['bas', 'txt', 'png', 'g4p', 'g2g', 'g3g', 'g5g', 'g2b']) assert.ok(!accepts(`wrong.${wrong}`));
+        for (const other of ['g2p', 'g3p', 'g5p'].filter(ext => ext !== extension)) assert.ok(!accepts(`wrong.${other}`));
+    }
+}
+state.settings.calcModel = 'auto';
 state.activeFamily = 'ti';
 
 async function checkSettingsChange() {

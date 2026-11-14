@@ -464,5 +464,7 @@
   "sharp_program_name": "Calculator program name for {file} (1–8 letters, digits or underscores, starting with a letter):",
   "sharp_picture_slot": "Picture slot for {file} (0–9). This replaces that picture. Images are fitted to 127×64 without cropping, on white:",
   "sharp_conversion_disabled": "Enable source and image conversion in Settings before sending this file.",
-  "sharp_converted": "Converted {file} → {target}."
+  "sharp_converted": "Converted {file} → {target}.",
+  "sharp_legacy_connection_hint": "These Sharp models require WebSerial and a CE-LK1P-compatible cable supporting even parity and RTS/CTS hardware flow control (9600 baud, 8E1). Select the exact model and its serial port.",
+  "sharp_legacy_limits": "Native program files for the selected model can be sent. Screenshots, the variable list and individual downloads are available. Source/image conversion, groups, RAM backups and system/ROM transfers are unavailable."
 }

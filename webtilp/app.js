@@ -752,6 +752,8 @@ const I18N_EN = {
     "sharp_serial_diagnostics": "Sharp serial discovery (actual browser metadata): {details}",
     "sharp_serial_unknown_ids": "USB IDs not exposed",
     "sharp_connected": "Sharp cable connected. Leave the calculator powered on at its normal screen for transfers; use REPROGRAM for system or ROM reception.",
+    "sharp_legacy_connection_hint": "These Sharp models require WebSerial and a CE-LK1P-compatible cable supporting even parity and RTS/CTS hardware flow control (9600 baud, 8E1). Select the exact model and its serial port.",
+    "sharp_legacy_limits": "Native program files for the selected model can be sent. Screenshots, the variable list and individual downloads are available. Source/image conversion, groups, RAM backups and system/ROM transfers are unavailable.",
     "sharp_model": "Selected model",
     "sharp_transport": "Transport",
     "sharp_protocol": "Protocol",
@@ -2190,6 +2192,10 @@ const CALC_MODEL_OPTIONS = [
     { value: 'casio-rm7000', label: 'Casio RM-7000 (native OS loader)' },
     { value: 'casio-rm9000', label: 'Casio RM-9000 (native OS loader)' },
     { value: 'sharp-auto', label: 'Sharp EL-99xx (auto)' },
+    { value: 'sharp-el9400', label: 'Sharp EL-9400' },
+    { value: 'sharp-el9450', label: 'Sharp EL-9450' },
+    { value: 'sharp-el9600', label: 'Sharp EL-9600' },
+    { value: 'sharp-el9650', label: 'Sharp EL-9650' },
     { value: 'sharp-el9900', label: 'Sharp EL-9900' },
     { value: 'sharp-el9900g', label: 'Sharp EL-9900G' },
     { value: 'sharp-el9900gsii', label: 'Sharp EL-9900G SII' },
@@ -4408,8 +4414,8 @@ function updateSourceConversionSettingAvailability() {
     }
     const modelId = getSelectedConversionModelId();
     const selectedModel = els.settingCalcModel?.value ?? state.settings?.calcModel;
-    const supported = String(selectedModel).startsWith('sharp-')
-        || (selectedModel === 'auto' && state.activeFamily === DEVICE_FAMILY_SHARP)
+    const supported = (String(selectedModel).startsWith('sharp-') && getSharpModelProfile(selectedModel).family !== 'celk1')
+        || (selectedModel === 'auto' && state.activeFamily === DEVICE_FAMILY_SHARP && getSharpCapabilities().sourceConversion)
         || getPythonConversionKind(modelId) !== PYTHON_CONVERSION_NONE
         || NSPIRE_LUA_CALC_MODELS.has(modelId);
     els.settingConvertScriptFiles.disabled = !supported;
@@ -4585,6 +4591,10 @@ function updateCalcHint(cableModel) {
     }
     if (['casio-rm7000', 'casio-rm9000'].includes(els.settingCalcModel?.value)) {
         els.settingCalcHint.textContent = t('rm_loader_settings_hint');
+        return;
+    }
+    if (getSharpModelProfile(els.settingCalcModel?.value).family === 'celk1') {
+        els.settingCalcHint.textContent = t('sharp_legacy_connection_hint');
         return;
     }
     if (String(cableModel) === CABLE_SILVERLINK) {
@@ -5354,9 +5364,16 @@ function buildFileInputAccept(extensions) {
 function updateFileInputAccept() {
     if (!els.fileInput) return;
     let extensions = [];
-    if (state?.activeFamily === 'sharp') {
-        extensions = ['g4p', 'g4e', 'g4s', 'g4y', 'g4m', 'g4i', 'g4d', 'g4l', 'g4n', 'g4v', 'g4z', 'g4w', 'g4t', 'g4b', 'g4g'];
-        if (state.settings?.convertScriptFiles !== false) extensions.push('bas', 'txt', 'png', 'jpg', 'jpeg', 'bmp', 'gif', 'webp');
+    const selectedSharpProfile = String(state.settings?.calcModel).startsWith('sharp-')
+        ? getSharpModelProfile() : {family: 'celk4'};
+    if (state?.activeFamily === 'sharp' || selectedSharpProfile.family === 'celk1') {
+        const capabilities = getSharpCapabilities();
+        const profile = state.sharpBackend?.profile || getSharpModelProfile(state.sharpBackend?.model || state.settings?.calcModel);
+        els.fileInput.disabled = !capabilities.send;
+        if (!capabilities.send) { els.fileInput.accept = ''; return; }
+        extensions = profile.family === 'celk1' ? Array.from(profile.nativeExtensions || [])
+            : ['g4p', 'g4e', 'g4s', 'g4y', 'g4m', 'g4i', 'g4d', 'g4l', 'g4n', 'g4v', 'g4z', 'g4w', 'g4t', 'g4b', 'g4g'];
+        if (capabilities.sourceConversion && state.settings?.convertScriptFiles !== false) extensions.push('bas', 'txt', 'png', 'jpg', 'jpeg', 'bmp', 'gif', 'webp');
     } else if (isHPPrimeActive()) {
         extensions = Array.from(HP_PRIME_UPLOAD_EXTENSIONS);
     } else if (isNumWorksActive()) {
@@ -5395,6 +5412,7 @@ function isCasioActive() {
 }
 
 function resetFamilySpecificUiText(clearActionTitles = true) {
+    document.getElementById('dropzone')?.removeAttribute?.('aria-disabled');
     setTextContent(document.getElementById('dropzoneTitle'), t('dropzone_title'));
     setTextContent(document.getElementById('dropzoneSubtitle'), t('dropzone_subtitle'));
     setTextContent(document.getElementById('panelVarsTitle'), t('calculator_variables'));
@@ -7700,6 +7718,7 @@ async function refreshBackupDirlist(module, handle) {
 
 async function refreshDirlist({ manual = false } = {}) {
     if (state?.activeFamily === 'sharp') {
+        if (!getSharpCapabilities().directory) { log(t('sharp_legacy_limits')); return; }
         await runSharpOperation(t('sharp_list'), async backend => {
             const entries = await backend.listVariables();
             if (state.sharpBackend !== backend) return;
@@ -7856,7 +7875,7 @@ function canPreviewVariable(entry, modelId = getActiveCalcModelId()) {
         return true;
     }
     if (entry.kind === 'sharp') {
-        return Boolean(entry.category && entry.selector?.length === 11 && globalThis.WebTILPSharpFiles);
+        return getSharpCapabilities().sourceConversion && Boolean(entry.category && entry.selector?.length === 11 && globalThis.WebTILPSharpFiles);
     }
     if (entry.kind === 'numworks') {
         return !entry.invalid;
@@ -8359,6 +8378,23 @@ function hasFileDrag(event) {
 }
 
 function setSelectedFiles(files, sourceLabel) {
+    const sharpProfile = state.sharpBackend?.profile || (String(state.settings?.calcModel).startsWith('sharp-')
+        ? getSharpModelProfile() : {family: 'celk4'});
+    if (sharpProfile.family === 'celk1' && Array.from(files || []).some(file =>
+        !(sharpProfile.nativeExtensions || []).includes(String(file.name).split('.').pop().toLowerCase()))) {
+        state.selectedFiles = [];
+        if (els.fileInput) els.fileInput.value = '';
+        updateSendFilesButtonState();
+        log(t('sharp_legacy_limits'));
+        return;
+    }
+    if (state.activeFamily === DEVICE_FAMILY_SHARP && !getSharpCapabilities().send) {
+        state.selectedFiles = [];
+        if (els.fileInput) els.fileInput.value = '';
+        updateSendFilesButtonState();
+        log(t('sharp_legacy_limits'));
+        return;
+    }
     state.selectedFiles = Array.from(files || []);
     if (els.fileInput) {
         if (state.selectedFiles.length) {
@@ -8399,7 +8435,8 @@ function updateSendFilesButtonState() {
     }
     const hasFiles = state.selectedFiles.length || (els.fileInput && els.fileInput.files && els.fileInput.files.length);
     const available = (!isCasioActive() || state.casioStorageSupported)
-        && (!isHPLegacyActive() || state.hpLegacyKermitEnabled);
+        && (!isHPLegacyActive() || state.hpLegacyKermitEnabled)
+        && (state.activeFamily !== DEVICE_FAMILY_SHARP || getSharpCapabilities().send);
     els.btnSendFiles.disabled = !hasFiles || !available;
     els.btnSendFiles.classList.toggle('primary', !!hasFiles && available);
     els.btnSendFiles.classList.toggle('subtle', !hasFiles || !available);
@@ -9053,6 +9090,11 @@ function chooseHPPrimeAppForFile(file) {
 }
 
 async function sendDroppedFiles(files, dropFolder) {
+    if (String(state.settings?.calcModel).startsWith('sharp-') && getSharpModelProfile().family === 'celk1'
+        && state.activeFamily !== 'sharp') {
+        await connect();
+        if (state.activeFamily !== 'sharp') return;
+    }
     if (state?.activeFamily === 'sharp') { await sendSharpFiles(files); return; }
 
     if (!files.length) {
@@ -10697,6 +10739,11 @@ async function sendSelectedFiles() {
     }
     setButtonLoading(els.btnSendFiles, true);
     try {
+        if (String(state.settings?.calcModel).startsWith('sharp-') && getSharpModelProfile().family === 'celk1'
+            && state.activeFamily !== 'sharp') {
+            await connect();
+            if (state.activeFamily !== 'sharp') return;
+        }
         if (state?.activeFamily === 'sharp') { await sendSharpFiles(files); return; }
         if (isHPLegacyActive()) {
             try {
@@ -10913,6 +10960,7 @@ async function processIncomingTransfers(files, options = {}) {
 
 async function receiveBackup() {
     if (state?.activeFamily === 'sharp') {
+        if (!getSharpCapabilities().backup) { log(t('sharp_legacy_limits')); return; }
         await runSharpOperation(t('sharp_backup'), async backend => saveSharpDownload(await backend.receiveBackup(), backend));
         return;
     }
@@ -11336,6 +11384,7 @@ async function downloadHPLegacyEntry(entry) {
 
 async function receiveSelected() {
     if (state?.activeFamily === 'sharp') {
+        if (!getSharpCapabilities().receive) { log(t('sharp_legacy_limits')); return; }
         const entries = getSelectedVarInputs().map(buildEntryFromCheckbox);
         await runSharpOperation(t('sharp_receive'), async backend => {
             for (const entry of entries) saveSharpDownload(await backend.receiveVariable(entry), backend);
@@ -11865,6 +11914,7 @@ async function deleteEntry(entry) {
 
 async function downloadEntry(entry) {
     if (state?.activeFamily === 'sharp') {
+        if (!getSharpCapabilities().receive) { log(t('sharp_legacy_limits')); return; }
         await runSharpOperation(t('sharp_receive'), async backend => saveSharpDownload(await backend.receiveVariable(entry), backend));
         return;
     }
@@ -12760,6 +12810,7 @@ async function drawHPPrimeScreenshot(canvas, png) {
 
 async function takeScreenshot() {
     if (state?.activeFamily === 'sharp') {
+        if (!getSharpCapabilities().screen) { log(t('sharp_legacy_limits')); return; }
         await runSharpOperation(t('sharp_screen'), async backend => {
             const screenshot = await backend.captureScreenshot();
             if (state.sharpBackend !== backend) return;
@@ -13373,8 +13424,9 @@ function bindEvents() {
     const dropzoneDragOver = (event) => {
         if (hasFileDrag(event)) {
             event.preventDefault();
-            event.dataTransfer.dropEffect = 'copy';
-            setDropzoneActive(true);
+            const available = state.activeFamily !== DEVICE_FAMILY_SHARP || getSharpCapabilities().send;
+            event.dataTransfer.dropEffect = available ? 'copy' : 'none';
+            setDropzoneActive(available);
         }
     };
     const dropzoneDragLeave = (event) => {
@@ -13829,9 +13881,21 @@ if (!self.isSecureContext) {
 }
 
 
+function getSharpModelProfile(model = state.settings?.calcModel) {
+    return globalThis.WebTILPSharp?.getModelProfile?.(model) || { family: 'celk4' };
+}
+
+function getSharpCapabilities(backend = state.sharpBackend) {
+    if (backend?.capabilities) return backend.capabilities;
+    const legacy = (backend?.profile || getSharpModelProfile(backend?.model || state.settings?.calcModel)).family === 'celk1';
+    return { screen: true, directory: true, receive: true, send: true, backup: !legacy,
+        dump: !legacy, version: !legacy, sourceConversion: !legacy };
+}
+
 function sharpSerialDevice(port, usbDevice = null) {
     const device = serialPortToDevice(port, { usbDevice, serialKind: SERIAL_KIND_SHARP,
-        vendorId: SHARP_VENDOR_ID, productId: SHARP_PRODUCT_ID, productName: 'Sharp EL-99xx' });
+        vendorId: SHARP_VENDOR_ID, productId: SHARP_PRODUCT_ID,
+        productName: globalThis.WebTILPSharp?.MODELS?.[state.settings?.calcModel] || 'Sharp calculator' });
     device.serialInfo = port.getInfo?.() || {};
     device.usbDevice = usbDevice;
     return device;
@@ -13852,7 +13916,8 @@ async function logSharpSerialDiagnostics(port, usbDevice) {
 }
 
 async function getAuthorizedSharpSerialDevices() {
-    if (globalThis.WebTILPSharpUsb?.shouldUse()) {
+    const legacy = getSharpModelProfile().family === 'celk1';
+    if (!legacy && globalThis.WebTILPSharpUsb?.shouldUse()) {
         try { return (await navigator.usb.getDevices())
             .filter(device => globalThis.WebTILPSharp?.isSharpUsbDevice(device))
             .map(device => sharpSerialDevice(globalThis.WebTILPSharpUsb.createPort(device), device));
@@ -13861,13 +13926,15 @@ async function getAuthorizedSharpSerialDevices() {
     if (!navigator.serial) return [];
     try {
         return (await navigator.serial.getPorts())
-            .filter(port => globalThis.WebTILPSharp?.isSharpSerialInfo(port.getInfo?.() || {}))
+            .filter(port => legacy || globalThis.WebTILPSharp?.isSharpSerialInfo(port.getInfo?.() || {}))
             .map(port => sharpSerialDevice(port));
     } catch (error) { console.warn(error); return []; }
 }
 
 async function requestSharpSerialDevice(usbDevice = null) {
-    if (globalThis.WebTILPSharpUsb?.shouldUse()) {
+    const legacy = getSharpModelProfile().family === 'celk1';
+    if (legacy) usbDevice = null;
+    if (!legacy && globalThis.WebTILPSharpUsb?.shouldUse()) {
         const generation = state.sharpConnectionGeneration;
         try {
             const device = usbDevice || await navigator.usb.requestDevice({filters:[{vendorId: SHARP_VENDOR_ID, productId: SHARP_PRODUCT_ID}]});
@@ -13877,7 +13944,7 @@ async function requestSharpSerialDevice(usbDevice = null) {
             return sharpSerialDevice(globalThis.WebTILPSharpUsb.createPort(device), device);
         } catch (error) { if (error?.name === 'NotFoundError') return null; throw error; }
     }
-    if (!navigator.serial) throw new Error(t('sharp_serial_required'));
+    if (!navigator.serial) throw new Error(legacy ? t('sharp_legacy_connection_hint') : t('sharp_serial_required'));
     if (!self.isSecureContext) throw new Error(t('transport_secure_context_error'));
     const generation = state.sharpConnectionGeneration;
     const checkGeneration = () => {
@@ -13914,7 +13981,9 @@ async function requestSharpSerialDevice(usbDevice = null) {
 }
 
 async function connectSharp(usbDevice = null, serialDevice = null) {
-    const Backend = globalThis.WebTILPSharp?.SharpBackend;
+    const model = String(state.settings?.calcModel).startsWith('sharp-') ? state.settings.calcModel : 'sharp-auto';
+    const profile = getSharpModelProfile(model);
+    const Backend = profile.family === 'celk1' ? globalThis.WebTILPSharp?.SharpLegacyBackend : globalThis.WebTILPSharp?.SharpBackend;
     if (!Backend) throw new Error(t('sharp_backend_unavailable'));
     const generation = ++state.sharpConnectionGeneration;
     const checkGeneration = () => {
@@ -13922,7 +13991,11 @@ async function connectSharp(usbDevice = null, serialDevice = null) {
         const error = new Error('Sharp connection cancelled.');
         error.sharpConnectionCancelled = true; throw error;
     };
-    if (!serialDevice && usbDevice && globalThis.WebTILPSharpUsb?.shouldUse()) {
+    if (profile.family === 'celk1') {
+        usbDevice = null;
+        if (serialDevice?.serialPort?.device) serialDevice = null;
+    }
+    if (!serialDevice && usbDevice && profile.family !== 'celk1' && globalThis.WebTILPSharpUsb?.shouldUse()) {
         serialDevice = sharpSerialDevice(globalThis.WebTILPSharpUsb.createPort(usbDevice), usbDevice);
     }
     if (!serialDevice) {
@@ -13940,7 +14013,6 @@ async function connectSharp(usbDevice = null, serialDevice = null) {
         setConnected(false);
         checkGeneration();
     }
-    const model = String(state.settings?.calcModel).startsWith('sharp-') ? state.settings.calcModel : 'sharp-auto';
     const backend = new Backend({ serialPort: serialDevice.serialPort, model,
         onProgress(progress) {
             if (state.sharpBackend !== backend) return;
@@ -13956,10 +14028,15 @@ async function connectSharp(usbDevice = null, serialDevice = null) {
     } catch (error) { await backend.close().catch(() => {}); throw error; }
     state.sharpBackend = backend; state.activeFamily = DEVICE_FAMILY_SHARP;
     state.authorizedDevice = serialDevice; state.handle = 0; state.cableOpen = true;
-    state.features = FEATURE_FLAGS.OPS_SCREEN | FEATURE_FLAGS.OPS_DIRLIST | FEATURE_FLAGS.OPS_VARS
-        | FEATURE_FLAGS.OPS_BACKUP | FEATURE_FLAGS.OPS_ROMDUMP | FEATURE_FLAGS.OPS_OS;
+    const capabilities = getSharpCapabilities(backend);
+    state.features = (capabilities.screen ? FEATURE_FLAGS.OPS_SCREEN : 0)
+        | (capabilities.directory ? FEATURE_FLAGS.OPS_DIRLIST : 0)
+        | (capabilities.receive || capabilities.send ? FEATURE_FLAGS.OPS_VARS : 0)
+        | (capabilities.backup ? FEATURE_FLAGS.OPS_BACKUP : 0)
+        | (capabilities.dump ? FEATURE_FLAGS.OPS_ROMDUMP | FEATURE_FLAGS.OPS_OS : 0);
     state.dirlist = []; renderDirlist([]); readSharpInfo(); applyActiveFamilyUiState();
-    setConnected(true); setStatus('status_connected', true); log(t('sharp_connected'));
+    setConnected(true); setStatus('status_connected', true);
+    log(t(profile.family === 'celk1' ? 'sharp_legacy_connection_hint' : 'sharp_connected'));
     await getDeviceInfo({ automatic: true });
 }
 
@@ -13972,10 +14049,13 @@ function readSharpInfo(version = null) {
     const hex = value => Number.isInteger(value) ? value.toString(16).toUpperCase().padStart(4, '0') : '?';
     const serialIdentity = info.usbVendorId !== undefined || info.usbProductId !== undefined
         ? `${hex(info.usbVendorId)}:${hex(info.usbProductId)}` : t('sharp_serial_unknown_ids');
+    const profile = backend.profile || getSharpModelProfile(backend.model);
+    const legacy = profile.family === 'celk1';
     const entries = [{ key: t('model'), value: state.deviceModelName },
-        { key: t('sharp_transport'), value: `${serialIdentity} / ${state.authorizedDevice?.serialPort?.device ? "WebUSB" : "WebSerial"}` },
-        { key: t('sharp_protocol'), value: 'PC-Link / REPROGRAM' }];
-    if (version) entries.push({ key: t('sharp_version'), value: version });
+        { key: t('sharp_transport'), value: `${serialIdentity} / ${state.authorizedDevice?.serialPort?.device ? "WebUSB" : "WebSerial"}${legacy ? ' / 9600 8E1 / RTS/CTS' : ''}` },
+        { key: t('sharp_protocol'), value: legacy ? 'PC-Link / CE-LK1P' : 'PC-Link / REPROGRAM' }];
+    if (profile.width && profile.height) entries.push({ key: t('screenshot'), value: `${profile.width}×${profile.height}` });
+    if (version && getSharpCapabilities(backend).version) entries.push({ key: t('sharp_version'), value: version });
     state.deviceInfoEntries = entries; renderDeviceInfo(entries);
     updateDeviceModelDisplay(state.deviceModelName);
     if (els.memoryInfo) els.memoryInfo.textContent = '—';
@@ -13988,15 +14068,20 @@ function setSharpUiState() {
         if (!button) continue;
         button.disabled = true; button.classList.add('disabled');
     }
-    for (const button of [els.btnScreenshot, els.btnRefreshDirlist, els.btnReceiveBackup,
-        els.btnReceiveOs, els.btnDumpRom]) {
+    const capabilities = getSharpCapabilities();
+    for (const [button, available] of [[els.btnScreenshot, capabilities.screen], [els.btnRefreshDirlist, capabilities.directory],
+        [els.btnReceiveBackup, capabilities.backup], [els.btnReceiveOs, capabilities.dump], [els.btnDumpRom, capabilities.dump]]) {
         if (!button) continue;
-        button.disabled = false; button.classList.remove('disabled', 'hidden');
+        button.disabled = !available;
+        button.classList.toggle('disabled', !available);
+        button.classList.remove('hidden');
+        button.title = available ? '' : t('sharp_legacy_limits');
     }
     for (const button of [els.btnIsReady, els.btnDownloadOsPartial, els.btnLeaveExam]) button?.classList.add('hidden');
-    if (els.fileInput) { els.fileInput.disabled = false; updateFileInputAccept(); }
-    setTextContent(document.getElementById('dropzoneTitle'), t('sharp_drop_title'));
-    setTextContent(document.getElementById('dropzoneSubtitle'), t('sharp_drop_hint'));
+    if (els.fileInput) { els.fileInput.disabled = !capabilities.send; updateFileInputAccept(); }
+    document.getElementById('dropzone')?.setAttribute?.('aria-disabled', String(!capabilities.send));
+    setTextContent(document.getElementById('dropzoneTitle'), t(capabilities.send ? 'sharp_drop_title' : 'sharp_vars_title'));
+    setTextContent(document.getElementById('dropzoneSubtitle'), t(!capabilities.sourceConversion ? 'sharp_legacy_limits' : 'sharp_drop_hint'));
     setTextContent(document.getElementById('panelVarsTitle'), t('sharp_vars_title'));
     updateSendFilesButtonState(); updateSelectionActionButtons();
 }
@@ -14057,6 +14142,7 @@ function createSharpPreview(data, filename) {
 }
 
 async function previewSharpEntry(entry) {
+    if (!getSharpCapabilities().sourceConversion) { log(t('sharp_legacy_limits')); return; }
     const generation = state.sharpConnectionGeneration, renderId = previewRenderId;
     await runSharpOperation(t('sharp_receive'), async backend => {
         const result = await backend.receiveVariable(entry);
@@ -14073,12 +14159,24 @@ async function previewSharpEntry(entry) {
 
 async function sendSharpFiles(files) {
     if (!files.length) return;
+    if (!getSharpCapabilities().send) { log(t('sharp_legacy_limits')); return; }
     const backend = state.sharpBackend, generation = state.sharpConnectionGeneration;
+    const profile = backend?.profile || getSharpModelProfile(backend?.model || state.settings?.calcModel);
+    const legacy = profile.family === 'celk1';
     // Convert and validate the entire batch (including groups) before sending.
     const prepared = [], codec = globalThis.WebTILPSharpFiles;
     try {
+        if (legacy && files.some(file => !(profile.nativeExtensions || []).includes(String(file.name).split('.').pop().toLowerCase()))) {
+            throw new Error(t('sharp_legacy_limits'));
+        }
         for (const file of files) {
             let name = file.name, data;
+            if (legacy) {
+                if (!backend?.decodeFile) throw new Error(t('sharp_backend_unavailable'));
+                data = new Uint8Array(await file.arrayBuffer());
+                prepared.push({name, data, decoded: backend.decodeFile(data, name)});
+                continue;
+            }
             const source = /\.(bas|txt)$/i.test(name), image = /\.(png|jpe?g|bmp|gif|webp)$/i.test(name);
             if (source || image) {
                 if (state.settings?.convertScriptFiles === false) throw new Error(t('sharp_conversion_disabled'));
@@ -14114,7 +14212,7 @@ async function sendSharpFiles(files) {
         const destinations = new Set();
         for (const item of prepared) {
             const decoded = item.decoded;
-            const key = decoded.backup ? 'backup' : decoded.category.ext + ':' + Array.from(decoded.selector).join(',');
+            const key = decoded.backup ? 'backup' : (decoded.category.ext || decoded.category.name || 'PROGRAM') + ':' + Array.from(decoded.selector).join(',');
             if (destinations.has(key)) throw new Error(tFormat('source_conversion_name_conflict', { name: item.name }));
             destinations.add(key);
         }
@@ -14136,6 +14234,7 @@ async function sendSharpFiles(files) {
 }
 
 async function receiveSharpDump(includeBoot) {
+    if (!getSharpCapabilities().dump) { log(t('sharp_legacy_limits')); return; }
     if (!confirm(t(includeBoot ? 'sharp_dump_rom_notice' : 'sharp_dump_system_notice'))) return;
     await runSharpOperation(t('sharp_dump'), async backend => {
         const result = await backend.receiveDump({ includeBoot });

@@ -7,11 +7,34 @@ const VENDOR_ID = 0x04FC, PRODUCT_ID = 0x0201;
 const RAM_SIZE = 0xE32B, BASE = 0xF00000, OS_END = 0xFFC000, ROM_END = 0x1000000;
 const MODELS = Object.freeze({
     'sharp-auto': 'Sharp EL-99xx',
+    'sharp-el9400': 'Sharp EL-9400',
+    'sharp-el9450': 'Sharp EL-9450',
+    'sharp-el9600': 'Sharp EL-9600',
+    'sharp-el9650': 'Sharp EL-9650',
     'sharp-el9900': 'Sharp EL-9900',
     'sharp-el9900g': 'Sharp EL-9900G',
     'sharp-el9900gsii': 'Sharp EL-9900G SII',
     'sharp-el9950': 'Sharp EL-9950'
 });
+const LEGACY_PROFILES = Object.freeze({
+    'sharp-el9400': { identity: '94', width: 96, fileFamily: 2 },
+    'sharp-el9450': { identity: '95', width: 96, fileFamily: 5 },
+    'sharp-el9600': { identity: '96', width: 132, fileFamily: 3 },
+    'sharp-el9650': { identity: '96', width: 132, fileFamily: 3 }
+});
+const PROFILES = Object.freeze(Object.fromEntries(Object.keys(MODELS).map(model => {
+    const legacy = LEGACY_PROFILES[model];
+    return [model, Object.freeze({
+        family: legacy ? 'celk1' : 'celk4', height: 64,
+        ...(legacy || { width: 132, fileFamily: 4,
+            identity: model === 'sharp-el9950' ? '9:' : model === 'sharp-auto' ? null : '99' }),
+        nativeExtensions: Object.freeze(legacy ? ['g' + legacy.fileFamily + 'p'] : []),
+        serialOptions: Object.freeze(legacy
+            ? { baudRate: 9600, dataBits: 8, parity: 'even', stopBits: 1, flowControl: 'hardware' }
+            : { baudRate: 38400, dataBits: 8, parity: 'none', stopBits: 2, flowControl: 'none' })
+    })];
+})));
+function getModelProfile(model) { return PROFILES[model] || null; }
 const CATEGORIES = Object.freeze([
     { name: 'PROGRAM', ext: 'p', dynamic: true },
     { name: 'SOLVE EQU', ext: 'e', dynamic: true },
@@ -123,12 +146,12 @@ function decodeNative(data, filename = '') {
 }
 function validateRestore(file, model, allowRestore) {
     if (!file.backup) return;
-    if (!allowRestore || !MODELS[model] || model === 'sharp-auto') throw new Error('Select an exact Sharp model and confirm RAM restore first.');
+    if (!allowRestore || !MODELS[model] || model === 'sharp-auto' || getModelProfile(model).family !== 'celk4') throw new Error('Select an exact Sharp EL-99xx model and confirm RAM restore first.');
     const marker = /^WebTiLP (sharp-[a-z0-9]+)/.exec(file.description);
     if (marker && marker[1] !== model) throw new Error('This backup belongs to a different Sharp model.');
 }
 function decodeScreenshot(data, width = 132, height = 64) {
-    if (width !== 132 || height !== 64 || data.length !== 1056) throw new Error('Invalid Sharp screenshot dimensions or size.');
+    if (![96, 132].includes(width) || height !== 64 || data.length !== width * height / 8) throw new Error('Invalid Sharp screenshot dimensions or size.');
     const rgba = new Uint8ClampedArray(width * height * 4);
     for (let y = 0; y < height; y++) for (let x = 0; x < width; x++) {
         const color = data[(y >> 3) * width + x] & (0x80 >> (y & 7)) ? 0 : 255;
@@ -228,6 +251,12 @@ class SharpBackend {
     constructor({ serialPort, model = 'sharp-auto', timeoutMs = 30000, onProgress = () => {} }) {
         if (!MODELS[model]) throw new Error('Unknown Sharp model.');
         this.port = serialPort; this.model = model; this.timeoutMs = timeoutMs;
+        this.profile = getModelProfile(model);
+        if (this.profile.family === 'celk1' && new.target === SharpBackend) {
+            throw new Error('Use the CE-LK1P backend for this Sharp model.');
+        }
+        this.capabilities = Object.freeze({ screen: true, directory: true, receive: true,
+            send: true, backup: true, dump: true, version: true, sourceConversion: true });
         this.onProgress = onProgress; this.queue = new Uint8Array(); this.waiters = new Set();
         this.busy = false; this.cancelled = false; this.closed = true; this.identity = null; this.error = null;
         this.receivedBytes = 0; this.version = null;
@@ -299,20 +328,27 @@ class SharpBackend {
             const prefix = await this.read(2 + length, timeoutMs,
                 onProgress && (received => onProgress(Math.max(0, received - 2))));
             const identity = text(prefix.subarray(0, 2));
-            if (!['99', '9:'].includes(identity) || (this.identity && this.identity !== identity)) {
+            const identities = this.profile.identity ? [this.profile.identity] : ['99', '9:'];
+            if (this.profile.identity && ['94', '95', '96', '99', '9:'].includes(identity)
+                && identity !== this.profile.identity && !this.identity) {
+                throw new Error('Selected Sharp model does not match the calculator identity.');
+            }
+            if (!identities.includes(identity) || (this.identity && this.identity !== identity)) {
                 const hex = data => Array.from(data, b => b.toString(16).padStart(2, '0')).join(' ');
-                const error = new Error(`Unexpected Sharp sender identity (${hex(prefix.subarray(0, 2))}; expected ${this.identity || '99 / 9:'}). Frame prefix: ${hex(prefix.subarray(0, 16))}; queued: ${hex(this.queue.subarray(0, 32))}.`);
+                const error = new Error(`Unexpected Sharp sender identity (${hex(prefix.subarray(0, 2))}; expected ${this.identity || identities.join(' / ')}). Frame prefix: ${hex(prefix.subarray(0, 16))}; queued: ${hex(this.queue.subarray(0, 32))}.`);
                 error.code = 'SHARP_FRAME_IDENTITY'; throw error;
             }
-            if (this.model === 'sharp-el9950' && identity !== '9:' || this.model !== 'sharp-auto' && this.model !== 'sharp-el9950' && identity !== '99') throw new Error('Selected Sharp model does not match the calculator identity.');
             const extraLength = dynamicLength ? dynamicLength(prefix.subarray(2)) : 0;
-            if (!Number.isSafeInteger(extraLength) || extraLength < 0 || extraLength > RAM_SIZE) throw new Error('Invalid Sharp frame size.');
-            const packet = concat(prefix, await this.read(extraLength + 2, timeoutMs));
+            if (!Number.isSafeInteger(extraLength) || extraLength < 0 || extraLength > (this.profile.family === 'celk1' ? 0xFFFF : RAM_SIZE)) throw new Error('Invalid Sharp frame size.');
+            const packet = concat(prefix, await this.read(extraLength + 2, timeoutMs,
+                onProgress && (received => onProgress(length + Math.min(received, extraLength)))));
             if (view(packet).getUint16(packet.length - 2, true) === checksum(packet.subarray(0, packet.length - 2))) {
                 this.identity = identity;
                 // Only 9: uniquely identifies a supported model. The 9900,
                 // 9900G and SII all use 99, so leave that family ambiguous.
-                if (this.model === 'sharp-auto' && identity === '9:') this.model = 'sharp-el9950';
+                if (this.model === 'sharp-auto' && identity === '9:') {
+                    this.model = 'sharp-el9950'; this.profile = getModelProfile(this.model);
+                }
                 return packet.slice(2, -2);
             }
             await this.write(frame(Uint8Array.of(0x81)));
@@ -329,7 +365,8 @@ class SharpBackend {
     async expectCommand(expected) {
         const data = await this.receive(1);
         if (data[0] !== expected) {
-            const error = new Error(data[0] === 0x84 ? 'Sharp calculator has insufficient memory.' : `Unexpected Sharp response 0x${data[0].toString(16)} (expected 0x${expected.toString(16)}).`);
+            const error = new Error(data[0] === 0x84 && this.profile.family !== 'celk1'
+                ? 'Sharp calculator has insufficient memory.' : `Unexpected Sharp response 0x${data[0].toString(16)} (expected 0x${expected.toString(16)}).`);
             error.code = data[0]; throw error;
         }
     }
@@ -346,7 +383,8 @@ class SharpBackend {
                 return;
             }
             if (response[0] !== 0x81) {
-                const error = new Error(response[0] === 0x84 ? 'Sharp calculator has insufficient memory.' : `Sharp rejected the transfer (0x${response[0].toString(16)}).`);
+                const error = new Error(response[0] === 0x84 && this.profile.family !== 'celk1'
+                    ? 'Sharp calculator has insufficient memory.' : `Sharp rejected the transfer (0x${response[0].toString(16)}).`);
                 error.code = response[0]; throw error;
             }
         }
@@ -637,7 +675,7 @@ class SharpBackend {
     }
 }
 const api = { SharpBackend, DumpReceiver, MODELS, CATEGORIES, VENDOR_ID, PRODUCT_ID,
-    RAM_SIZE, frame, checksum, decodeNative, encodeNative, nativeHeader, decodeScreenshot, validateRestore,
+    RAM_SIZE, getModelProfile, frame, checksum, decodeNative, encodeNative, nativeHeader, decodeScreenshot, validateRestore,
     isSharpUsbDevice: device => device?.vendorId === VENDOR_ID && device?.productId === PRODUCT_ID,
     isSharpSerialInfo: info => info?.usbVendorId === VENDOR_ID && info?.usbProductId === PRODUCT_ID };
 scope.WebTILPSharp = api;

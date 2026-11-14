@@ -464,5 +464,7 @@
   "hp_legacy_download_failed": "Old-HP Kermit download failed",
   "hp_legacy_directory_download_unavailable": "Recursive old-HP directory download is not implemented; open the directory on the calculator and refresh its listing.",
   "hp_legacy_backup_unavailable": "Whole-calculator backup is not exposed for the old-HP Kermit backend.",
-  "hp_legacy_mutation_unavailable": "Delete and rename are deliberately not exposed through old-HP Kermit host commands."
+  "hp_legacy_mutation_unavailable": "Delete and rename are deliberately not exposed through old-HP Kermit host commands.",
+  "sharp_legacy_connection_hint": "These Sharp models require WebSerial and a CE-LK1P-compatible cable supporting even parity and RTS/CTS hardware flow control (9600 baud, 8E1). Select the exact model and its serial port.",
+  "sharp_legacy_limits": "Native program files for the selected model can be sent. Screenshots, the variable list and individual downloads are available. Source/image conversion, groups, RAM backups and system/ROM transfers are unavailable."
 }

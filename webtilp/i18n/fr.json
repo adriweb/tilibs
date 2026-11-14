@@ -464,5 +464,7 @@
   "sharp_program_name": "Nom du programme pour {file} (1 à 8 lettres, chiffres ou traits de soulignement, en commençant par une lettre) :",
   "sharp_picture_slot": "Emplacement de l’image {file} (0–9). L’image existante sera remplacée. Conversion en 127×64 sans recadrage, sur fond blanc :",
   "sharp_conversion_disabled": "Activez la conversion des sources et des images dans les paramètres avant d’envoyer ce fichier.",
-  "sharp_converted": "Conversion de {file} → {target}."
+  "sharp_converted": "Conversion de {file} → {target}.",
+  "sharp_legacy_connection_hint": "Ces modèles Sharp nécessitent WebSerial et un câble compatible CE-LK1P prenant en charge la parité paire et le contrôle de flux matériel RTS/CTS (9600 bauds, 8E1). Sélectionnez le modèle exact et son port série.",
+  "sharp_legacy_limits": "Les programmes natifs du modèle sélectionné peuvent être envoyés. Les captures d’écran, la liste des variables et les téléchargements individuels sont disponibles. La conversion source/image, les groupes, les sauvegardes RAM et les transferts système/ROM sont indisponibles."
 }

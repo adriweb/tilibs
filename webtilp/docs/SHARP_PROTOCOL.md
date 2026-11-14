@@ -1,5 +1,8 @@
 # Sharp EL-99xx support
 
+For the older, fixed-9600-baud EL-9400/9450/9600/9650 models, see
+[the CE-LK1P protocol and validation notes](SHARP_CELK1_PROTOCOL.md).
+
 ## Native hardware investigation (2026-11-13)
 
 The Sharp backend, frontend and regression tests have been restored. Native

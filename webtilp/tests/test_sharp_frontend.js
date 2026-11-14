@@ -40,7 +40,7 @@ function context(extra = {}) {
         FEATURE_FLAGS: { OPS_SCREEN: 4, OPS_DIRLIST: 8, OPS_VARS: 32, OPS_BACKUP: 16, OPS_ROMDUMP: 512, OPS_OS: 8192 },
         els: { btnConnect: element() }, ...extra };
     vm.createContext(c);
-    for (const name of ['isSerialDevice', 'deviceMatches', 'serialPortToDevice', 'sharpSerialDevice', 'logSharpSerialDiagnostics', 'getAuthorizedSharpSerialDevices', 'requestSharpSerialDevice',
+    for (const name of ['getSharpModelProfile', 'getSharpCapabilities', 'isSerialDevice', 'deviceMatches', 'serialPortToDevice', 'sharpSerialDevice', 'logSharpSerialDiagnostics', 'getAuthorizedSharpSerialDevices', 'requestSharpSerialDevice',
         'connectSharp', 'connect', 'getWebUsbDeviceFamily', 'runSharpOperation', 'getDeviceInfo',
         'buildEntryFromCheckbox', 'sendSharpFiles', 'saveSharpDownload', 'receiveSharpDump']) vm.runInContext(extract(name), c);
     return c;
@@ -340,6 +340,151 @@ async function main() {
         assert.equal(shown, null);
         pending = c.previewSharpEntry(entry); c.state.sharpConnectionGeneration++; complete(result); await pending;
         assert.equal(shown, null);
+    }
+    // CE-LK1P profiles use WebSerial even on macOS, accept generic granted
+    // serial ports, and expose the supported native file operations.
+    {
+        const models = ['sharp-el9400', 'sharp-el9450', 'sharp-el9600', 'sharp-el9650'];
+        const optionsStart = source.indexOf('const CALC_MODEL_OPTIONS =');
+        const optionsEnd = source.indexOf('];', optionsStart) + 2;
+        const modelOptions = vm.runInNewContext(source.slice(optionsStart, optionsEnd) + '\nCALC_MODEL_OPTIONS');
+        for (const model of models) assert.ok(modelOptions.some(option => option.value === model && option.label === sharp.MODELS[model]));
+        const legacyCapabilities = {screen: true, directory: true, receive: true, send: true,
+            backup: false, dump: false, version: false, sourceConversion: false};
+        const getModelProfile = model => models.includes(model)
+            ? {family: 'celk1', width: ['sharp-el9400', 'sharp-el9450'].includes(model) ? 96 : 132, height: 64,
+                nativeExtensions: [model === 'sharp-el9400' ? 'g2p' : model === 'sharp-el9450' ? 'g5p' : 'g3p']}
+            : {family: 'celk4'};
+        const unknownPort = {getInfo: () => ({usbVendorId: 0x067b, usbProductId: 0x23a3})};
+        const secondPort = {getInfo: () => ({})};
+        class LegacyBackend extends Backend {
+            constructor(options) { super(options); this.profile = getModelProfile(options.model); this.capabilities = legacyCapabilities; }
+        }
+        for (const model of models) {
+            let serialRequests = 0;
+            const c = context({
+                WebTILPSharp: {...sharp, SharpBackend: Backend, SharpLegacyBackend: LegacyBackend, getModelProfile,
+                    MODELS: {...sharp.MODELS, [model]: model.replace('sharp-el', 'Sharp EL-')}},
+                WebTILPSharpUsb: {shouldUse: () => true, createPort() {throw new Error('CE-LK1P must not use direct CE-LK4 USB');}},
+                navigator: {usb: {getDevices() {throw new Error('Legacy discovery is serial only');}},
+                    serial: {getPorts: async () => [unknownPort], requestPort: async options => {
+                        serialRequests++; assert.equal(options, undefined); return unknownPort;
+                    }}}
+            });
+            c.state.settings.calcModel = model;
+            await c.connect();
+            assert.ok(c.state.sharpBackend instanceof LegacyBackend);
+            assert.equal(serialRequests, 1);
+            assert.equal(c.state.sharpBackend.infoReads, 1, 'automatic info refresh performs the backend handshake');
+            assert.equal(c.state.features, c.FEATURE_FLAGS.OPS_SCREEN | c.FEATURE_FLAGS.OPS_DIRLIST | c.FEATURE_FLAGS.OPS_VARS);
+            assert.equal((await c.getAuthorizedSharpSerialDevices())[0].serialPort, unknownPort);
+            c.renderDeviceInfo = () => {}; c.updateDeviceModelDisplay = () => {};
+            vm.runInContext(extract('readSharpInfo'), c); c.readSharpInfo();
+            const entries = c.state.deviceInfoEntries;
+            assert.equal(entries.find(entry => entry.key === 'sharp_protocol').value, 'PC-Link / CE-LK1P');
+            assert.ok(entries.find(entry => entry.key === 'sharp_transport').value.includes('067B:23A3 / WebSerial / 9600 8E1 / RTS/CTS'));
+            assert.equal(entries.find(entry => entry.key === 'screenshot').value, `${getModelProfile(model).width}×64`);
+            assert.ok(!entries.some(entry => entry.key === 'sharp_version'));
+            c.navigator.serial.getPorts = async () => [unknownPort, secondPort];
+            assert.equal((await c.getAuthorizedSharpSerialDevices()).length, 2);
+            c.hasAnySupportedTransport = () => true; c.state.connectInProgress = false;
+            vm.runInContext(extract('autoConnectIfAuthorized'), c);
+            await c.autoConnectIfAuthorized();
+            assert.equal(serialRequests, 1, 'ambiguous granted ports are not silently probed');
+            c.state.connected = false; await c.connectSharp();
+            assert.equal(serialRequests, 2, 'multiple granted serial ports require explicit selection');
+            await c.connectSharp(usb, {serialPort: {device: usb}});
+            assert.equal(serialRequests, 3, 'a supplied CE-LK4 USB shim is replaced by the native serial chooser');
+            assert.equal(c.state.authorizedDevice.serialPort, unknownPort);
+            assert.equal(c.state.authorizedDevice.usbDevice, null);
+        }
+        const legacy = context({getSelectedConversionModelId: () => 0, getPythonConversionKind: () => 0,
+            PYTHON_CONVERSION_NONE: 0, NSPIRE_LUA_CALC_MODELS: new Set(),
+            WebTILPSharp: {...sharp, getModelProfile}});
+        legacy.state.activeFamily = 'sharp';
+        legacy.state.settings.calcModel = 'sharp-el9400';
+        legacy.state.connected = true; legacy.state.selectedFiles = [];
+        const entry = {kind: 'sharp', name: 'RAW', type: 112, selector: new Uint8Array(11), category: {name: 'PROGRAM'}};
+        let receives = 0, reads = 0, confirmations = 0, downloads = 0, sends = 0, decodes = 0;
+        legacy.state.sharpBackend = {model: 'sharp-el9400', profile: getModelProfile('sharp-el9400'), capabilities: legacyCapabilities,
+            decodeFile(data, name) {
+                decodes++;
+                if (data[0] !== 2) throw new Error('Wrong Sharp file family');
+                return {category: {name: 'PROGRAM', ext: 'p'}, selector: new Uint8Array(11).fill(name.charCodeAt(0)), object: data};
+            },
+            async sendFile() {sends++;},
+            async receiveVariable(actual) {assert.equal(actual, entry); receives++; return {filename: 'RAW.g2p', data: new Uint8Array([1, 2])};}};
+        legacy.triggerDownload = () => {downloads++;};
+        legacy.confirm = () => {confirmations++; return true;};
+        const failures = []; legacy.logError = error => failures.push(error);
+        for (const name of ['receiveBackup', 'downloadEntry', 'previewSharpEntry', 'setSelectedFiles', 'updateSendFilesButtonState',
+            'updateSelectionActionButtons', 'setSharpUiState', 'updateSourceConversionSettingAvailability', 'canPreviewVariable']) {
+            vm.runInContext(extract(name), legacy);
+        }
+        for (const name of ['keyCodeInput', 'fileInput', 'btnSendFiles', 'btnRecvSelected', 'btnSyncClock', 'btnNewFolder', 'btnDeleteSelected', 'btnScreenshot',
+            'btnRefreshDirlist', 'btnReceiveBackup', 'btnReceiveOs', 'btnDumpRom', 'btnIsReady', 'btnDownloadOsPartial', 'btnLeaveExam',
+            'settingConvertScriptFiles', 'settingConvertScriptFilesField']) legacy.els[name] = element();
+        legacy.resetFamilySpecificUiText = () => {}; legacy.updateKeyControlsState = () => {}; legacy.clearKeyMapDataList = () => {};
+        legacy.updateFileInputAccept = () => {}; legacy.setTextContent = (el, text) => {el.textContent = text;};
+        legacy.document = {getElementById: () => element()}; legacy.getSelectedVarInputs = () => [{}];
+        legacy.getHPPrimePreviewKind = () => null;
+        legacy.setSharpUiState();
+        for (const button of ['btnReceiveBackup', 'btnReceiveOs', 'btnDumpRom', 'btnDeleteSelected', 'btnSendFiles']) {
+            assert.equal(legacy.els[button].disabled, true, button);
+        }
+        for (const button of ['btnScreenshot', 'btnRefreshDirlist', 'btnRecvSelected']) assert.equal(legacy.els[button].disabled, false, button);
+        assert.equal(legacy.els.fileInput.disabled, false);
+        legacy.updateSourceConversionSettingAvailability(); assert.equal(legacy.els.settingConvertScriptFiles.disabled, true);
+        legacy.state.settings.calcModel = 'auto';
+        legacy.updateSourceConversionSettingAvailability(); assert.equal(legacy.els.settingConvertScriptFiles.disabled, true);
+        legacy.state.settings.calcModel = 'sharp-el9400';
+        assert.equal(legacy.canPreviewVariable(entry, 0), false);
+        await legacy.sendSharpFiles([{name: 'bad.g4b', async arrayBuffer() {reads++; return new ArrayBuffer(0);}}]);
+        await legacy.receiveSharpDump(true); await legacy.receiveSharpDump(false); await legacy.receiveBackup();
+        await legacy.previewSharpEntry(entry);
+        assert.equal(reads, 0, 'unsupported upload types never read or convert files');
+        assert.equal(receives, 0, 'unsupported previews do not receive data');
+        assert.equal(confirmations, 0, 'unsupported dumps and uploads do not prompt');
+        legacy.setSelectedFiles([{name: 'dropped.bas'}], 'drop');
+        assert.equal(legacy.state.selectedFiles.length, 0);
+        await legacy.downloadEntry(entry);
+        assert.equal(receives, 1); assert.equal(downloads, 1, 'individual raw downloads remain available');
+        const native = {name: 'HELLO.g2p', async arrayBuffer() {reads++; return new Uint8Array([2, 1]).buffer;}};
+        for (const name of ['HELLO.bas', 'HELLO.txt', 'image.png', 'group.g2g', 'HELLO.g5p', 'HELLO.g4p', 'backup.g2b']) {
+            await legacy.sendSharpFiles([native, {name, async arrayBuffer() {throw new Error('Unsupported file must not be read');}}]);
+        }
+        assert.equal(reads, 0, 'mixed batches with unsupported formats stop before reading even valid programs');
+        assert.equal(decodes, 0); assert.equal(sends, 0); assert.equal(confirmations, 0);
+        await legacy.sendSharpFiles([{name: 'BAD.g2p', arrayBuffer: async () => new Uint8Array([4]).buffer}]);
+        assert.equal(decodes, 1, 'legacy native files use the backend family validator');
+        assert.equal(sends, 0); assert.equal(confirmations, 0);
+        await legacy.sendSharpFiles([native]);
+        assert.equal(sends, 1); assert.equal(confirmations, 1);
+        await legacy.sendSharpFiles([native, native]);
+        assert.equal(sends, 1, 'duplicate destinations reject the whole batch');
+        assert.equal(confirmations, 1);
+        assert.ok(failures.some(error => error.message === 'Wrong Sharp file family'));
+
+    }
+    // Explicit legacy native-program uploads connect through the selected Sharp
+    // profile before routing either a picker batch or a table drop.
+    {
+        const c = context(); c.state.settings.calcModel = 'sharp-el9450'; c.state.activeFamily = 'ti';
+        const file = {name: 'HELLO.g5p'}; c.state.selectedFiles = [file];
+        let connections = 0, uploads = 0;
+        c.connect = async () => {connections++; c.state.activeFamily = 'sharp';};
+        c.sendSharpFiles = async files => {assert.equal(files[0], file); uploads++;};
+        c.updateSendFilesButtonState = () => {};
+        vm.runInContext(extract('sendSelectedFiles'), c);
+        vm.runInContext(extract('sendDroppedFiles'), c);
+        await c.sendSelectedFiles();
+        assert.equal(connections, 1); assert.equal(uploads, 1);
+        c.state.activeFamily = 'ti';
+        await c.sendDroppedFiles([file], '');
+        assert.equal(connections, 2); assert.equal(uploads, 2);
+        c.state.activeFamily = 'ti'; c.connect = async () => {};
+        await c.sendSelectedFiles();
+        assert.equal(uploads, 2, 'cancelled authorization never falls through to a TI transfer');
     }
     // Sharp controls expose only implemented operations, and no TI native enum receives NaN.
     const ui = context(); ui.state.activeFamily = 'sharp';

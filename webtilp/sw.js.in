@@ -7,6 +7,7 @@ const PRECACHE_URLS = [
   'app.bundle.js',
   'evo_webusb_serial.js',
   'sharp_backend.js',
+  'sharp_legacy_backend.js',
   'sharp_files.js',
   'sharp_usb.js',
   'numworks_backend.bundle.js',
