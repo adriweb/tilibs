@@ -6598,7 +6598,8 @@ function normalizeClockSettings(clockInfo) {
     if (!Number.isFinite(state)) {
         state = 1;
     }
-    return { timeFormat, dateFormat, state };
+    const timezoneMinutes = Number.isInteger(clockInfo?.timezone_minutes) ? clockInfo.timezone_minutes : null;
+    return { timeFormat, dateFormat, state, timezoneMinutes };
 }
 
 function clockInfoToDate(clockInfo) {
@@ -6684,7 +6685,7 @@ async function syncClock() {
         const settings = normalizeClockSettings(afterInfo);
         const displayDate = afterDate || targetDate;
         if (adjusted) {
-            log(`Clock synced (timezone corrected) to ${displayDate.toLocaleString()}.`);
+            log(`Clock synced (time corrected) to ${displayDate.toLocaleString()}.`);
         } else {
             log(`Clock synced to ${displayDate.toLocaleString()}.`);
         }
@@ -6765,7 +6766,17 @@ function appendDeviceInfoRowHtml(keyHtml, valueHtml) {
     els.deviceInfoList.appendChild(row);
 }
 
-function formatClockDisplayBase(date, timeFormatValue, dateFormatValue) {
+function formatClockTimezone(timezoneMinutes) {
+    if (!Number.isInteger(timezoneMinutes) || timezoneMinutes < -32768 || timezoneMinutes > 32767) {
+        return null;
+    }
+    const minutes = Math.abs(timezoneMinutes);
+    const hoursPart = String(Math.floor(minutes / 60)).padStart(2, '0');
+    const minutesPart = String(minutes % 60).padStart(2, '0');
+    return `UTC${timezoneMinutes < 0 ? '-' : '+'}${hoursPart}:${minutesPart}`;
+}
+
+function formatClockDisplayBase(date, timeFormatValue, dateFormatValue, timezoneMinutes = null) {
     if (!date) {
         return null;
     }
@@ -6774,18 +6785,20 @@ function formatClockDisplayBase(date, timeFormatValue, dateFormatValue) {
     const dateFormatLabel = Number.isFinite(dateFormat) ? `D${dateFormat}` : 'D?';
     const timePart = `<abbr title="Clock time format">${timeFormat}</abbr>`;
     const datePart = `<abbr title="Clock date format index">${dateFormatLabel}</abbr>`;
-    return `${date.toLocaleString()} (${timePart}, ${datePart})`;
+    const timezone = formatClockTimezone(timezoneMinutes);
+    const timezonePart = timezone ? `, <abbr title="Calculator UTC offset; daylight saving rules are not stored">${timezone}</abbr>` : '';
+    return `${date.toLocaleString()} (${timePart}, ${datePart}${timezonePart})`;
 }
 
 function formatClockDisplay(clockInfo) {
     const date = clockInfoToDate(clockInfo);
     const timeFormatValue = clockInfo?.time_format === 12 ? 12 : 24;
-    return formatClockDisplayBase(date, timeFormatValue, clockInfo?.date_format);
+    return formatClockDisplayBase(date, timeFormatValue, clockInfo?.date_format, clockInfo?.timezone_minutes);
 }
 
 function formatClockDisplayFromDate(date, settings) {
     const timeFormatValue = settings?.timeFormat === 12 ? 12 : 24;
-    return formatClockDisplayBase(date, timeFormatValue, settings?.dateFormat);
+    return formatClockDisplayBase(date, timeFormatValue, settings?.dateFormat, settings?.timezoneMinutes);
 }
 
 function buildClockRowKey() {
