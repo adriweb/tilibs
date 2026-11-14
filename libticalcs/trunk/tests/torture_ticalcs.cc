@@ -1639,11 +1639,11 @@ static void clock_conversion_unit_test()
         CalcClock clock;
         uint32_t packed;
     } cases[] = {
-        { { 1997, 1, 1, 0, 0, 0, 12, 1, 0 }, 0 },
-        { { 2026, 1, 15, 13, 34, 56, 12, 1, 1 }, 0x369f4400 },
-        { { 2026, 7, 15, 13, 34, 56, 24, 2, 1 }, 0x378de380 },
-        { { 2024, 2, 29, 23, 59, 59, 12, 3, 1 }, 0x3317717f },
-        { { 2133, 2, 7, 6, 28, 15, 24, 1, 0 }, UINT32_MAX }
+        { { 1997, 1, 1, 0, 0, 0, 12, 1, 0, 0, 0 }, 0 },
+        { { 2026, 1, 15, 13, 34, 56, 12, 1, 0, 0, 1 }, 0x369f4400 },
+        { { 2026, 7, 15, 13, 34, 56, 24, 2, 0, 0, 1 }, 0x378de380 },
+        { { 2024, 2, 29, 23, 59, 59, 12, 3, 0, 0, 1 }, 0x3317717f },
+        { { 2133, 2, 7, 6, 28, 15, 24, 1, 0, 0, 0 }, UINT32_MAX }
     };
     for (const auto & test : cases)
     {
@@ -1662,12 +1662,12 @@ static void clock_conversion_unit_test()
             && decoded.date_format == test.clock.date_format && decoded.state == test.clock.state);
     }
     static const CalcClock invalid[] = {
-        { 1996, 12, 31, 23, 59, 59, 12, 1, 1 },
-        { 2133, 2, 7, 6, 28, 16, 12, 1, 1 },
-        { 2025, 2, 29, 12, 0, 0, 12, 1, 1 },
-        { 2026, 1, 1, 24, 0, 0, 12, 1, 1 },
-        { 2026, 1, 1, 0, 60, 0, 12, 1, 1 },
-        { 2026, 1, 1, 0, 0, 60, 12, 1, 1 }
+        { 1996, 12, 31, 23, 59, 59, 12, 1, 0, 0, 1 },
+        { 2133, 2, 7, 6, 28, 16, 12, 1, 0, 0, 1 },
+        { 2025, 2, 29, 12, 0, 0, 12, 1, 0, 0, 1 },
+        { 2026, 1, 1, 24, 0, 0, 12, 1, 0, 0, 1 },
+        { 2026, 1, 1, 0, 60, 0, 12, 1, 0, 0, 1 },
+        { 2026, 1, 1, 0, 0, 60, 12, 1, 0, 0, 1 }
     };
     for (const auto & clock : invalid)
     {
@@ -1727,17 +1727,8 @@ static int clock_packet_stub(CalcHandle *, uint32_t, const CalcEventData * event
             && data[2] == 0 && data[3] == 4);
         uint32_t packed = (uint32_t(data[4]) << 24) | (uint32_t(data[5]) << 16)
             | (uint32_t(data[6]) << 8) | data[7];
-        CalcClock clock = {};
-        ticalcs_clock_from_dusb(packed, &clock);
-        struct tm local = {};
-        local.tm_year = clock.year - 1900;
-        local.tm_mon = clock.month - 1;
-        local.tm_mday = clock.day;
-        local.tm_hour = clock.hours;
-        local.tm_min = clock.minutes;
-        local.tm_sec = clock.seconds;
-        local.tm_isdst = -1;
-        clock_packet_time = mktime(&local);
+        // Titanium's PID 0025 is UTC seconds since the 1997 epoch.
+        clock_packet_time = time_t(852076800) + packed;
         clock_packet_calls++;
         return ERR_ABORT; // Inspect the real serialized request without using USB.
     }
@@ -1754,7 +1745,12 @@ static void clock_89t_sync_unit_test()
     {
         for (int state = 0; state < 2; state++)
         {
-            CalcClock clock = { 2001, 2, 3, 4, 5, 6, 12, 1, state };
+            CalcClock clock = { 2001, 2, 3, 4, 5, 6, 12, 1, 0, 0, state };
+            GDateTime* now = g_date_time_new_now_local();
+            clock_expect(now);
+            clock.timezone_minutes = g_date_time_get_utc_offset(now) / G_TIME_SPAN_MINUTE;
+            clock.timezone_valid = 1;
+            g_date_time_unref(now);
             clock_packet_calls = 0;
             const time_t before = (g_get_real_time() + 500000) / G_USEC_PER_SEC + offset;
             clock_expect(handle->calc->fncts.sync_clock(handle, &clock, offset) == ERR_ABORT);

@@ -1003,7 +1003,8 @@ int TICALL ticalcs_calc_set_clock(CalcHandle* handle, CalcClock* _clock)
  * @handle: a previously allocated handle
  * @offset_seconds: adjustment to host local time, normally zero
  *
- * Synchronize to host local time, preserving clock formats and enabled state.
+ * Synchronize to host local time and UTC offset where supported, preserving
+ * clock formats and enabled state.
  * Direct USB 84-family and 89Ti models sample time immediately before writing;
  * CE models also account for RTC completion. Other models use their existing setter.
  * Return value: 0 if successful, an error code otherwise.
@@ -1097,7 +1098,9 @@ int TICALL ticalcs_calc_get_clock(CalcHandle* handle, CalcClock* _clock)
 		ret = ticalcs_event_send(handle, &event);
 		if (!ret)
 		{
-			ret = calc->fncts.get_clock(handle, _clock);
+			CalcClock current = {};
+			ret = calc->fncts.get_clock(handle, &current);
+			if (!ret) *_clock = current;
 		}
 		ticalcs_event_fill_header(handle, &event, /* type */ CALC_EVENT_TYPE_AFTER_GENERIC_OPERATION, /* retval */ ret, /* operation */ FNCT_GET_CLOCK);
 		event.data.ptrval = (void *)_clock;

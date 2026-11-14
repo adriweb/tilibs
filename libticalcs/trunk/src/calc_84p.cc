@@ -1508,6 +1508,8 @@ static int set_clock_fields(CalcHandle* handle, CalcClock* clock, CalcClock curr
 
 static int set_clock_impl(CalcHandle* handle, CalcClock* clock, bool sync, int offset_seconds)
 {
+	if (handle->updat->cancel) return ERR_ABORT;
+	if (clock->seconds > 59) return ERR_INVALID_PARAMETER;
 	GDateTime* date = g_date_time_new_utc(clock->year, clock->month, clock->day,
 		clock->hours, clock->minutes, clock->seconds);
 	if (!date)
@@ -1518,17 +1520,31 @@ static int set_clock_impl(CalcHandle* handle, CalcClock* clock, bool sync, int o
 	const gint64 initial_seconds = g_date_time_to_unix(date) - 852076800;
 	g_date_time_unref(date);
 
-	const uint16_t support[] = { DUSB_PID_CLASSIC_CLK_SUPPORT, DUSB_PID_NEW_CLK_SUPPORT };
-	DUSBCalcParam** params = dusb_cp_new_array(handle, 2);
-	int ret = dusb_cmd_s_param_request(handle, 2, support);
+	const uint16_t support[] = { DUSB_PID_CLASSIC_CLK_SUPPORT, DUSB_PID_NEW_CLK_SUPPORT, DUSB_PID_CLK_TZ };
+	DUSBCalcParam** params = dusb_cp_new_array(handle, 3);
+	int ret = dusb_cmd_s_param_request(handle, 3, support);
 	if (!ret)
 	{
-		ret = dusb_cmd_r_param_data(handle, 2, params);
+		ret = dusb_cmd_r_param_data(handle, 3, params);
+	}
+	if (!ret)
+	{
+		for (unsigned i = 0; i < 3; ++i)
+		{
+			if (params[i]->id != support[i] || (params[i]->ok && params[i]->size != (i == 2 ? 2U : 1U)))
+			{
+				ret = ERR_INVALID_PACKET;
+				break;
+			}
+		}
 	}
 
-	const bool classic = params[0]->ok && !params[1]->ok;
-	const bool fields = !params[0]->ok && params[1]->ok;
-	dusb_cp_del_array(handle, params, 2);
+	const bool classic = !ret && params[0]->ok && !params[1]->ok;
+	const bool fields = !ret && !params[0]->ok && params[1]->ok;
+	const bool timezone_supported = !ret && params[2]->ok;
+	const uint16_t current_timezone = timezone_supported
+		? (uint16_t(params[2]->data[0]) << 8) | params[2]->data[1] : 0;
+	dusb_cp_del_array(handle, params, 3);
 	if (ret)
 	{
 		return ret;
@@ -1538,12 +1554,27 @@ static int set_clock_impl(CalcHandle* handle, CalcClock* clock, bool sync, int o
 		return ERR_UNSUPPORTED;
 	}
 
+	if (classic && !sync && (initial_seconds < 0 || initial_seconds > G_MAXUINT32))
+	{
+		return ERR_INVALID_PARAMETER;
+	}
+	// Retain the actual CE fields while sampling the host clock before a timezone write.
+	CalcClock current = *clock;
+	if (sync)
+	{
+		ret = ticalcs_clock_now(clock, offset_seconds, 0);
+		if (ret) return ret;
+	}
+	if (clock->timezone_valid && timezone_supported && uint16_t(clock->timezone_minutes) != current_timezone)
+	{
+		const uint16_t value = uint16_t(clock->timezone_minutes);
+		const uint8_t data[] = {uint8_t(value >> 8), uint8_t(value)};
+		ret = dusb_cmd_s_param_set_r_data_ack(handle, DUSB_PID_CLK_TZ, 2, data);
+		if (ret) return ret;
+	}
+
 	if (classic)
 	{
-		if (!sync && (initial_seconds < 0 || initial_seconds > G_MAXUINT32))
-		{
-			return ERR_INVALID_PARAMETER;
-		}
 		if (sync)
 		{
 			ret = ticalcs_clock_now(clock, offset_seconds, 500000);
@@ -1585,7 +1616,6 @@ static int set_clock_impl(CalcHandle* handle, CalcClock* clock, bool sync, int o
 		return 0;
 	}
 
-	CalcClock current = *clock;
 	if (!sync)
 	{
 		ret = get_clock(handle, &current);
@@ -1642,10 +1672,13 @@ static int sync_clock(CalcHandle* handle, CalcClock* clock, int offset_seconds)
 
 static int get_clock_impl(CalcHandle* handle, CalcClock* _clock, bool normalize_hours)
 {
-	static const uint16_t pids[12] = {
+	_clock->timezone_valid = 0;
+	_clock->timezone_minutes = 0;
+	static const uint16_t pids[13] = {
 		DUSB_PID_CLASSIC_CLK_SUPPORT, DUSB_PID_NEW_CLK_SUPPORT,
 		DUSB_PID_CLK_ON, DUSB_PID_CLK_SEC_SINCE_1997, DUSB_PID_CLK_DATE_FMT, DUSB_PID_CLK_TIME_FMT,
-		DUSB_PID_CLK_SECONDS, DUSB_PID_CLK_MINUTES, DUSB_PID_CLK_HOURS, DUSB_PID_CLK_DAY, DUSB_PID_CLK_MONTH, DUSB_PID_CLK_YEAR
+		DUSB_PID_CLK_SECONDS, DUSB_PID_CLK_MINUTES, DUSB_PID_CLK_HOURS, DUSB_PID_CLK_DAY, DUSB_PID_CLK_MONTH, DUSB_PID_CLK_YEAR,
+		DUSB_PID_CLK_TZ
 	};
 	const int size = sizeof(pids) / sizeof(uint16_t);
 
@@ -1660,6 +1693,21 @@ static int get_clock_impl(CalcHandle* handle, CalcClock* _clock, bool normalize_
 		ret = dusb_cmd_r_param_data(handle, size, params);
 		if (!ret)
 		{
+			for (unsigned i = 0; i < unsigned(size); ++i)
+			{
+				if (params[i]->id != pids[i])
+				{
+					ret = ERR_INVALID_PACKET;
+					break;
+				}
+			}
+			if (!ret && params[12]->ok && params[12]->size != 2) ret = ERR_INVALID_PACKET;
+		}
+		if (!ret)
+		{
+			_clock->timezone_valid = params[12]->ok ? 1 : 0;
+			const unsigned value = params[12]->ok ? (unsigned(params[12]->data[0]) << 8) | params[12]->data[1] : 0;
+			_clock->timezone_minutes = int16_t(value >= 0x8000 ? int(value) - 0x10000 : int(value));
 			const int classic_clock = !!params[0]->ok && !!!params[1]->ok;
 			const int new_clock = !!!params[0]->ok && !!params[1]->ok;
 			if ((!classic_clock && !new_clock) || (classic_clock && new_clock))
