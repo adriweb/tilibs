@@ -748,12 +748,21 @@ static void write_var_entry_json(FILE* fp, const VarEntry* ve, const char* kind)
     json_escape_bytes(fp, folder_buf, sizeof(folder_buf));
     // Display names are UTF-8; transfers need the original calculator bytes.
     fprintf(fp, R"(","name_hex":")");
-    for (size_t i = 0; i < name_len; ++i) {
-        fprintf(fp, "%02x", (unsigned char)raw_name[i]);
+    const char* wire_name = tifiles_calc_is_tinspire(g_calc_model) && ve->filename[0]
+        ? ve->filename : raw_name;
+    const size_t wire_name_len = safe_strnlen(wire_name, VARNAME_MAX);
+    for (size_t i = 0; i < wire_name_len; ++i) {
+        fprintf(fp, "%02x", (unsigned char)wire_name[i]);
     }
     fprintf(fp, R"(","folder_hex":")");
     for (size_t i = 0; i < folder_len; ++i) {
         fprintf(fp, "%02x", (unsigned char)raw_folder[i]);
+    }
+    if (tifiles_calc_is_tinspire(g_calc_model) && ve->filename[0]) {
+        char filename_buf[VARNAME_MAX * 4] = {};
+        ticonv_varname_to_utf8_sn(g_calc_model, ve->filename, filename_buf, sizeof(filename_buf), ve->type);
+        fprintf(fp, R"(","filename":")");
+        json_escape_bytes(fp, filename_buf, sizeof(filename_buf));
     }
     fprintf(fp, R"(","type":%u,"type_name":")", ve->type);
     if (type_name && *type_name) {
@@ -1901,9 +1910,19 @@ static bool copy_calc_name(char* dst, size_t capacity, const char* text,
 static bool set_var_request(VarEntry& request, const char* folder, const char* name,
                             uint8_t type, const char* folder_hex, const char* name_hex) {
     request.type = type;
-    return copy_calc_name(request.folder, sizeof(request.folder), folder, folder_hex, 0, false)
-        && copy_calc_name(request.name, sizeof(request.name), name, name_hex, type, true)
-        && request.name[0];
+    if (!copy_calc_name(request.folder, sizeof(request.folder), folder, folder_hex, 0, false)
+        || !copy_calc_name(request.name, sizeof(request.name), name, name_hex, type, true)
+        || !request.name[0]) return false;
+    if (tifiles_calc_is_tinspire(g_calc_model) && type == NSP_TNS && name_hex) {
+        // Nspire directory JSON carries the complete wire filename in name_hex.
+        // Text-only requests keep the historical document-basename convention.
+        strcpy(request.filename, request.name);
+        const size_t len = strlen(request.name);
+        if (len > 4 && !g_ascii_strcasecmp(request.name + len - 4, ".tns")) {
+            request.name[len - 4] = '\0';
+        }
+    }
+    return true;
 }
 
 EMSCRIPTEN_KEEPALIVE
@@ -2094,6 +2113,13 @@ int calc_rename_var(CableHandle* cable_handle,
     const char* new_name_hex = old_type == new_type && g_strcmp0(old_name, new_name) == 0 ? old_name_hex : nullptr;
     if (!set_var_request(new_req, new_folder, new_name, new_type, new_folder_hex, new_name_hex)) return ERR_WEB_INVALID_ARGUMENT;
 
+    if (old_req.filename[0] && !new_req.filename[0]) {
+        const size_t len = strlen(old_req.filename);
+        const char* suffix = len > 4 && !g_ascii_strcasecmp(old_req.filename + len - 4, ".tns")
+            ? old_req.filename + len - 4 : "";
+        if (strlen(new_req.name) + strlen(suffix) >= sizeof(new_req.filename)) return ERR_WEB_INVALID_ARGUMENT;
+        snprintf(new_req.filename, sizeof(new_req.filename), "%s%s", new_req.name, suffix);
+    }
     return ticalcs_calc_rename_var(g_calc_handle, &old_req, &new_req);
 }
 

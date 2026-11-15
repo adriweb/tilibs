@@ -39,14 +39,14 @@ async function check() {
         findDirlistMatch: () => state.dirlist[0],
         hasSilverlinkConnected: () => false,
         clearNativeWarnings() {}, getNativeWarningSuffix: () => '',
-        async ccallAsync(_module, name, _ret, types, args) {
+        async ccallAsync(_module, name, _ret, types, args, options) {
             assert.equal(types.length, args.length, name);
-            calls.push({name, args: [...args]});
+            calls.push({name, args: [...args], options});
             // Stop previews at the receive boundary; other UI paths may finish.
             return args.includes('/previews') ? 4 : 0;
         }
     });
-    vm.runInContext(['buildSelectionKey', 'buildEntryFromCheckbox', 'getTiFolderRequestHex', 'receiveSelected',
+    vm.runInContext(['getVariableReceiveTimeout', 'buildSelectionKey', 'buildEntryFromCheckbox', 'getTiFolderRequestHex', 'receiveSelected',
         'deleteSelected', 'isSameDeleteFolder', 'getEntryFolderPath', 'readTiDeletionDirlist', 'deleteEntriesWithSession', 'renameEntry', 'deleteEntry', 'downloadEntry', 'previewEntry',
         'downloadFolderEntriesWithSession', 'performTransfers'].map(extract).join('\n'), context);
     const checkbox = {dataset: {
@@ -107,6 +107,53 @@ async function check() {
         locationMask: 3, defaultLocation: 'ram'}], module, {hasArchive: true});
     expect('calc_change_attr', [0, '80', '5d']);
     expect('calc_del_var', ['80', '5d']);
+    assert.deepEqual(errors, []);
+    // Only the calculator-generated root ZIP may stay silent while the OS
+    // prepares it. Single, selected and root-folder downloads must all wait.
+    context.isNspireActive = () => true;
+    const logs = {...entry, folder: '', folder_hex: '', name: 'NspireLogs.zip', type: 0,
+        name_hex: '4e73706972654c6f67732e7a6970', isFolder: false};
+    for (const ordinary of [{...logs, name: 'themes.csv'}, {...logs, name: 'NspireLogs'},
+        {...logs, folder: 'Examples'}, {...logs, type: 1}]) {
+        assert.equal(context.getVariableReceiveTimeout(ordinary), 5000);
+    }
+    state.dirlist = [logs];
+    selected = [{dataset: {name: logs.name, folder: '', type: '0', kind: 'var',
+        nameHex: logs.name_hex, folderHex: '', isFolder: '0'}}];
+    for (const action of [() => context.downloadEntry(logs), () => context.receiveSelected(),
+        () => context.downloadFolderEntriesWithSession(module, 42, '', false)]) {
+        calls.length = 0;
+        await action();
+        const receive = calls.find(call => call.name === 'calc_recv_var');
+        assert.ok(receive);
+        assert.equal(receive.options.timeoutMs, 125000);
+    }
+    assert.equal(context.getVariableReceiveTimeout({...logs, filename: 'NspireLogs.zip.tns'}), 5000);
+    vm.runInContext(['formatVariableDisplayName', 'findDirlistMatch'].map(extract).join('\n'), context);
+    context.calcSupportsFolders = () => true;
+    const files = ['config', 'config.tns', 'config.dat', 'config.dat.tns', '.hidden', 'themes.csv'];
+    state.dirlist = files.map(filename => ({...logs, filename,
+        name: filename.endsWith('.tns') ? filename.slice(0, -4) : filename,
+        name_hex: Buffer.from(filename).toString('hex')}));
+    assert.equal(context.findDirlistMatch('config', 0, '').filename, 'config.tns');
+    assert.equal(context.findDirlistMatch('config.dat', 0, '').filename, 'config.dat.tns');
+    for (const file of state.dirlist) {
+        assert.equal(context.formatVariableDisplayName(file), file.filename);
+        selected = [{dataset: {name: file.name, filename: file.filename, nameHex: file.name_hex,
+            folder: '', folderHex: '', type: '0', kind: 'var', isFolder: '0'}}];
+        assert.equal(context.buildEntryFromCheckbox(selected[0]).filename, file.filename);
+        for (const action of [() => context.downloadEntry(file), () => context.receiveSelected(),
+            () => context.deleteEntry(file), () => context.renameEntry(file)]) {
+            calls.length = 0;
+            await action();
+            assert.ok(calls.some(call => call.args.includes(file.name_hex)), file.filename);
+        }
+    }
+    assert.equal(new Set(state.dirlist.map(file => context.buildSelectionKey({dataset: {
+        name: file.name, nameHex: file.name_hex, type: '0', kind: 'var'
+    }}))).size, files.length, 'same-basename files have distinct selection keys');
+    context.isNspireActive = () => false;
+    assert.equal(context.getVariableReceiveTimeout(logs), 5000);
     assert.deepEqual(errors, []);
     console.log('Raw variable/folder names survive selection, single/bulk download/delete, preview, rename, app download and overwrite.');
 }
