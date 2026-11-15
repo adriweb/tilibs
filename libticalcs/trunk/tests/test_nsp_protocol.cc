@@ -244,8 +244,8 @@ static int stop_before_nspire_io(CalcHandle *, uint32_t, const CalcEventData *ev
 		}
 		return 1234;
 	}
-	// Simulate a successful request send, then fail the first header read
-	// after checking the receive request path.
+	// Simulate a successful request send, then fail the first header read so
+	// the actual receive path must restore the scoped generation timeout.
 	if (event->type == CALC_EVENT_TYPE_AFTER_SEND_NSP_VPKT
 	    && event->data.nsp_vpkt.cmd == NSP_CMD_FM_GET_FILE) return 0;
 	if (event->type == CALC_EVENT_TYPE_BEFORE_SEND_NSP_RPKT) return 1234;
@@ -299,12 +299,13 @@ static void check_nspire_filenames_and_requests(void)
 		tifiles_filename_free(filename);
 		FileContent *content = tifiles_content_create_regular(handle->model);
 		requested_path[0] = 0;
-		expected_stream_timeout = 50;
+		expected_stream_timeout = !strcmp(test.path, "/NspireLogs.zip") ? 1200 : 50;
 		recv_calls = 0;
 		CHECK(ticalcs_calc_recv_var(handle, MODE_NORMAL, content, &request) == 1234);
 		CHECK(!strcmp(requested_path, test.path));
 		CHECK(recv_calls == 1);
 		CHECK(cable.timeout == 50);
+		CHECK(handle->priv.nsp_nnse_stream_timeout == 0);
 		tifiles_content_delete_regular(content);
 
 		requested_path[0] = 0;
@@ -342,6 +343,41 @@ static int check_stream_timeout(CableHandle *cable, uint8_t *, uint32_t)
 	return 1234;
 }
 
+static int stream_readable(CableHandle *, int *status)
+{
+	*status = STATUS_RX;
+	return 0;
+}
+
+static void check_nnse_scoped_timeout(void)
+{
+	CableFncts functions = {};
+	functions.recv = check_stream_timeout;
+	functions.check = stream_readable;
+	CableHandle cable = {};
+	cable.cable = &functions;
+	cable.open = 1;
+	cable.timeout = 50;
+	CalcHandle *handle = ticalcs_handle_new(CALC_NSPIRE_CXIIT);
+	CHECK(handle);
+	handle->cable = &cable;
+	handle->priv.nsp_nnse_mode = 2;
+	handle->priv.nsp_nnse_handshake_done = 1;
+	uint8_t data[1024];
+	uint32_t size = 0;
+	const unsigned int timeouts[] = {0U, 1200U, 0U};
+	for (unsigned int override_timeout : timeouts)
+	{
+		handle->priv.nsp_nnse_stream_timeout = override_timeout;
+		expected_stream_timeout = override_timeout ? override_timeout : 50;
+		recv_calls = 0;
+		CHECK(nsp_nnse_recv_stream(handle, data, sizeof(data), &size) == 1234);
+		CHECK(recv_calls > 0);
+		CHECK(cable.timeout == 50);
+	}
+	ticalcs_handle_del(handle);
+}
+
 int main(void)
 {
 	check_oversized_legacy_packet_is_drained_and_rejected();
@@ -351,5 +387,6 @@ int main(void)
 	check_reply_reverses_request_endpoints();
 	check_nspire_directory_filenames();
 	check_nspire_filenames_and_requests();
+	check_nnse_scoped_timeout();
 	return 0;
 }
