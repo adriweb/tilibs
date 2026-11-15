@@ -122,6 +122,7 @@ typedef enum
  * @size: size of data (uint16_t for TI-Z80, TI-eZ80)
  * @data: pure data
  * @action: used by ticalcs library (must be set to 0)
+ * @filename: exact Nspire directory filename, including extension; empty for legacy requests
  *
  * A generic structure used to store the content of a TI variable.
  **/
@@ -137,6 +138,7 @@ typedef struct
 	uint8_t*	data;
 
 	int			action;
+	char		filename[VARNAME_MAX];
 } VarEntry;
 
 /**

@@ -363,6 +363,19 @@ char* TICALL tifiles_build_filename(CalcModel model, const VarEntry *ve)
 		return nullptr;
 	}
 
+	// Directory entries retain exact filenames for all Nspire regular files.
+	// Legacy requests without metadata still use the normal TNS extension.
+	if (tifiles_calc_is_tinspire(model) && ve->type == NSP_TNS && ve->filename[0])
+	{
+		char *name = ticonv_varname_to_filename(model, ve->filename, ve->type);
+		if (!ve->folder[0]) return name;
+		char *folder = ticonv_varname_to_filename(model, ve->folder, -1);
+		filename = g_strconcat(folder, ".", name, nullptr);
+		g_free(folder);
+		g_free(name);
+		return filename;
+	}
+
 	if (tifiles_calc_is_ti8x(model) || !strcmp(ve->folder, "") || (ve->type == tifiles_flash_type(model)))
 	{
 		char* part2 = ticonv_varname_to_filename(model, ve->name, ve->type);
