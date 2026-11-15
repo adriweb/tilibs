@@ -5087,6 +5087,13 @@ function isNspireActive() {
     return typeof pid === 'number' && NSPIRE_PIDS.has(pid);
 }
 
+function getVariableReceiveTimeout(entry) {
+    // The OS builds this archive before sending its size or any progress.
+    return isNspireActive() && !entry.folder && Number(entry.type) === 0
+        && (entry.filename || entry.name) === 'NspireLogs.zip'
+        ? 125000 : PROGRESS_IDLE_TIMEOUT_MS;
+}
+
 function isHPPrimeActive() {
     return state.activeFamily === DEVICE_FAMILY_HP_PRIME;
 }
@@ -7129,7 +7136,7 @@ function getHPPrimePreviewKind(entry) {
 }
 
 function formatVariableDisplayName(entry) {
-    const name = entry.name || '';
+    const name = entry.filename || entry.name || '';
     if (entry.kind === 'sharp' || entry.kind === 'backup-var') {
         return name;
     }
@@ -7159,7 +7166,7 @@ function renderTableView(entries, filter) {
         if (!filter) {
             return true;
         }
-        const hay = `${entry.name} ${entry.type} ${entry.type_name || ''} ${entry.kind}`.toLowerCase();
+        const hay = `${entry.filename || entry.name} ${entry.type} ${entry.type_name || ''} ${entry.kind}`.toLowerCase();
         return hay.includes(filter);
     };
 
@@ -7282,6 +7289,7 @@ function renderTableView(entries, filter) {
         const checkbox = row.querySelector('input[type="checkbox"]');
         if (checkbox) {
             checkbox.dataset.name = entry.name || '';
+            checkbox.dataset.filename = entry.filename || '';
             checkbox.dataset.folder = entry.folder || '';
             checkbox.dataset.nameHex = entry.name_hex ?? '';
             checkbox.dataset.folderHex = entry.folder_hex ?? '';
@@ -7936,6 +7944,7 @@ function buildEntryFromCheckbox(checkbox) {
 
     return {
         name: checkbox.dataset.name,
+        filename: checkbox.dataset.filename || '',
         folder: checkbox.dataset.folder,
         name_hex: checkbox.dataset.nameHex || null,
         folder_hex: checkbox.dataset.folderHex || null,
@@ -9486,7 +9495,9 @@ function findDirlistMatch(name, type, folder, location) {
             return false;
         }
         const entryFolder = normalizeFolderPath(entry.folder);
-        return entry.name === name && entry.type === type && entryFolder === targetFolder;
+        const sameName = isNspireActive() && entry.filename
+            ? /\.tns$/i.test(entry.filename) && entry.filename.slice(0, -4) === name : entry.name === name;
+        return sameName && entry.type === type && entryFolder === targetFolder;
     });
 }
 
@@ -10419,7 +10430,7 @@ async function receiveSelected() {
             const progressLabel = `Receiving ${entry.name}`;
             const result = entry.kind === 'app'
                 ? await ccallAsync(module, 'calc_recv_app', 'number', ['number', 'string', 'number', 'string', 'string'], [handle, entry.name, entry.type, '/downloads', entry.name_hex], { timeoutMs: PROGRESS_IDLE_TIMEOUT_MS, useProgress: true, progressLabel })
-                : await ccallAsync(module, 'calc_recv_var', 'number', ['number', 'string', 'string', 'number', 'string', 'string', 'string'], [handle, entry.folder, entry.name, entry.type, '/downloads', entry.folder_hex, entry.name_hex], { timeoutMs: PROGRESS_IDLE_TIMEOUT_MS, useProgress: true, progressLabel });
+                : await ccallAsync(module, 'calc_recv_var', 'number', ['number', 'string', 'string', 'number', 'string', 'string', 'string'], [handle, entry.folder, entry.name, entry.type, '/downloads', entry.folder_hex, entry.name_hex], { timeoutMs: getVariableReceiveTimeout(entry), useProgress: true, progressLabel });
             if (result === 0) {
                 await downloadLastReceived(module);
                 log(`Received ${entry.name}.`);
@@ -10761,7 +10772,7 @@ async function downloadEntry(entry) {
         const progressLabel = `Receiving ${entry.name}`;
         const result = entry.kind === 'app'
             ? await ccallAsync(module, 'calc_recv_app', 'number', ['number', 'string', 'number', 'string', 'string'], [handle, entry.name, entry.type, '/downloads', entry.name_hex], { timeoutMs: PROGRESS_IDLE_TIMEOUT_MS, useProgress: true, progressLabel })
-            : await ccallAsync(module, 'calc_recv_var', 'number', ['number', 'string', 'string', 'number', 'string', 'string', 'string'], [handle, entry.folder, entry.name, entry.type, '/downloads', entry.folder_hex, entry.name_hex], { timeoutMs: PROGRESS_IDLE_TIMEOUT_MS, useProgress: true, progressLabel });
+            : await ccallAsync(module, 'calc_recv_var', 'number', ['number', 'string', 'string', 'number', 'string', 'string', 'string'], [handle, entry.folder, entry.name, entry.type, '/downloads', entry.folder_hex, entry.name_hex], { timeoutMs: getVariableReceiveTimeout(entry), useProgress: true, progressLabel });
         if (result === 0) {
             await downloadLastReceived(module);
             log(`Received ${entry.name}.`);
@@ -11217,7 +11228,7 @@ async function previewEntry(entry, actionButton) {
             ['number', 'string', 'string', 'number', 'string', 'string', 'string'],
             [handle, entry.folder, entry.name, entry.type, '/previews', entry.folder_hex, entry.name_hex],
             {
-                timeoutMs: PROGRESS_IDLE_TIMEOUT_MS,
+                timeoutMs: getVariableReceiveTimeout(entry),
                 useProgress: true,
                 progressLabel: `Preparing preview for ${entry.name}`
             }
@@ -11362,7 +11373,7 @@ async function downloadFolderEntriesWithSession(module, handle, folderPath, conf
             'number',
             ['number', 'string', 'string', 'number', 'string', 'string', 'string'],
             [handle, entry.folder, entry.name, entry.type, '/downloads', entry.folder_hex, entry.name_hex],
-            { timeoutMs: PROGRESS_IDLE_TIMEOUT_MS, useProgress: true, progressLabel: `Receiving ${entry.name}` }
+            { timeoutMs: getVariableReceiveTimeout(entry), useProgress: true, progressLabel: `Receiving ${entry.name}` }
         );
         if (result === 0) {
             await downloadLastReceived(module);

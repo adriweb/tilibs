@@ -111,6 +111,46 @@ const timeout = setTimeout(() => { console.error('Variable-name WASM test timed 
         module.ccall('test_var_name_teardown', null, [], []);
         console.log(`${fixture.display}: exact DBUS name bytes ${fixture.raw}`);
     }
+    // Distinguish TNS basenames from exact app-data names across the real
+    // directory JSON / ccall / VarRequest bridge, including rename and move.
+    for (const folder of ['', 'Examples/sub']) {
+        for (const filename of ['config', 'config.tns', 'config.dat', 'config.dat.tns',
+            '.hidden', '.hidden.tns', 'UPPER.TNS', 'themes.csv', 'themes.tns',
+            'NspireLogs.zip', 'NspireLogs.zip.tns', 'é.cfg']) {
+            const raw = Buffer.from(filename).toString('hex');
+            const folderHex = Buffer.from(folder).toString('hex');
+            const jsonPath = module.ccall('test_var_name_setup', 'string',
+                ['number', 'number', 'string', 'string'], [32, 0, raw, folderHex]);
+            const entry = JSON.parse(module.FS.readFile(jsonPath, {encoding: 'utf8'}));
+            assert.equal(entry.filename, filename);
+            assert.equal(entry.name_hex, raw);
+            const isDocument = /\.tns$/i.test(filename);
+            assert.equal(entry.name, isDocument ? filename.slice(0, -4) : filename);
+            const handle = module.ccall('test_var_name_handle', 'number', [], []);
+            module.ccall('test_var_name_capture', null, [], []);
+            const captured = field => module.ccall('test_var_name_captured_hex', 'string', ['number'], [field]);
+            for (const [fn, types, args] of [
+                ['calc_recv_var', ['number', 'string', 'string', 'number', 'string', 'string', 'string'],
+                    [handle, folder, entry.name, 0, '/', folderHex, raw]],
+                ['calc_del_var', ['number', 'string', 'string', 'number', 'string', 'string'],
+                    [handle, folder, entry.name, 0, folderHex, raw]],
+                ['calc_rename_var', ['number', 'string', 'string', 'number', 'string', 'string', 'number', 'string', 'string'],
+                    [handle, folder, entry.name, 0, folder, 'NEW', 0, folderHex, raw]]
+            ]) {
+                assert.equal(await module.ccall(fn, 'number', types, args, {async: true}), 4, fn);
+                assert.equal(captured(4), raw, `${fn}: exact source filename`);
+                if (fn === 'calc_rename_var') {
+                    assert.equal(captured(5), Buffer.from('NEW' + (isDocument ? filename.slice(-4) : '')).toString('hex'));
+                }
+            }
+            assert.equal(await module.ccall('calc_rename_var', 'number',
+                ['number', 'string', 'string', 'number', 'string', 'string', 'number', 'string', 'string'],
+                [handle, folder, entry.name, 0, 'Moved', entry.name, 0, folderHex, raw], {async: true}), 4);
+            assert.equal(captured(5), raw, 'moving preserves the complete filename');
+            module.ccall('test_var_name_teardown', null, [], []);
+        }
+    }
+    console.log('Nspire exact filenames survive JSON, receive, delete, rename and move without adding .tns.');
     // The real libticalcs dispatcher captures every request-building wrapper.
     // Include charsets whose display conversion cannot be inverted uniquely.
     for (const fixture of [

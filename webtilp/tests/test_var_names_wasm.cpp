@@ -77,6 +77,11 @@ extern "C" EMSCRIPTEN_KEEPALIVE const char* test_var_name_setup(int model, int t
         assert(sscanf(folder_hex + 2 * i, "%2x", &value) == 1);
         entry.folder[i] = value;
     }
+    if (tifiles_calc_is_tinspire(g_calc_model) && type == NSP_TNS) {
+        strcpy(entry.filename, entry.name);
+        const size_t len = strlen(entry.name);
+        if (len > 4 && !g_ascii_strcasecmp(entry.name + len - 4, ".tns")) entry.name[len - 4] = 0;
+    }
     FILE* fp = fopen("/name.json", "wb");
     assert(fp);
     write_var_entry_json(fp, &entry, "var");
@@ -119,7 +124,8 @@ extern "C" EMSCRIPTEN_KEEPALIVE void test_var_name_real_folder_delete() {
 
 extern "C" EMSCRIPTEN_KEEPALIVE const char* test_var_name_captured_hex(int field) {
     const char* value = field == 0 ? name_test_old.name : field == 1 ? name_test_old.folder
-        : field == 2 ? name_test_new.name : name_test_new.folder;
+        : field == 2 ? name_test_new.name : field == 3 ? name_test_new.folder
+        : field == 4 ? name_test_old.filename : name_test_new.filename;
     static std::string hex;
     hex.clear();
     for (; *value; ++value) {
