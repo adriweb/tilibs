@@ -899,6 +899,10 @@ static int nnse_send_stream_control_reset(CalcHandle *handle, uint16_t seqno)
 
 static unsigned int nnse_effective_stream_timeout(CalcHandle *handle)
 {
+	if (handle != nullptr && handle->priv.nsp_nnse_stream_timeout)
+	{
+		return handle->priv.nsp_nnse_stream_timeout;
+	}
 	if (handle != nullptr && handle->cable != nullptr
 	    && handle->cable->timeout > 0
 	    && handle->cable->timeout < NSP_NNSE_STREAM_TIMEOUT_CEILING)

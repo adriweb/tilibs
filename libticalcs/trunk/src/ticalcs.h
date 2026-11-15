@@ -1059,6 +1059,7 @@ struct _CalcHandle
 		uint16_t nsp_nnse_last_stream_seqno; // last delivered incoming NNSE stream sequence number
 		uint16_t nsp_nnse_passive_port; // extra calculator-initiated service port accepted by a passive operation
 		uint8_t nsp_nnse_has_last_stream_seqno; // whether nsp_nnse_last_stream_seqno is valid
+		unsigned int nsp_nnse_stream_timeout; // temporary receive timeout override in tenths of seconds; 0 = normal ceiling
 		void * nsp_nnse_rx_buffer; // raw NNSE bytes already consumed from USB while resynchronizing
 		void * nsp_nnse_pending; // NNSE stream payloads received while waiting for NNSE-level acks
 	} priv;
