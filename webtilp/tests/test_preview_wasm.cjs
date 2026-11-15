@@ -63,6 +63,7 @@ async function main() {
         canPreviewVariable: () => true,
         getHPPrimePreviewKind: () => '',
         getActiveCalcModelId: () => 20,
+        isNspireActive: () => false,
         authorizeDevice: async () => {},
         initModule: async () => module,
         ensureHandle: async () => 1,
@@ -74,7 +75,7 @@ async function main() {
     });
     vm.runInContext('let previewSession = null; let previewRenderId = 0;\n' + [
         'disposePreviewSession', 'formatTivarsException', 'isTIBasicPreviewEntry',
-        'usesTIBasicPreviewSyntax', 'unwrapReadablePreview', 'previewEntry'
+        'usesTIBasicPreviewSyntax', 'unwrapReadablePreview', 'getVariableReceiveTimeout', 'previewEntry'
     ].map(extract).join('\n'), context);
     context.closePreviewModal = () => vm.runInContext('disposePreviewSession()', context);
 
