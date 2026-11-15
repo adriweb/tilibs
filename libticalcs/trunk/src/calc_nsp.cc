@@ -51,9 +51,11 @@ static gchar * build_path(CalcModel model, VarRequest * vr)
 	const char * dot_if_any;
 	const char * fext_if_any;
 	gchar * path;
+	const bool exact_filename = vr->type == NSP_TNS && vr->filename[0];
+	const char * name = exact_filename ? vr->filename : vr->name;
 
 	// Don't add a dot if this file type is unknown or a folder.
-	if (vr->type >= NSP_MAXTYPES || vr->type == NSP_DIR)
+	if (vr->type >= NSP_MAXTYPES || vr->type == NSP_DIR || exact_filename)
 	{
 		dot_if_any = "";
 	}
@@ -63,7 +65,7 @@ static gchar * build_path(CalcModel model, VarRequest * vr)
 	}
 
 	// Don't add a file extension if this is a folder.
-	if (vr->type == NSP_DIR)
+	if (vr->type == NSP_DIR || exact_filename)
 	{
 		fext_if_any = "";
 	}
@@ -74,11 +76,11 @@ static gchar * build_path(CalcModel model, VarRequest * vr)
 
 	if (!strcmp(vr->folder, ""))
 	{
-		path = g_strconcat("/", vr->name, dot_if_any, fext_if_any, nullptr);
+		path = g_strconcat("/", name, dot_if_any, fext_if_any, nullptr);
 	}
 	else
 	{
-		path = g_strconcat("/", vr->folder, "/", vr->name, dot_if_any, fext_if_any, nullptr);
+		path = g_strconcat("/", vr->folder, "/", name, dot_if_any, fext_if_any, nullptr);
 	}
 
 	return path;
@@ -439,24 +441,17 @@ static int enumerate_folder_entries(CalcHandle* handle, GNode** vars, const char
 			fe->type = vartype;
 			fe->attr = ATTRB_NONE;
 
-			// We might have to remove some extensions.
+			// Keep the wire filename separately: type zero also covers app data
+			// without .tns, and must not imply an extension for file operations.
 			if (fe->type == NSP_TNS)
 			{
-				char * ext = (char*)tifiles_fext_get((const char*)varname);
-				// Just a sanity check
-				if (ext)
+				ticalcs_strlcpy(fe->filename, varname, sizeof(fe->filename));
+				const size_t len = strlen(varname);
+				if (len > 4 && !g_ascii_strcasecmp(varname + len - 4, ".tns"))
 				{
-					// Did the file name have any non-empty extension ?
-					if (*ext)
-					{
-						// Then we can remove the exension.
-						*(ext-1) = '\0';
-					}
-					// else there is no extension to remove.
+					varname[len - 4] = '\0';
 				}
-				// else there is no extension to remove.
 			}
-			// else don't remove the extension.
 			ticalcs_strlcpy(fe->name, varname, sizeof(fe->name));
 
 			const GNode* node = dirlist_create_append_node(fe, vars);
@@ -721,6 +716,16 @@ static int		send_var	(CalcHandle* handle, CalcMode mode, FileContent* content)
 	if (entry->action == ACT_SKIP)
 	{
 		return 0;
+	}
+
+	// The OS accepts only TNS uploads, even though it lists other files.
+	if (entry->filename[0])
+	{
+		const size_t len = strlen(entry->filename);
+		if (len <= 4 || g_ascii_strcasecmp(entry->filename + len - 4, ".tns"))
+		{
+			return ERR_INVALID_PARAMETER;
+		}
 	}
 
 	//if (!strlen(entry->folder))
