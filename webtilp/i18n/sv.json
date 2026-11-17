@@ -204,6 +204,7 @@
   "auto_probe_hint": "Auto detekterar modellen automatiskt.",
   "silverlink_hint": "SilverLink kräver manuellt val av modell.",
   "graylink_hint": "GrayLink requires manual model selection and a WebSerial RS232 adapter.",
+  "calc_group_accessories": "Tillbehör",
   "cable_timeout": "Kabeltimeout (1/10s)",
   "cable_delay": "Kabelfördröjning (µs)",
   "language": "Språk",

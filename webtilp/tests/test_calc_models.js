@@ -31,9 +31,11 @@ function extractFunction(name) {
 }
 
 let stored = null;
+const cableModels = Object.fromEntries(['CABLE_DIRECTLINK', 'CABLE_SILVERLINK', 'CABLE_GRAYLINK']
+    .map(name => [name, appSource.match(new RegExp(`^const ${name} = '([^']+)';`, 'm'))[1]]));
 const context = {
     console,
-    CABLE_DIRECTLINK: '6', CABLE_SILVERLINK: '5', CABLE_GRAYLINK: '1',
+    ...cableModels,
     state: {},
     localStorage: {
         getItem(key) { assert.equal(key, 'webtilp.settings'); return stored; },
@@ -52,9 +54,9 @@ const context = {
 vm.createContext(context);
 vm.runInContext(appSource.slice(appSource.indexOf('const SETTINGS_DEFAULTS ='),
     appSource.indexOf('const TIVARS_LEGACY_PREVIEW_TYPES =')), context);
-vm.runInContext('globalThis.config = { CALC_MODEL_OPTIONS, DIRECTLINK_CALC_VALUES, EVO_PYTHON_CALC_MODELS, TIVARS_PREVIEW_CALC_MODELS };', context);
+vm.runInContext('globalThis.config = { CALC_MODEL_OPTIONS, CALC_MODEL_GROUPS, DIRECTLINK_CALC_VALUES, EVO_PYTHON_CALC_MODELS, TIVARS_PREVIEW_CALC_MODELS };', context);
 for (const name of ['loadSettings', 'saveSettings', 'getEvoCalcModelForDevice',
-    'applyWebUsbDeviceCableHint', 'authorizeDevice']) {
+    'applyWebUsbDeviceCableHint', 'authorizeDevice', 'sortCalcOptions', 'getCalcOptionsForCable']) {
     vm.runInContext(extractFunction(name), context);
 }
 
@@ -67,6 +69,39 @@ async function main() {
     for (const [label, name] of Object.entries(labels)) {
         assert.equal(context.config.CALC_MODEL_OPTIONS.find(option => option.label === label)?.value,
             models[name], `${label} matches the native enum`);
+    }
+    const accessories = ['CALC_TIPRESENTER', 'CALC_CBL', 'CALC_CBR', 'CALC_CBL2', 'CALC_CBR2', 'CALC_LABPRO'];
+    const groupIds = Array.from(context.config.CALC_MODEL_GROUPS, group => group.id);
+    assert.deepEqual(groupIds, ['z80', 'ez80', '68k', 'nspire', 'evo', 'accessories', 'casio', 'sharp']);
+    for (const option of context.config.CALC_MODEL_OPTIONS) {
+        if (option.value !== 'auto') assert.ok(groupIds.includes(option.group), `${option.label} has a valid group`);
+    }
+    for (const [model, group] of [[models.CALC_TI82AEP_USB, 'ez80'], [models.CALC_NSPIRE_CRADLE, 'accessories']]) {
+        assert.equal(context.config.CALC_MODEL_OPTIONS.find(option => option.value === model).group, group);
+    }
+    for (const cable of ['auto', context.CABLE_SILVERLINK, context.CABLE_GRAYLINK, context.CABLE_DIRECTLINK]) {
+        const options = context.getCalcOptionsForCable(cable);
+        const values = new Set(options.map(option => option.value));
+        const isDbus = cable === context.CABLE_SILVERLINK || cable === context.CABLE_GRAYLINK;
+        const expectedGroups = isDbus ? ['z80', '68k', 'accessories', 'casio', 'sharp'] : groupIds;
+        assert.deepEqual(Array.from(new Set(options.slice(1).map(option => option.group))), expectedGroups,
+            'family order survives cable filtering');
+        let previousGroup = -1;
+        for (const option of options.slice(1)) {
+            const group = groupIds.indexOf(option.group);
+            assert.ok(group >= previousGroup, 'each family stays together');
+            previousGroup = group;
+        }
+        for (const accessory of accessories) {
+            assert.equal(values.has(models[accessory]), cable !== context.CABLE_DIRECTLINK,
+                `${accessory} visibility for cable ${cable}`);
+        }
+        assert.equal(options[0].value, 'auto', 'Auto remains the first option');
+        if (cable === context.CABLE_SILVERLINK || cable === context.CABLE_GRAYLINK) {
+            assert.ok(values.has(models.CALC_TI83P), 'DBUS calculators remain available');
+            assert.equal(values.has(models.CALC_TI84P_USB), false, 'USB calculators require DirectLink');
+            assert.equal(values.has(models.CALC_LABPRO_USB), false, 'USB LabPro is not a DBUS accessory');
+        }
     }
     const evoModels = ['CALC_TI84EVO_USB', 'CALC_TI84EVOT_USB', 'CALC_TI83EVO_USB'].map(name => models[name]);
     for (const model of evoModels) {

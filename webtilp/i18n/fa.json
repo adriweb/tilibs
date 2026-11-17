@@ -204,6 +204,7 @@
   "auto_probe_hint": "حالت خودکار مدل را شناسایی می‌کند.",
   "silverlink_hint": "SilverLink نیاز به انتخاب دستی مدل دارد.",
   "graylink_hint": "GrayLink requires manual model selection and a WebSerial RS232 adapter.",
+  "calc_group_accessories": "لوازم جانبی",
   "cable_timeout": "مهلت کابل (۱/۱۰ ثانیه)",
   "cable_delay": "تأخیر کابل (µs)",
   "language": "زبان",

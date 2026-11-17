@@ -214,6 +214,7 @@
   "auto_probe_hint": "自动模式将检测计算器型号。",
   "silverlink_hint": "使用 SilverLink 时，请手动选择计算器型号。",
   "graylink_hint": "使用 GrayLink 时，请手动选择计算器型号，并使用支持 WebSerial 的 RS232 适配器。",
+  "calc_group_accessories": "配件",
   "cable_timeout": "线缆超时时间（单位：0.1 秒）",
   "cable_delay": "线缆延迟（微秒）",
   "settings_note": "更改设置将重置当前连接句柄。请重新连接计算器，使设置完全生效。",
