@@ -204,6 +204,7 @@
   "auto_probe_hint": "Auto rileva automaticamente il modello.",
   "silverlink_hint": "SilverLink richiede la selezione manuale del modello.",
   "graylink_hint": "GrayLink requires manual model selection and a WebSerial RS232 adapter.",
+  "calc_group_accessories": "Accessori",
   "cable_timeout": "Timeout cavo (1/10s)",
   "cable_delay": "Ritardo cavo (µs)",
   "language": "Lingua",

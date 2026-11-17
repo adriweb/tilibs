@@ -864,6 +864,7 @@ const I18N_EN = {
     "auto_probe_hint": "Auto uses probing to detect the model.",
     "silverlink_hint": "SilverLink requires manual model selection.",
     "graylink_hint": "GrayLink requires manual model selection and a WebSerial RS232 adapter.",
+    "calc_group_accessories": "Accessories",
     "cable_timeout": "Cable timeout (1/10s)",
     "cable_delay": "Cable delay (us)",
     "language": "Language",
@@ -1948,63 +1949,76 @@ const CABLE_OPTIONS = [
     { value: CABLE_GRAYLINK, label: 'GrayLink serial (RS232)' }
 ];
 
-const SILVERLINK_CALC_VALUES = new Set([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 16, 17]);
+// Both DBUS cables also support TI Presenter, CBL/CBR, CBL2/CBR2 and LabPro.
+const SILVERLINK_CALC_VALUES = new Set([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 16, 17, 37, 38, 39, 40, 41, 42]);
 const DIRECTLINK_CALC_VALUES = new Set([13, 14, 15, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 48, 49, 50]);
+
+// Match desktop TiLP's family order, followed by the other manual backends.
+const CALC_MODEL_GROUPS = [
+    { id: 'z80', label: 'Z80' },
+    { id: 'ez80', label: 'eZ80' },
+    { id: '68k', label: '68k' },
+    { id: 'nspire', label: 'Nspire' },
+    { id: 'evo', label: 'Evo' },
+    { id: 'accessories', label: 'Accessories', labelKey: 'calc_group_accessories' },
+    { id: 'casio', label: 'Casio' },
+    { id: 'sharp', label: 'Sharp' }
+];
 
 const CALC_MODEL_OPTIONS = [
     { value: 'auto', label: 'Auto' },
-    { value: 'casio-rm7000', label: 'Casio RM-7000 (native OS loader)' },
-    { value: 'casio-rm9000', label: 'Casio RM-9000 (native OS loader)' },
-    { value: 'sharp-auto', label: 'Sharp EL-99xx (auto)' },
-    { value: 'sharp-el9900', label: 'Sharp EL-9900' },
-    { value: 'sharp-el9900g', label: 'Sharp EL-9900G' },
-    { value: 'sharp-el9900gsii', label: 'Sharp EL-9900G SII' },
-    { value: 'sharp-el9950', label: 'Sharp EL-9950' },
-    { value: 1, label: 'TI-73' },
-    { value: 2, label: 'TI-82' },
-    { value: 3, label: 'TI-83' },
-    { value: 4, label: 'TI-83+' },
-    { value: 5, label: 'TI-84+' },
-    { value: 6, label: 'TI-85' },
-    { value: 7, label: 'TI-86' },
-    { value: 8, label: 'TI-89' },
-    { value: 9, label: 'TI-89 Titanium' },
-    { value: 10, label: 'TI-92' },
-    { value: 11, label: 'TI-92+' },
-    { value: 12, label: 'Voyage 200' },
-    { value: 13, label: 'TI-84+ USB' },
-    { value: 14, label: 'TI-89 Titanium USB' },
-    { value: 15, label: 'TI-Nspire' },
-    { value: 16, label: 'TI-80' },
-    { value: 17, label: 'TI-84 Plus C' },
-    { value: 18, label: 'TI-84 Plus C USB' },
-    { value: 19, label: 'TI-83 Premium CE' },
-    { value: 20, label: 'TI-84 Plus CE' },
-    { value: 21, label: 'TI-82 Advanced' },
-    { value: 22, label: 'TI-84 Plus T' },
-    { value: 23, label: 'TI-Nspire Cradle' },
-    { value: 24, label: 'TI-Nspire Clickpad' },
-    { value: 25, label: 'TI-Nspire Clickpad CAS' },
-    { value: 26, label: 'TI-Nspire Touchpad' },
-    { value: 27, label: 'TI-Nspire Touchpad CAS' },
-    { value: 28, label: 'TI-Nspire CX' },
-    { value: 29, label: 'TI-Nspire CX CAS' },
-    { value: 30, label: 'TI-Nspire CM-C' },
-    { value: 31, label: 'TI-Nspire CM-C CAS' },
-    { value: 32, label: 'TI-Nspire CX II' },
-    { value: 33, label: 'TI-Nspire CX II CAS' },
-    { value: 34, label: 'TI-Nspire CX II-T' },
-    { value: 35, label: 'TI-Nspire CX II-T CAS' },
-    { value: 36, label: 'TI-82 Advanced Edition Python' },
-    { value: 37, label: 'TI Presenter' },
-    { value: 38, label: 'CBL' },
-    { value: 39, label: 'CBR' },
-    { value: 40, label: 'CBL2' },
-    { value: 41, label: 'CBR2' },
-    { value: 42, label: 'LabPro' },
-    { value: 48, label: 'TI-84 Evo' },
-    { value: 49, label: 'TI-84 Evo-T' },
-    { value: 50, label: 'TI-83 Evo' }
+    { value: 'casio-rm7000', label: 'Casio RM-7000 (native OS loader)', group: 'casio' },
+    { value: 'casio-rm9000', label: 'Casio RM-9000 (native OS loader)', group: 'casio' },
+    { value: 'sharp-auto', label: 'Sharp EL-99xx (auto)', group: 'sharp' },
+    { value: 'sharp-el9900', label: 'Sharp EL-9900', group: 'sharp' },
+    { value: 'sharp-el9900g', label: 'Sharp EL-9900G', group: 'sharp' },
+    { value: 'sharp-el9900gsii', label: 'Sharp EL-9900G SII', group: 'sharp' },
+    { value: 'sharp-el9950', label: 'Sharp EL-9950', group: 'sharp' },
+    { value: 1, label: 'TI-73', group: 'z80' },
+    { value: 2, label: 'TI-82', group: 'z80' },
+    { value: 3, label: 'TI-83', group: 'z80' },
+    { value: 4, label: 'TI-83+', group: 'z80' },
+    { value: 5, label: 'TI-84+', group: 'z80' },
+    { value: 6, label: 'TI-85', group: 'z80' },
+    { value: 7, label: 'TI-86', group: 'z80' },
+    { value: 8, label: 'TI-89', group: '68k' },
+    { value: 9, label: 'TI-89 Titanium', group: '68k' },
+    { value: 10, label: 'TI-92', group: '68k' },
+    { value: 11, label: 'TI-92+', group: '68k' },
+    { value: 12, label: 'Voyage 200', group: '68k' },
+    { value: 13, label: 'TI-84+ USB', group: 'z80' },
+    { value: 14, label: 'TI-89 Titanium USB', group: '68k' },
+    { value: 15, label: 'TI-Nspire', group: 'nspire' },
+    { value: 16, label: 'TI-80', group: 'z80' },
+    { value: 17, label: 'TI-84 Plus C', group: 'z80' },
+    { value: 18, label: 'TI-84 Plus C USB', group: 'z80' },
+    { value: 19, label: 'TI-83 Premium CE', group: 'ez80' },
+    { value: 20, label: 'TI-84 Plus CE', group: 'ez80' },
+    { value: 21, label: 'TI-82 Advanced', group: 'z80' },
+    { value: 22, label: 'TI-84 Plus T', group: 'z80' },
+    { value: 23, label: 'TI-Nspire Cradle', group: 'accessories' },
+    { value: 24, label: 'TI-Nspire Clickpad', group: 'nspire' },
+    { value: 25, label: 'TI-Nspire Clickpad CAS', group: 'nspire' },
+    { value: 26, label: 'TI-Nspire Touchpad', group: 'nspire' },
+    { value: 27, label: 'TI-Nspire Touchpad CAS', group: 'nspire' },
+    { value: 28, label: 'TI-Nspire CX', group: 'nspire' },
+    { value: 29, label: 'TI-Nspire CX CAS', group: 'nspire' },
+    { value: 30, label: 'TI-Nspire CM-C', group: 'nspire' },
+    { value: 31, label: 'TI-Nspire CM-C CAS', group: 'nspire' },
+    { value: 32, label: 'TI-Nspire CX II', group: 'nspire' },
+    { value: 33, label: 'TI-Nspire CX II CAS', group: 'nspire' },
+    { value: 34, label: 'TI-Nspire CX II-T', group: 'nspire' },
+    { value: 35, label: 'TI-Nspire CX II-T CAS', group: 'nspire' },
+    { value: 36, label: 'TI-82 Advanced Edition Python', group: 'ez80' },
+    { value: 37, label: 'TI Presenter', group: 'accessories' },
+    { value: 38, label: 'CBL', group: 'accessories' },
+    { value: 39, label: 'CBR', group: 'accessories' },
+    { value: 40, label: 'CBL2', group: 'accessories' },
+    { value: 41, label: 'CBR2', group: 'accessories' },
+    { value: 42, label: 'LabPro', group: 'accessories' },
+    { value: 48, label: 'TI-84 Evo', group: 'evo' },
+    { value: 49, label: 'TI-84 Evo-T', group: 'evo' },
+    { value: 50, label: 'TI-83 Evo', group: 'evo' }
 ];
 
 const CE_PYTHON_CALC_MODELS = new Map([
@@ -4319,19 +4333,32 @@ function ensureGrayLinkModelSelected() {
 
 function populateSelect(select, options) {
     select.innerHTML = '';
+    const groups = new Map();
     options.forEach(option => {
+        let parent = select;
+        if (option.group) {
+            if (!groups.has(option.group)) {
+                const group = document.createElement('optgroup');
+                group.label = getOptionLabel(CALC_MODEL_GROUPS.find(entry => entry.id === option.group));
+                groups.set(option.group, group);
+                select.appendChild(group);
+            }
+            parent = groups.get(option.group);
+        }
         const item = document.createElement('option');
         item.value = String(option.value);
         item.textContent = getOptionLabel(option);
-        select.appendChild(item);
+        parent.appendChild(item);
     });
 }
 
 function sortCalcOptions(options) {
     const autoOption = options.find(option => String(option.value) === 'auto');
+    const groupOrder = new Map(CALC_MODEL_GROUPS.map((group, index) => [group.id, index]));
     const rest = options
         .filter(option => String(option.value) !== 'auto')
-        .sort((a, b) => a.label.localeCompare(b.label, undefined, { sensitivity: 'base' }));
+        .sort((a, b) => groupOrder.get(a.group) - groupOrder.get(b.group)
+            || a.label.localeCompare(b.label, undefined, { sensitivity: 'base', numeric: true }));
     return autoOption ? [autoOption, ...rest] : rest;
 }
 
