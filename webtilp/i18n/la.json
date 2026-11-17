@@ -204,6 +204,7 @@
   "auto_probe_hint": "Auto exemplar per explorationem detegit.",
   "silverlink_hint": "SilverLink electionem exemplaris manualem requirit.",
   "graylink_hint": "GrayLink requires manual model selection and a WebSerial RS232 adapter.",
+  "calc_group_accessories": "Instrumenta accessoria",
   "cable_timeout": "Tempus exspectationis cabli (1/10s)",
   "cable_delay": "Mora cabli (µs)",
   "language": "Lingua",

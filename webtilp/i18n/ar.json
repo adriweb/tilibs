@@ -204,6 +204,7 @@
   "auto_probe_hint": "الوضع التلقائي يستخدم الفحص لاكتشاف الطراز.",
   "silverlink_hint": "SilverLink يتطلب اختيار الطراز يدويًا.",
   "graylink_hint": "GrayLink requires manual model selection and a WebSerial RS232 adapter.",
+  "calc_group_accessories": "الملحقات",
   "cable_timeout": "مهلة الكابل (1/10 ثانية)",
   "cable_delay": "تأخير الكابل (µs)",
   "language": "اللغة",
