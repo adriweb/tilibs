@@ -5,6 +5,8 @@ const timeout = setTimeout(() => { console.error('Variable-name WASM test timed 
 (async () => {
     const module = await createModule({print() {}, printErr() {}});
     await module.ccall('init', 'number', [], [], {async: true});
+    assert.equal(module.ccall('test_var_name_filenames', 'string', [], []), '');
+    console.log('Download filenames retain printable ASCII/Latin-1 across DBUS, USB, CE, Evo and Nspire, including folders.');
     const subtypeMetadata = (bytes, model = 8, type = 0x1c, container = 0) => JSON.parse(
         module.ccall('test_other_subtype_json', 'string', ['number', 'number', 'string', 'number'],
             [model, type, Buffer.from(bytes).toString('hex'), container]));
