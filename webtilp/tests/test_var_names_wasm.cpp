@@ -49,6 +49,65 @@ int name_test_send(CableHandle*, uint8_t* data, uint32_t size) {
 int name_test_recv(CableHandle*, uint8_t*, uint32_t) { return TICABLES_ERR_READ_TIMEOUT; }
 }
 
+extern "C" EMSCRIPTEN_KEEPALIVE const char* test_var_name_filenames() {
+    // Exercise every subscript digit, independently of built-in list tokens.
+    const unsigned short digits[] = {'L', 0x2080, 0x2081, 0x2082, 0x2083, 0x2084,
+        0x2085, 0x2086, 0x2087, 0x2088, 0x2089, 0};
+    char* filename = ticonv_utf16_to_gfe(CALC_TI84P_USB, digits);
+    assert(filename && strcmp(filename, "L0123456789") == 0);
+    ticonv_gfe_free(filename);
+
+    // Controls, DEL, non-Latin text and supplementary characters must not leak
+    // into filenames or disappear when no readable transliteration exists.
+    const unsigned short unusual[] = {0x0001, 0x007f, 0x4e2d, 0xd83d, 0xde00, '/', 0};
+    filename = ticonv_utf16_to_gfe(CALC_NSPIRE_CXII, unusual);
+    assert(filename && strcmp(filename, "_u0001__u007F__u4E2D__u1F600__") == 0);
+    ticonv_gfe_free(filename);
+
+    struct Fixture {
+        CalcModel model; uint8_t type; const char* raw; const char* basename;
+        const char* folder = "";
+    };
+    for (const Fixture& fixture : {
+        Fixture{CALC_TI83P, 1, "\x5d", "L1"},
+        Fixture{CALC_TI83P, 1, "\x5d\x05", "L6"},
+        Fixture{CALC_TI83P, 3, "\x5e\x10", "Y1"},
+        Fixture{CALC_TI83P, 3, "\x5e\x19", "Y0"},
+        Fixture{CALC_TI83P, 2, "\x5c", "[A]"},
+        Fixture{CALC_TI84P_USB, 1, "L₁", "L1"},
+        Fixture{CALC_TI84PCE_USB, 3, "Y₉", "Y9"},
+        Fixture{CALC_TI83EVO_USB, 1, "L₆", "L6"},
+        Fixture{CALC_TI84P_USB, 0x15, "A₀₇", "A07"},
+        Fixture{CALC_TI84P_USB, 0, "θ", "_theta_"},
+        Fixture{CALC_TI89, 0, "\x88", "_theta_"},
+        Fixture{CALC_TI89, 0, "\xe9", "é"},
+        Fixture{CALC_TI84P_USB, 0x15, "αΩπ", "_alpha__OMEGA__pi_"},
+        Fixture{CALC_NSPIRE_CXII, 0, "café", "Données.café", "Données"},
+        Fixture{CALC_NSPIRE_CXII, 0, "àçèéêëîïôùûüÿÉÇ", "àçèéêëîïôùûüÿÉÇ"}
+    }) {
+        VarEntry entry{};
+        strcpy(entry.name, fixture.raw);
+        strcpy(entry.folder, fixture.folder);
+        entry.type = fixture.type;
+        filename = tifiles_build_filename(fixture.model, &entry);
+        const std::string expected = std::string(fixture.basename) + "."
+            + tifiles_vartype2fext(fixture.model, fixture.type);
+        if (!filename || filename != expected) {
+            static std::string error;
+            error = std::string(filename ? filename : "(null)") + " != " + expected;
+            tifiles_filename_free(filename);
+            return error.c_str();
+        }
+        for (const char* p = filename; *p; p = g_utf8_next_char(p)) {
+            const gunichar ch = g_utf8_get_char(p);
+            assert(((ch >= 0x20 && ch <= 0x7e) || (ch >= 0xa0 && ch <= 0xff))
+                && g_unichar_isprint(ch));
+        }
+        tifiles_filename_free(filename);
+    }
+    return "";
+}
+
 extern "C" EMSCRIPTEN_KEEPALIVE const char* test_var_name_setup(int model, int type,
                                                                const char* raw_hex,
                                                                const char* folder_hex) {
