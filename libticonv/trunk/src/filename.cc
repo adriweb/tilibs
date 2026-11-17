@@ -39,6 +39,89 @@
 
 #include "ticonv.h"
 
+static const char* greek_filename_spelling(gunichar ch)
+{
+	switch (ch)
+	{
+		case 0x03bc: return "_mu_";
+		case 0x03b1: return "_alpha_";
+		case 0x03b2: return "_beta_";
+		case 0x0393: return "_GAMMA_";
+		case 0x03b3: return "_gamma_";
+		case 0x0394: return "_DELTA_";
+		case 0x03b4: return "_delta_";
+		case 0x03b5: return "_epsilon_";
+		case 0x03b6: return "_zeta_";
+		case 0x03b8: return "_theta_";
+		case 0x03bb: return "_lambda_";
+		case 0x03be: return "_ksi_";
+		case 0x03a0: return "_PI_";
+		case 0x03c0: return "_pi_";
+		case 0x03c1: return "_rho_";
+		case 0x03a3: return "_SIGMA_";
+		case 0x03c3: return "_sigma_";
+		case 0x03c4: return "_tau_";
+		case 0x03d5: return "_PHI_";
+		case 0x03a8: return "_PSI_";
+		case 0x03a9: return "_OMEGA_";
+		case 0x03c9: return "_omega_";
+		default: return "";
+	}
+}
+
+#ifdef __EMSCRIPTEN__
+// Browser downloads retain printable ASCII and Latin-1, encoded as UTF-8.
+static char* browser_filename(const unsigned short* src)
+{
+	char* utf8 = g_utf16_to_utf8(src, -1, nullptr, nullptr, nullptr);
+	if (!utf8) return nullptr;
+	GString* result = g_string_new(nullptr);
+	for (const char* p = utf8; *p; p = g_utf8_next_char(p))
+	{
+		const gunichar ch = g_utf8_get_char(p);
+		if (ch >= 0x20 && ch <= 0x7e)
+		{
+			g_string_append_c(result, ch == '/' ? '_' : ch);
+		}
+		else if (ch >= 0xa0 && ch <= 0xff && g_unichar_isprint(ch))
+		{
+			g_string_append_unichar(result, ch);
+		}
+		else if (ch >= 0x2080 && ch <= 0x2089)
+		{
+			g_string_append_c(result, '0' + ch - 0x2080);
+		}
+		else if (*greek_filename_spelling(ch))
+		{
+			g_string_append(result, greek_filename_spelling(ch));
+		}
+		else
+		{
+			char character[7] = {};
+			g_unichar_to_utf8(ch, character);
+			char* replacement = g_str_to_ascii(character, "en");
+			bool printable = replacement && *replacement;
+			for (const char* q = replacement; q && *q; ++q)
+			{
+				if (*q < 0x20 || *q > 0x7e || *q == '?' || *q == '/') printable = false;
+			}
+			if (printable)
+			{
+				g_string_append(result, replacement);
+			}
+			else
+			{
+				// Keep otherwise untranslatable characters distinct and visible.
+				g_string_append_printf(result, "_u%04X_", ch);
+			}
+			g_free(replacement);
+		}
+	}
+	g_free(utf8);
+	return g_string_free(result, FALSE);
+}
+#endif
+
 /**
  * ticonv_utf16_to_gfe:
  * @model: a calculator model taken in #CalcModel.
@@ -50,6 +133,7 @@
  * Greeks characters need conversion if the locale is not UTF-8 (Windows for sure, Linux
  * if locale is different of UTF-8) because greek characters are often missed or mis-converted
  * when converting to locale.
+ * WebAssembly builds retain printable ASCII and Latin-1 characters in UTF-8.
  *
  * Return value: %dst as a newly allocated string or NULL if error.
  **/
@@ -65,6 +149,10 @@ char* TICALL ticonv_utf16_to_gfe(CalcModel model, const unsigned short *src)
 	{
 		return nullptr;
 	}
+
+#ifdef __EMSCRIPTEN__
+	return browser_filename(src);
+#endif
 
 	// detokenization to UTF-16
 	const unsigned short* p = utf16_src = src;
@@ -85,32 +173,7 @@ char* TICALL ticonv_utf16_to_gfe(CalcModel model, const unsigned short *src)
 			{
 				glong ir, iw;
 
-				switch (*p)
-				{
-					case 0x03bc: str = "_mu_"; break;
-					case 0x03b1: str = "_alpha_"; break;
-					case 0x03b2: str = "_beta_"; break;
-					case 0x0393: str = "_GAMMA_"; break;
-					case 0x03b3: str = "_gamma_"; break;
-					case 0x0394: str = "_DELTA_"; break;
-					case 0x03b4: str = "_delta_"; break;
-					case 0x03b5: str = "_epsilon_";break;
-					case 0x03b6: str = "_zeta_"; break;
-					case 0x03b8: str = "_theta_"; break;
-					case 0x03bb: str = "_lambda_"; break;
-					case 0x03be: str = "_ksi_"; break;
-					case 0x03a0: str = "_PI_"; break;
-					case 0x03c0: str = "_pi_"; break;
-					case 0x03c1: str = "_rho_"; break;
-					case 0x03a3: str = "_SIGMA_"; break; 
-					case 0x03c3: str = "_sigma_"; break; 
-					case 0x03c4: str = "_tau_"; break;
-					case 0x03d5: str = "_PHI_"; break;
-					case 0x03a8: str = "_PSI_"; break;
-					case 0x03a9: str = "_OMEGA_"; break; 
-					case 0x03c9: str = "_omega_"; break;
-					default: str = ""; break;
-				}
+				str = greek_filename_spelling(*p);
 
 				gunichar2* str2 = g_utf8_to_utf16(str, -1, &ir, &iw, nullptr);
 				memcpy(q, str2, (iw+1) * sizeof(unsigned short));
@@ -142,32 +205,7 @@ char* TICALL ticonv_utf16_to_gfe(CalcModel model, const unsigned short *src)
 				{
 					glong ir, iw;
 
-					switch(*p)
-					{
-						case 0x03bc: str = "_mu_"; break;
-						case 0x03b1: str = "_alpha_"; break;
-						case 0x03b2: str = "_beta_"; break;
-						case 0x0393: str = "_GAMMA_"; break;
-						case 0x03b3: str = "_gamma_"; break;
-						case 0x0394: str = "_DELTA_"; break;
-						case 0x03b4: str = "_delta_"; break;
-						case 0x03b5: str = "_epsilon_";break;
-						case 0x03b6: str = "_zeta_"; break;
-						case 0x03b8: str = "_theta_"; break;
-						case 0x03bb: str = "_lambda_"; break;
-						case 0x03be: str = "_ksi_"; break;
-						case 0x03a0: str = "_PI_"; break;
-						case 0x03c0: str = "_pi_"; break;
-						case 0x03c1: str = "_rho_"; break;
-						case 0x03a3: str = "_SIGMA_"; break;
-						case 0x03c3: str = "_sigma_"; break;
-						case 0x03c4: str = "_tau_"; break;
-						case 0x03d5: str = "_PHI_"; break;
-						case 0x03a8: str = "_PSI_"; break;
-						case 0x03a9: str = "_OMEGA_"; break;
-						case 0x03c9: str = "_omega_"; break;
-						default: str = ""; break;
-					}
+					str = greek_filename_spelling(*p);
 
 					gunichar2* str2 = g_utf8_to_utf16(str, -1, &ir, &iw, nullptr);
 					memcpy(q, str2, (iw+1) * sizeof(gunichar2));
