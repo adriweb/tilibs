@@ -596,6 +596,7 @@ const FEATURE_FLAGS = {
     FTS_FOLDER  : 1 << 16,
     FTS_FLASH   : 1 << 18,
     FTS_BACKUP  : 1 << 20,
+    FTS_NONSILENT: 1 << 22,
 };
 
 const TIG_MODE = {
@@ -911,6 +912,12 @@ const I18N_EN = {
     "backup_note": "Standard backups may fail on large memory contents. TIGroup is recommended for big backups.",
     "backup_manual_note": "After clicking Create Backup, send a Backup from the calculator's LINK menu. WebTILP will wait for you to start it.",
     "backup_manual_waiting": "Waiting for backup: send a Backup from the calculator's LINK menu.",
+    "receive_variables": "Receive Variables",
+    "receive_variables_waiting": "Waiting for variables from the calculator…",
+    "receive_variables_82": "On the calculator, press 2nd → LINK → SEND. Choose a selection option, select the variables, then choose TRANSMIT → 1:Transmit.",
+    "receive_variables_85": "On the calculator, press 2nd → LINK → F1:SEND. Select the variables, then press F1:XMIT.",
+    "send_variables_82": "Before starting, put the calculator in receive mode with 2nd → LINK → RECEIVE → 1:Receive. Confirm any overwrite on the calculator.",
+    "send_variables_85": "Before starting, put the calculator in receive mode with 2nd → LINK → F2:RECV. Confirm any overwrite on the calculator.",
     "loading_dirlist": "Loading directory listing...",
     "create_backup": "Create Backup",
     "theme_prefix": "Theme",
@@ -1529,7 +1536,10 @@ function installTiUsbTransport(device) {
     };
     const abort = () => {
         if (aborting) return aborting;
-        if (transport.module) transport.module.__manualBackupWaiting = false;
+        if (transport.module) {
+            transport.module.__manualBackupWaiting = false;
+            transport.module.__manualLinkWaiting = false;
+        }
         capture();
         poisoned = true;
         aborting = (async () => {
@@ -1577,16 +1587,18 @@ function installTiUsbTransport(device) {
         device[name] = async (...args) => {
             if (poisoned) throw new DOMException(`${label} needs buffer recovery.`, 'NetworkError');
             try {
-                const waitingForBackup = name === 'transferIn' && transport.module?.__manualBackupWaiting;
+                const manualWait = name === 'transferIn' && (transport.module?.__manualBackupWaiting
+                    || transport.module?.__manualLinkWaiting);
                 const nativeTimeoutMs = transport.module?.__cableTimeoutMs || 5000;
                 const configuredTimeoutMs = transport.module?.__configuredCableTimeoutMs || 5000;
                 // Flash erase/program waits temporarily extend the native timeout.
                 // Keep ordinary SilverLink I/O short, but honor those extensions.
                 const extendedWait = nativeTimeoutMs > configuredTimeoutMs;
                 const timeoutMs = isSilverLink && !extendedWait ? 1100 : nativeTimeoutMs;
-                const result = await run(name, args, waitingForBackup ? null : timeoutMs);
+                const result = await run(name, args, manualWait ? null : timeoutMs);
                 if (name === 'transferIn' && result.data?.byteLength && transport.module) {
                     transport.module.__manualBackupWaiting = false;
+                    transport.module.__manualLinkWaiting = false;
                 }
                 if (result.status !== 'ok') await abortTransfer();
                 return result;
@@ -1791,6 +1803,11 @@ async function withProgressTimeout(promise, label, timeoutMs = CCALL_TIMEOUT_MS,
         }
         if (state.lastProgressTs > lastProgress) {
             lastProgress = state.lastProgressTs;
+        }
+        if (module?.__manualLinkWaiting) {
+            // The calculator may be waiting for an overwrite decision.
+            // Give subsequent packets their full deadline once it replies.
+            lastProgress = Date.now();
         }
         // A protocol WAIT or Flash GC can extend the native packet deadline.
         // Keep the JS watchdog from aborting a receive the calculator requested.
@@ -3627,6 +3644,7 @@ const els = {
     varsPanel: document.getElementById('varsPanel'),
     btnNewFolder: document.getElementById('btnNewFolder'),
     btnSendFiles: document.getElementById('btnSendFiles'),
+    btnReceiveVars: document.getElementById('btnReceiveVars'),
     btnReceiveBackup: document.getElementById('btnReceiveBackup'),
     btnBackupDirlist: document.getElementById('btnBackupDirlist'),
     backupDirlistNote: document.getElementById('backupDirlistNote'),
@@ -4417,6 +4435,7 @@ async function applyTranslations() {
     setTextContent(document.getElementById('dropzoneTitle'), t('dropzone_title'));
     setTextContent(document.getElementById('dropzoneSubtitle'), t('dropzone_subtitle'));
     setIconLabel(els.btnSendFiles, 'upload', t('send_selected_files'), '📤');
+    setIconLabel(els.btnReceiveVars, 'download', t('receive_variables'), '⬇️');
     setIconLabel(els.btnReceiveBackup, 'archive', t('make_backup'), '📥');
     setIconLabel(els.btnReceiveOs, 'download', t('receive_os'), '📥');
     setIconLabel(els.btnDownloadOsPartial, 'download', t('download_os_so_far'), '⬇️');
@@ -5186,6 +5205,7 @@ function updateFileInputAccept() {
 }
 
 function resetFamilySpecificUiText(clearActionTitles = true) {
+    els.btnReceiveVars?.classList.add('hidden');
     setTextContent(document.getElementById('dropzoneTitle'), t('dropzone_title'));
     setTextContent(document.getElementById('dropzoneSubtitle'), t('dropzone_subtitle'));
     setTextContent(document.getElementById('panelVarsTitle'), t('calculator_variables'));
@@ -5209,6 +5229,7 @@ function setTiUiState(capabilitiesKnown = false) {
     }
     updateSendFilesButtonState();
     if (capabilitiesKnown) {
+        els.btnReceiveVars?.classList.toggle('hidden', !hasManualVariableLink(getActiveCalcModelId()));
         // updateCapabilities() already resolved the key controls and the
         // per-feature button states for this calculator. Leave them alone, so
         // that a translation refresh cannot hide the keys panel or drop the
@@ -6200,6 +6221,7 @@ async function updateCapabilities() {
     const hasFolder = (features & FEATURE_FLAGS.FTS_FOLDER) !== 0;
     const hasBackup = (features & FEATURE_FLAGS.OPS_BACKUP) !== 0 || (features & FEATURE_FLAGS.FTS_BACKUP) !== 0;
     const canListBackup = !hasDirlist && hasBackup && [2, 6].includes(getActiveCalcModelId()); // TI-82, TI-85
+    els.btnReceiveVars?.classList.toggle('hidden', !hasManualVariableLink(getActiveCalcModelId()));
     const hasClock = (features & FEATURE_FLAGS.OPS_CLOCK) !== 0;
     const hasRomDump = (features & FEATURE_FLAGS.OPS_ROMDUMP) !== 0;
     const hasKeys = (features & FEATURE_FLAGS.OPS_KEYS) !== 0;
@@ -9131,8 +9153,17 @@ async function handleCeBundleTransfer(bundleFile, module, options) {
 
 function openTransferModal(plan, options) {
     els.transferTableBody.innerHTML = '';
+    const model = getActiveCalcModelId();
+    const manualLink = hasManualVariableLink(model);
+    const manualNote = document.getElementById('transferManualLinkNote');
+    const showManualNote = manualLink && plan.some(item => isVarFileClass(item.fileClass));
+    document.getElementById('transferNote')?.classList.toggle('hidden', manualLink);
+    manualNote?.classList.toggle('hidden', !showManualNote);
+    if (showManualNote) setTextContent(manualNote, t(model === 2 ? 'send_variables_82' : 'send_variables_85'));
     if (els.transferOverwriteAll) {
+        els.transferOverwriteAll.closest('.transfer-overwrite-option')?.classList.toggle('hidden', manualLink);
         els.transferOverwriteAll.checked = false;
+        els.transferOverwriteAll.disabled = manualLink;
     }
     // Files can target folders that are not on the calculator yet.
     const folders = [...new Set([
@@ -9300,7 +9331,7 @@ function openTransferModal(plan, options) {
             els.transferModal.classList.add('hidden');
             resolve({
                 selections,
-                overwriteAll: Boolean(els.transferOverwriteAll?.checked)
+                overwriteAll: !manualLink && Boolean(els.transferOverwriteAll?.checked)
             });
         };
         els.btnTransferAllRam?.addEventListener('click', onAllRam);
@@ -9326,23 +9357,30 @@ function getNativeBackupWaitingLabel(model) {
     return t(model === 2 ? 'backup_wait_82' : 'backup_wait_8586');
 }
 
-async function runGuidedBackup(direction, filename, operation) {
+function hasManualVariableLink(model) {
+    return (model === 2 || model === 6) && (state.features & FEATURE_FLAGS.FTS_NONSILENT) !== 0;
+}
+
+async function runGuidedLinkTransfer(direction, filename, operation) {
     const model = getActiveCalcModelId();
-    if (!els.backupGuideModal || !getNativeBackupSteps(model, direction).length) return operation();
+    const variables = direction === 'receive-vars';
+    const steps = variables ? [model === 2 ? 'receive_variables_82' : 'receive_variables_85']
+        : getNativeBackupSteps(model, direction);
+    if (!els.backupGuideModal || !steps.length) return operation();
     const restore = direction === 'restore';
     const epoch = state.operationEpoch;
     const previousFocus = document.activeElement;
-    setTextContent(els.backupGuideTitle, t(restore ? 'backup_restore_title' : 'backup_receive_title'));
+    setTextContent(els.backupGuideTitle, t(variables ? 'receive_variables' : restore ? 'backup_restore_title' : 'backup_receive_title'));
     setTextContent(els.backupGuideFile, filename ? tFormat('backup_restore_file', { file: filename }) : '');
     els.backupGuideFile.classList.toggle('hidden', !filename);
     els.backupGuideWarning.classList.toggle('hidden', !restore);
     setTextContent(els.backupGuideWarning, t('backup_restore_warning'));
-    els.backupGuideSteps.replaceChildren(...getNativeBackupSteps(model, direction).map(key => {
+    els.backupGuideSteps.replaceChildren(...steps.map(key => {
         const li = document.createElement('li');
         li.textContent = t(key);
         return li;
     }));
-    els.backupGuideVersion.classList.toggle('hidden', ![2, 6].includes(model));
+    els.backupGuideVersion.classList.toggle('hidden', variables || ![2, 6].includes(model));
     setTextContent(els.backupGuideVersion, t('backup_rom_menu_note'));
     setTextContent(els.btnStartBackupRestore, t('backup_restore_title'));
     els.btnStartBackupRestore.classList.toggle('hidden', !restore);
@@ -9360,7 +9398,7 @@ async function runGuidedBackup(direction, filename, operation) {
         if (!started) { decide?.(false); return; }
         setTextContent(els.backupGuideStatus, t('backup_transfer_cancelling'));
         // Use the same cancellation and buffer recovery as the emergency-reset button.
-        nukeConnection(false).catch(error => logError(error, 'Cancel backup failed'));
+        nukeConnection(false).catch(error => logError(error, 'Cancel transfer failed'));
     };
     els.btnStartBackupRestore.addEventListener('click', onStart);
     els.btnCancelBackupGuide.addEventListener('click', onCancel);
@@ -9376,12 +9414,12 @@ async function runGuidedBackup(direction, filename, operation) {
         els.btnStartBackupRestore.classList.add('hidden');
         setTextContent(els.btnCancelBackupGuide, t('backup_transfer_cancel'));
         els.btnCancelBackupGuide.focus();
-        const status = restore ? (model === 3 ? 'backup_restore_auto' : 'backup_restore_wait')
+        const status = variables ? 'receive_variables_waiting' : restore ? (model === 3 ? 'backup_restore_auto' : 'backup_restore_wait')
             : (model === 3 ? 'backup_receive_auto' : model === 2 ? 'backup_wait_82' : 'backup_wait_8586');
         setTextContent(els.backupGuideStatus, t(status));
         const result = await operation();
         if (cancelled) {
-            const error = new Error('Backup transfer cancelled.');
+            const error = new Error('Transfer cancelled.');
             error.silent = true;
             throw error;
         }
@@ -9588,7 +9626,7 @@ async function performTransfers(plan, module, options) {
             }
 
             let existing = null;
-            if (isVar && state.dirlist.length && targetName && item.entryType != null) {
+            if (!needsEot && isVar && state.dirlist.length && targetName && item.entryType != null) {
                 existing = findDirlistMatch(targetName, item.entryType, targetFolder, targetLocation);
                 if (existing) {
                     const overwrite = options.overwriteAll
@@ -9712,7 +9750,7 @@ async function performTransfers(plan, module, options) {
                     }
                 };
                 result = item.fileClass === 'backup' && [2, 3, 6, 7].includes(model)
-                    ? await runGuidedBackup('restore', displayName, send) : await send();
+                    ? await runGuidedLinkTransfer('restore', displayName, send) : await send();
                 if (result === null) break;
                 pendingEot = deferEot && result === 0;
             } finally {
@@ -9760,7 +9798,7 @@ async function performTransfers(plan, module, options) {
             log(`Failed to send ${label}: ${err?.message || 'unknown error'}.${getNativeWarningSuffix()}`);
         }
     }
-    // Close even when trailing entries were skipped (e.g. overwrite declined).
+    // Close even when trailing entries were skipped.
     // Do not report a successful batch until the calculator acknowledges EOT.
     await finishVarSend();
     return { successCount };
@@ -10028,6 +10066,27 @@ async function processIncomingTransfers(files, options = {}) {
     }
 }
 
+async function receiveVariables() {
+    if (!hasManualVariableLink(getActiveCalcModelId())) return;
+    setButtonLoading(els.btnReceiveVars, true);
+    try {
+        const handle = await ensureCableOpen();
+        const module = state.module;
+        const dir = '/downloads';
+        if (!module.FS.analyzePath(dir).exists) module.FS.mkdir(dir);
+        const result = await runGuidedLinkTransfer('receive-vars', '', () =>
+            ccallAsync(module, 'calc_recv_var_ns', 'number', ['number', 'string'], [handle, dir], {
+                timeoutMs: null, useProgress: true, progressLabel: t('receive_variables_waiting')
+            }));
+        if (result !== 0) throw new Error(formatErrorResult(module, result));
+        await downloadLastReceived(module);
+    } catch (error) {
+        logError(error, t('receive_variables'));
+    } finally {
+        setButtonLoading(els.btnReceiveVars, false);
+    }
+}
+
 async function receiveBackup() {
     if (state?.activeFamily === 'sharp') {
         await runSharpOperation(t('sharp_backup'), async backend => saveSharpDownload(await backend.receiveBackup(), backend));
@@ -10130,7 +10189,7 @@ async function receiveBackup() {
         if (manualBackup) log(getNativeBackupWaitingLabel(getActiveCalcModelId()));
         const result = isTigroup
             ? await ccallAsync(module, 'calc_recv_tigroup', 'number', ['number', 'string', 'number'], [handle, target, backupChoice.mode], { timeoutMs: PROGRESS_IDLE_TIMEOUT_MS, useProgress: true, progressLabel: 'Receiving backup (tigroup)' })
-            : await runGuidedBackup('receive', '', () => ccallAsync(module, 'calc_recv_backup', 'number', ['number', 'string'], [handle, target], { timeoutMs: manualBackup ? null : PROGRESS_IDLE_TIMEOUT_MS, useProgress: true, progressLabel: manualBackup ? getNativeBackupWaitingLabel(getActiveCalcModelId()) : 'Receiving backup' }));
+            : await runGuidedLinkTransfer('receive', '', () => ccallAsync(module, 'calc_recv_backup', 'number', ['number', 'string'], [handle, target], { timeoutMs: manualBackup ? null : PROGRESS_IDLE_TIMEOUT_MS, useProgress: true, progressLabel: manualBackup ? getNativeBackupWaitingLabel(getActiveCalcModelId()) : 'Receiving backup' }));
         if (result !== 0) {
             log(`Backup failed (${formatErrorResult(module, result)}).`);
             return;
@@ -11877,6 +11936,7 @@ async function nukeConnection(tryReconnect = true) {
     clearActiveOperations('Operation cancelled by emergency reset.');
     const transport = tiUsbTransports.get(state.authorizedDevice);
     const module = state.module || transport?.module;
+    const grayLink = isGrayLinkSerialDevice(state.authorizedDevice) ? module?.__ticablesWebSerial : null;
     let nativeIdle = true;
     if (transport) {
         try {
@@ -11886,6 +11946,19 @@ async function nukeConnection(tryReconnect = true) {
         } catch (error) {
             nativeIdle = false;
             console.warn('[WebTILP] TI USB I/O did not stop; retiring the module without native teardown', error);
+        }
+    }
+    if (grayLink) {
+        // Wake a non-silent receive before calling back into Asyncify to close.
+        grayLink.error = new Error('GrayLink transfer cancelled.');
+        grayLink.queue = [];
+        grayLink.queuedBytes = 0;
+        for (const wake of grayLink.waiters?.splice(0) || []) wake();
+        try {
+            await withTimeout(getModuleCallState(module).tail, 'Waiting for GrayLink I/O', 3000);
+        } catch (error) {
+            nativeIdle = false;
+            console.warn('[WebTILP] GrayLink I/O did not stop', error);
         }
     }
     const wasSharp = state.activeFamily === DEVICE_FAMILY_SHARP;
@@ -11915,7 +11988,7 @@ async function nukeConnection(tryReconnect = true) {
         if (state.module && nativeIdle && !wasSharp && !wasHPPrime && !wasNumWorks) {
             try {
                 retireModule(state.module, 'emergency reset');
-                if (transport) {
+                if (transport || grayLink) {
                     await state.module.ccall('notify_usb_disconnect', null, [], [], { async: true });
                 } else {
                     state.module._notify_usb_disconnect();
@@ -12080,6 +12153,7 @@ function bindEvents() {
     els.btnRefreshDirlist.addEventListener('click', () => refreshDirlist({ manual: true }));
     els.btnBackupDirlist?.addEventListener('click', () => refreshDirlist({ manual: true }));
     els.btnSendFiles.addEventListener('click', sendSelectedFiles);
+    els.btnReceiveVars.addEventListener('click', receiveVariables);
     els.btnReceiveBackup.addEventListener('click', receiveBackup);
     els.btnReceiveOs.addEventListener('click', receiveOs);
     els.btnDownloadOsPartial.addEventListener('click', downloadPartialOs);
