@@ -113,6 +113,7 @@ function harness(device = new USBDevice(), realTime = false) {
         console: { log() {}, warn(...args) { logs.push(args); }, error(...args) { logs.push(args); } },
         els: {}, setButtonLoading() {},
         clearActiveOperations() { state.operationEpoch++; },
+        isGrayLinkSerialDevice: device => device?.serialKind === 2,
         isHPPrimeActive: () => false, isHPLegacyActive: () => false, isNumWorksActive: () => false,
         isCasioActive: () => false, isNspireActive: () => false,
         clearDeviceData() {}, applyActiveFamilyUiState() {}, setConnected() {}, setStatus() {}, log() {},
@@ -288,6 +289,35 @@ async function main() {
         assert.equal(h.state.nukeInProgress, false);
         assert.equal(h.transport.needsRecovery, false);
         assert.ok(!h.logs.some(args => args[0] === 'ERROR'), 'bomb recovery succeeds even if USB reset is rejected');
+    }
+    {
+        const h = harness();
+        h.state.authorizedDevice = {serialKind: 2};
+        let active = false;
+        const serial = {queue: [], queuedBytes: 0, waiters: []};
+        const module = h.state.module = {
+            __ticablesWebSerial: serial,
+            async ccall(name) {
+                if (name === 'calc_recv_var_ns') {
+                    active = true;
+                    await new Promise(resolve => serial.waiters.push(resolve));
+                    assert.ok(serial.error);
+                    active = false;
+                    return 3;
+                }
+                assert.equal(name, 'notify_usb_disconnect');
+                assert.equal(active, false, 'GrayLink teardown waits for the receive to leave Asyncify');
+                return 0;
+            }
+        };
+        const cancelled = assert.rejects(h.context.ccallAsync(module, 'calc_recv_var_ns', 'number', [], []),
+            error => error.silent === true);
+        await new Promise(resolve => setImmediate(resolve));
+        assert.equal(active, true);
+        await h.context.nukeConnection(false);
+        await cancelled;
+        assert.equal(h.state.module, null);
+        assert.equal(serial.waiters.length, 0);
     }
     for (const failReset of [false, true]) {
         const h = harness();
@@ -624,6 +654,105 @@ async function testManualRestoreWasm(path, model) {
     console.log(`Compiled WASM TI-${model === 2 ? 82 : model === 6 ? 85 : 86} restore human wait and partial-CTS timeout passed`);
 }
 
+function nonsilentVariable(model) {
+    const mid = model === 2 ? 0x82 : 0x85;
+    const filename = model === 2 ? '/A.82p' : '/A.85p';
+    const varHeader = model === 2 ? [3, 0, 5, 0x41, 0, 0, 0, 0, 0, 0, 0]
+        : [3, 0, 0x12, 1, 0x41];
+    const varSum = varHeader.reduce((sum, byte) => sum + byte, 0);
+    const received = [mid, 6, varHeader.length, 0, ...varHeader, varSum, 0,
+        mid, 0x56, 0, 0, mid, 0x15, 3, 0, 1, 0, 0x31, 0x32, 0, mid, 0x92, 3, 0];
+    // The ROM echoes the VAR payload length in ACK and CTS.
+    const varAck = [mid, 0x56, varHeader.length, 0];
+    const overwrite = [mid, 9, varHeader.length, 0, mid, 0x56, 3, 0, mid, 0x56, 0, 0];
+    return {mid, filename, received, varAck, overwrite};
+}
+
+async function testNonsilentVariables(path, model) {
+    const h = await wasmHarness(path, model, false);
+    const {module} = h;
+    const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
+    const {mid, filename, received, varAck, overwrite} = nonsilentVariable(model);
+    module._set_cable_timeout(4); // 400 ms, well below the user's response time.
+    const receive = () => h.context.ccallAsync(module, 'calc_recv_var_ns', 'number', ['number', 'string'],
+        [h.state.handle, '/'], {timeoutMs: null});
+    const receivePending = receive();
+    while (!h.device.waiting.size) await delay(10);
+    await delay(1300);
+    assert.equal(module.__manualLinkWaiting, true);
+    assert.equal(h.transport.needsRecovery, false);
+    h.device.feed(received);
+    assert.equal(await receivePending, 0);
+    assert.equal(module.__manualLinkWaiting, false);
+    assert.equal(module.FS.readFile('/last_recv_path.txt', {encoding: 'utf8'}), filename);
+
+    const send = (timeoutMs) => {
+        h.device.feed(varAck);
+        return h.context.ccallAsync(module, 'send_file_custom', 'number',
+            ['number', 'string', 'string', 'number', 'number'],
+            [h.state.handle, filename, '', -1, 0], {timeoutMs, useProgress: true});
+    };
+    const sending = send(700);
+    while (!h.device.waiting.size) await delay(10);
+    await delay(1300);
+    assert.equal(module.__manualLinkWaiting, true);
+    assert.equal(h.transport.needsRecovery, false);
+    h.device.feed(overwrite);
+    assert.equal(await sending, 0);
+    assert.equal(module.__manualLinkWaiting, false);
+
+    const broken = send(3000);
+    while (!h.device.waiting.size) await delay(10);
+    assert.equal(module.__manualLinkWaiting, true);
+    h.device.feed([mid, 9]); // The user replied, but the header is incomplete.
+    assert.notEqual(await broken, 0);
+    assert.equal(module.__manualLinkWaiting, false);
+    assert.equal(h.transport.needsRecovery, false);
+    console.log(`Compiled TI-${model === 2 ? 82 : 85} WASM/SilverLink overwrites after both deadlines and times out on a partial reply`);
+}
+
+async function testGrayLinkOverwrite(path) {
+    const h = harness();
+    h.state.authorizedDevice = {serialKind: 2};
+    Object.defineProperty(globalThis, 'navigator', {configurable: true, value: {serial: {}}});
+    let reader;
+    const port = {
+        readable: new ReadableStream({start(controller) { reader = controller; }}),
+        writable: new WritableStream(),
+        async setSignals() {},
+        async getSignals() { return {}; },
+        async close() {}
+    };
+    const feed = bytes => reader.enqueue(Uint8Array.from(bytes));
+    const module = h.state.module = await require(require('node:path').resolve(path))();
+    await module.ccall('init', 'number', [], [], {async: true});
+    module.__ticablesWebSerial = {kind: 2, port};
+    module._set_cable_model(1); // GrayLink
+    module._set_force_cable(1);
+    module._set_calc_model(2);
+    module._set_force_calc(1);
+    module._set_cable_timeout(4);
+    h.state.handle = await module.ccall('create_handle', 'number', [], [], {async: true});
+    assert.ok(h.state.handle);
+    assert.equal(await module.ccall('open_cable', 'number', ['number'], [h.state.handle], {async: true}), 0);
+
+    const {filename, received, varAck, overwrite} = nonsilentVariable(2);
+    feed(received);
+    assert.equal(await h.context.ccallAsync(module, 'calc_recv_var_ns', 'number', ['number', 'string'],
+        [h.state.handle, '/']), 0);
+    feed(varAck);
+    const sending = h.context.ccallAsync(module, 'send_file_custom', 'number',
+        ['number', 'string', 'string', 'number', 'number'],
+        [h.state.handle, filename, '', -1, 0], {timeoutMs: 700, useProgress: true});
+    await new Promise(resolve => setTimeout(resolve, 1300));
+    assert.equal(module.__manualLinkWaiting, true, 'empty GrayLink reads preserve the overwrite wait');
+    feed(overwrite);
+    assert.equal(await sending, 0);
+    assert.equal(module.__manualLinkWaiting, false);
+    await module.ccall('close_cable', 'number', ['number'], [h.state.handle], {async: true});
+    console.log('Compiled TI-82 WASM/GrayLink overwrites after repeated serial read timeouts');
+}
+
 (async () => {
     await main();
     if (process.argv[2]) {
@@ -631,6 +760,8 @@ async function testManualRestoreWasm(path, model) {
         await test89FlashWaitWasm(process.argv[2]);
         await testDirectLinkWasm(process.argv[2]);
         await test83PlusWasm(process.argv[2]);
+        for (const model of [2, 6]) await testNonsilentVariables(process.argv[2], model);
+        await testGrayLinkOverwrite(process.argv[2]);
         for (const model of [2, 6, 7]) await testManualRestoreWasm(process.argv[2], model);
         for (const failReset of [false, true]) await testWasm(process.argv[2], failReset);
         process.exit(0);

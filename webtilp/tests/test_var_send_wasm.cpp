@@ -16,9 +16,15 @@ int mock_recv(CableHandle*, uint8_t* data, uint32_t size) {
     while (size--) { *data++ = replies.front(); replies.pop_front(); }
     return 0;
 }
-void reply(uint8_t command) {
+void reply(uint8_t command, const std::vector<uint8_t>& data = {}) {
     const uint8_t model = g_calc_model == CALC_TI82 ? DBUS_MID_TI82_PC : DBUS_MID_TI85_PC;
-    for (uint8_t byte : {model, command, uint8_t(0), uint8_t(0)}) replies.push_back(byte);
+    for (uint8_t byte : {model, command, uint8_t(data.size()), uint8_t(0)}) replies.push_back(byte);
+    if (!data.empty()) {
+        replies.insert(replies.end(), data.begin(), data.end());
+        const uint16_t sum = tifiles_checksum(data.data(), data.size());
+        replies.push_back(uint8_t(sum));
+        replies.push_back(uint8_t(sum >> 8));
+    }
 }
 void variable_replies() {
     reply(DBUS_CMD_ACK);
@@ -54,6 +60,43 @@ void fixture(const char* path, unsigned count) {
     }
     assert(tifiles_file_write_regular(path, content, nullptr) == 0);
     tifiles_content_delete_regular(content);
+}
+void check_receive(CalcModel model, unsigned count) {
+    const uint8_t type = model == CALC_TI82 ? TI82_PRGM : TI85_PRGM;
+    const std::vector<uint8_t> data{1, 0, 0x31};
+    std::vector<uint8_t> expected;
+    for (unsigned i = 0; i < count; ++i) {
+        const uint8_t name = 'A' + i;
+        reply(DBUS_CMD_VAR, model == CALC_TI82
+            ? std::vector<uint8_t>{3, 0, type, name, 0, 0, 0, 0, 0, 0, 0}
+            : std::vector<uint8_t>{3, 0, type, 1, name});
+        reply(DBUS_CMD_ACK);
+        reply(DBUS_CMD_XDP, data);
+        expected.insert(expected.end(), {DBUS_CMD_ACK, DBUS_CMD_CTS, DBUS_CMD_ACK});
+    }
+    reply(DBUS_CMD_EOT);
+    expected.push_back(DBUS_CMD_ACK);
+    assert(calc_recv_var_ns(g_cable_handle, "/tmp") == 0);
+    assert(commands() == expected && replies.empty());
+    sent.clear();
+
+    char* path = nullptr;
+    assert(g_file_get_contents("/last_recv_path.txt", &path, nullptr, nullptr));
+    const std::string expected_path = count == 1
+        ? std::string("/tmp/A.") + tifiles_vartype2fext(model, type)
+        : std::string("/tmp/variables.") + tifiles_fext_of_group(model);
+    assert(path == expected_path);
+    FileContent* content = tifiles_content_create_regular(model);
+    assert(tifiles_file_read_regular(path, content) == 0);
+    assert(content->num_entries == count);
+    for (unsigned i = 0; i < count; ++i) {
+        assert(content->entries[i]->name[0] == 'A' + i);
+        assert(content->entries[i]->size == data.size());
+        assert(!memcmp(content->entries[i]->data, data.data(), data.size()));
+    }
+    tifiles_content_delete_regular(content);
+    unlink(path);
+    g_free(path);
 }
 }
 
@@ -103,6 +146,9 @@ extern "C" EMSCRIPTEN_KEEPALIVE int test_var_send_protocol() {
         expect_commands({DBUS_CMD_EOT});
         assert(finish_var_send(nullptr) == ERR_WEB_INVALID_ARGUMENT);
         expect_commands({});
+
+        check_receive(model, 1);
+        check_receive(model, 2);
 
         ticalcs_cable_detach(g_calc_handle);
         ticalcs_handle_del(g_calc_handle);

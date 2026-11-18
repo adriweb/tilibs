@@ -43,7 +43,7 @@ async function check(model, format = 'backup', cancel = false) {
         ccallAsync: async (_m, name, _r, _types, args, options) => { events.push({ name, args, options }); return 0; },
         downloadLastReceived: async () => events.push({ download: true })
     });
-    vm.runInContext(['getNativeBackupSteps', 'getNativeBackupWaitingLabel', 'runGuidedBackup', 'openBackupModal', 'receiveBackup'].map(extract).join('\n'), context);
+    vm.runInContext(['getNativeBackupSteps', 'getNativeBackupWaitingLabel', 'runGuidedLinkTransfer', 'openBackupModal', 'receiveBackup'].map(extract).join('\n'), context);
     const receive = context.receiveBackup();
     // Reach the real modal after authorization/capability setup.
     await new Promise(resolve => setImmediate(resolve));
@@ -68,12 +68,12 @@ async function check(model, format = 'backup', cancel = false) {
     await check(7, 'backup', true);
     await check(4, 'tigroup');
     await checkGuides();
-    console.log('Manual backup instructions, receive ordering, cancellation and automatic controls passed');
+    console.log('Manual link instructions, receive ordering, cancellation and automatic controls passed');
 })().catch(error => { console.error(error); process.exitCode = 1; });
 
 async function checkGuides() {
     for (const model of [2, 3, 6, 7]) {
-        for (const direction of ['receive', 'restore']) {
+        for (const direction of ['receive', 'restore', ...([2, 6].includes(model) ? ['receive-vars'] : [])]) {
             for (const cancelAt of [null, ...(direction === 'restore' ? ['before'] : []), 'during']) {
                 const ids = ['backupGuideModal', 'backupGuideTitle', 'backupGuideFile', 'backupGuideWarning',
                     'backupGuideSteps', 'backupGuideVersion', 'backupGuideStatus', 'btnStartBackupRestore',
@@ -91,11 +91,12 @@ async function checkGuides() {
                     nukeConnection: async reconnect => { assert.equal(reconnect, false); resets++; finish(0); },
                     logError(error) { throw error; }
                 });
-                vm.runInContext(['getNativeBackupSteps', 'runGuidedBackup'].map(extract).join('\n'), context);
-                const pending = context.runGuidedBackup(direction, direction === 'restore' ? '<test>.82b' : '',
+                vm.runInContext(['getNativeBackupSteps', 'runGuidedLinkTransfer'].map(extract).join('\n'), context);
+                const pending = context.runGuidedLinkTransfer(direction, direction === 'restore' ? '<test>.82b' : '',
                     () => { transfers++; return new Promise(resolve => { finish = resolve; }); });
                 const lines = els.backupGuideSteps.children.map(child => child.textContent);
-                assert.ok(lines.includes(messages[direction === 'receive'
+                assert.ok(lines.includes(messages[direction === 'receive-vars'
+                    ? model === 2 ? 'receive_variables_82' : 'receive_variables_85' : direction === 'receive'
                     ? model === 3 ? 'backup_receive_auto' : model === 2 ? 'backup_receive_82' : 'backup_receive_8586'
                     : model === 3 ? 'backup_restore_auto' : model === 2 ? 'backup_restore_82_prepare' : 'backup_restore_8586_prepare']));
                 if (direction === 'restore') {

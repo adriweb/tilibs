@@ -1154,7 +1154,10 @@ int open_cable(CableHandle* handle) {
         libusb_free_device_list(devs, 1);
     }
 
-    const int result = ticables_cable_open(handle);
+    // GrayLink needs the browser's bound serial port. Attach while opening
+    // so the first calculator operation does not close and discard that port.
+    const int result = ticables_get_model(handle) == CABLE_GRY
+        ? ensure_calc_handle_attached(handle) : ticables_cable_open(handle);
     if (result == 0) select_debug_log_path(handle);
     printf("Open result: %d\n", result);
     return result;
@@ -1923,6 +1926,37 @@ static bool set_var_request(VarEntry& request, const char* folder, const char* n
         }
     }
     return true;
+}
+
+EMSCRIPTEN_KEEPALIVE
+int calc_recv_var_ns(CableHandle* cable_handle, const char* out_dir) {
+    if (!cable_handle || !out_dir || !*out_dir) return ERR_WEB_INVALID_ARGUMENT;
+
+    const int ready_result = ensure_calc_ready(cable_handle, 0);
+    if (ready_result != 0) return ready_result;
+    if (g_calc_model != CALC_TI82 && g_calc_model != CALC_TI85) return ERR_WEB_INVALID_ARGUMENT;
+
+    FileContent* content = tifiles_content_create_regular(g_calc_model);
+    if (!content) return ERR_WEB_OUT_OF_MEMORY;
+
+    VarEntry* single = nullptr;
+    // SilverLink's first USB read can wait while the user selects variables.
+    // The browser restores the ordinary packet deadline once bytes arrive.
+    EM_ASM({ Module.__manualLinkWaiting = true; });
+    int result = ticalcs_calc_recv_var_ns(g_calc_handle, MODE_NORMAL, content, &single);
+    EM_ASM({ Module.__manualLinkWaiting = false; });
+    if (result == 0) {
+        char* base = single ? tifiles_build_filename(g_calc_model, single)
+            : g_strdup_printf("variables.%s", tifiles_fext_of_group(g_calc_model));
+        char* path = base ? g_build_filename(out_dir, base, nullptr) : nullptr;
+        result = path ? tifiles_file_write_regular(path, content, nullptr) : ERR_WEB_OUT_OF_MEMORY;
+        if (result == 0) result = write_last_path(path);
+        g_free(path);
+        g_free(base);
+    }
+    if (single) tifiles_ve_delete(single);
+    tifiles_content_delete_regular(content);
+    return result;
 }
 
 EMSCRIPTEN_KEEPALIVE
@@ -2828,7 +2862,7 @@ int finish_var_send(CableHandle* cable_handle) {
     // An empty batch sends only EOT and waits for its ACK, without another VAR.
     FileContent content{};
     content.model = content.model_dst = g_calc_model;
-    return ticalcs_calc_send_var(g_calc_handle, MODE_SEND_LAST_VAR, &content);
+    return ticalcs_calc_send_var_ns(g_calc_handle, MODE_SEND_LAST_VAR, &content);
 }
 
 static constexpr uint16_t EVO_RESULT_BUSY = 0x425a; // BZ
@@ -2879,6 +2913,42 @@ static int wait_after_defrag(gint64 deadline)
 
 static int send_vars_with_gc_retry(CalcMode mode, FileContent* content)
 {
+    if (g_calc_model == CALC_TI82 || g_calc_model == CALC_TI85) {
+        struct {
+            ticalcs_event_hook_type hook;
+            void* user;
+            bool waiting_for_var_ack;
+        } link{ticalcs_calc_get_event_hook(g_calc_handle),
+               ticalcs_calc_get_event_user_pointer(g_calc_handle), false};
+        ticalcs_calc_set_event_user_pointer(g_calc_handle, &link);
+        ticalcs_calc_set_event_hook(g_calc_handle,
+            [](CalcHandle* handle, uint32_t count, const CalcEventData* event, void* user) {
+                auto& state = *static_cast<decltype(link)*>(user);
+                if (event->type == CALC_EVENT_TYPE_AFTER_SEND_DBUS_PKT
+                    && event->data.dbus_pkt.cmd == 0x06 /* VAR */) {
+                    state.waiting_for_var_ack = event->retval == 0;
+                }
+                if (event->type == CALC_EVENT_TYPE_AFTER_RECV_DBUS_PKT_HEADER) {
+                    // After VAR is acknowledged the calculator can prompt about
+                    // overwriting this variable before returning CTS or SKP.
+                    if (state.waiting_for_var_ack) {
+                        const bool waiting = event->retval == 0 && event->data.dbus_pkt.cmd == 0x56 /* ACK */;
+                        EM_ASM({ Module.__manualLinkWaiting = !!$0; }, (int)waiting);
+                    } else if (event->retval != TICABLES_ERR_READ_TIMEOUT || event->data.dbus_pkt.id != 0) {
+                        // Buffered replies may not trigger a fresh USB read.
+                        // Empty serial timeouts allow the user more time to answer.
+                        EM_ASM({ Module.__manualLinkWaiting = false; });
+                    }
+                    state.waiting_for_var_ack = false;
+                }
+                return state.hook ? state.hook(handle, count, event, state.user) : event->retval;
+            });
+        const int result = ticalcs_calc_send_var_ns(g_calc_handle, mode, content);
+        EM_ASM({ Module.__manualLinkWaiting = false; });
+        ticalcs_calc_set_event_hook(g_calc_handle, link.hook);
+        ticalcs_calc_set_event_user_pointer(g_calc_handle, link.user);
+        return result;
+    }
     if (!ticonv_model_is_tievo(g_calc_model)) {
         return ticalcs_calc_send_var(g_calc_handle, mode, content);
     }
