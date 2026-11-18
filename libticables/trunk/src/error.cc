@@ -54,6 +54,9 @@
  **/
 int TICALL ticables_error_get(int number, char **message)
 {
+#ifdef __WIN32__
+	const DWORD system_error = GetLastError();
+#endif
 	if (message == nullptr)
 	{
 		ticables_critical("ticables_error_get(NULL)\n");
@@ -365,27 +368,25 @@ int TICALL ticables_error_get(int number, char **message)
 		g_free(str);
 	}
 #else
-	if (GetLastError()) 
+	if (system_error)
 	{
-		LPVOID lpMsgBuf;
-		gchar *str;
-		char * tmp = *message;
-
-		FormatMessage(
+		WCHAR *system_message = nullptr;
+		if (FormatMessageW(
 			FORMAT_MESSAGE_ALLOCATE_BUFFER |
 			FORMAT_MESSAGE_FROM_SYSTEM |
 			FORMAT_MESSAGE_IGNORE_INSERTS,
-			NULL, 
-			GetLastError(),
-			MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
-			(LPTSTR)&lpMsgBuf, 
-			0, 
-			NULL);
-
-		str = g_strdup_printf("(%li) %s", (long)GetLastError, (char *)lpMsgBuf);
-		*message = g_strconcat(tmp, "\n", "System: ", str, NULL);
-		g_free(tmp);
-		g_free(str);
+			nullptr, system_error, 0, (LPWSTR)&system_message, 0, nullptr))
+		{
+			char *utf8 = g_utf16_to_utf8((const gunichar2 *)system_message, -1, nullptr, nullptr, nullptr);
+			if (utf8)
+			{
+				char *base = *message;
+				*message = g_strdup_printf("%s\nSystem: (%lu) %s", base, (unsigned long)system_error, utf8);
+				g_free(base);
+				g_free(utf8);
+			}
+			LocalFree(system_message);
+		}
 	}
 #endif
 

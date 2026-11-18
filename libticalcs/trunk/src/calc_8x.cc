@@ -866,6 +866,11 @@ static int		send_var_ns	(CalcHandle* handle, CalcMode mode, FileContent* content
 		ticalcs_update_pbar(handle);
 	}
 
+	if (ret)
+	{
+		return ret;
+	}
+
 	if (mode & MODE_SEND_EXEC_ASM)
 	{
 		ret = ti82_send_asm_exec(handle, content->entries[0]);
@@ -1081,20 +1086,19 @@ static int		recv_var	(CalcHandle* handle, CalcMode mode, FileContent* content, V
 
 static int		recv_var_ns	(CalcHandle* handle, CalcMode mode, FileContent* content, VarEntry** vr)
 {
-	int nvar = 0;
 	int ret = 0;
-	uint16_t ve_size;
 
 	ticalcs_strlcpy(handle->updat->text, _("Waiting for var(s)..."), sizeof(handle->updat->text));
 	ticalcs_update_label(handle);
 
 	content->model = handle->model;
 	content->num_entries = 0;
+	*vr = nullptr;
 
-	for (nvar = 0;; nvar++)
+	for (;;)
 	{
 		VarEntry *ve = tifiles_ve_create();
-		int ret2;
+		uint16_t ve_size = 0;
 
 		do
 		{
@@ -1106,23 +1110,21 @@ static int		recv_var_ns	(CalcHandle* handle, CalcMode mode, FileContent* content
 			}
 
 			ret = RECV_VAR(handle, &ve_size, &(ve->type), ve->name);
-			ve->size = ve_size;
 		}
-		while (ret == ERROR_READ_TIMEOUT);
+		while (ret == ERROR_READ_TIMEOUT && content->num_entries == 0);
 
-		ret2 = SEND_ACK(handle);
-
-		if (ret)
+		if (ret == ERR_EOT)
 		{
-			if (ret == ERR_EOT)	// end of transmission
-			{
-				ret = 0;
-			}
+			ret = SEND_ACK(handle);
 			goto error;
 		}
-		if (ret2)
+		if (!ret)
 		{
-			ret = ret2;
+			ve->size = ve_size;
+			ret = SEND_ACK(handle);
+		}
+		if (ret)
+		{
 			goto error;
 		}
 
@@ -1157,7 +1159,15 @@ error:
 		}
 	}
 
-	if (nvar == 1)
+	if (ret)
+	{
+		return ret;
+	}
+	if (content->num_entries == 0)
+	{
+		return ERR_NO_VARS;
+	}
+	if (content->num_entries == 1)
 	{
 		tifiles_comment_set_single_sn(content->comment, sizeof(content->comment));
 		*vr = tifiles_ve_dup(content->entries[0]);
@@ -1165,10 +1175,9 @@ error:
 	else
 	{
 		tifiles_comment_set_group_sn(content->comment, sizeof(content->comment));
-		*vr = nullptr;
 	}
 
-	return ret;
+	return 0;
 }
 
 static int		dump_rom_1	(CalcHandle* handle)
