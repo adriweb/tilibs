@@ -3,10 +3,11 @@
 When `OPS_DIRLIST` is absent but native backup is supported, TI-82 and TI-85
 show **List from backup…**. This is an explicit operation: the user confirms
 receiving a full backup, then sends Backup from the calculator's LINK menu.
-The variables panel stays hidden until parsing succeeds. Its rows form a
-read-only snapshot; **Refresh List** requests another backup with confirmation.
-Automatic refreshes and transfer preflights never request a backup. Successful
-file transfers invalidate the snapshot.
+**Make Backup** and backup restores also populate the variables panel from
+the transferred backup. Its rows form a read-only snapshot. **Refresh List**
+requests another backup with confirmation. A failed backup transfer or parse
+clears the snapshot, as does a subsequent variable send. Automatic refreshes
+and transfer preflights never request a backup.
 
 The parser in `webtilp.cpp` validates the model signature, payload and block lengths,
 checksum, VAT entry boundaries, names, and variable data ranges. It uses the RAM

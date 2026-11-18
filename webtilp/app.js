@@ -529,6 +529,7 @@ const state = {
     features: 0,
     dirlist: [],
     backupDirlistLoaded: false,
+    backupDirlistGeneration: 0,
     backupDirlistInProgress: false,
     hpFileSnapshotLoaded: false,
     hpFileRefreshGeneration: 0,
@@ -6921,6 +6922,7 @@ function clearDeviceData() {
     state.sharpProgress = null;
     state.dirlist = [];
     state.backupDirlistLoaded = false;
+    state.backupDirlistGeneration++;
     state.hpFileSnapshotLoaded = false;
     state.hpFileRefreshGeneration += 1;
     state.hpFileRenderGeneration = 0;
@@ -6980,6 +6982,53 @@ function parseLeadingBytes(text) {
     return Number(match[1]);
 }
 
+function setBackupDirlist(entries) {
+    state.dirlist = entries ?? [];
+    state.backupDirlistLoaded = entries !== null;
+    renderDirlist(state.dirlist);
+    els.varsPanel?.classList.toggle('hidden', entries === null);
+    els.backupDirlistNote?.classList.toggle('hidden', entries === null);
+}
+
+async function transferBackupWithDirlist(module, backupPath, transfer) {
+    const epoch = state.operationEpoch;
+    const generation = ++state.backupDirlistGeneration;
+    const isCurrent = () => epoch === state.operationEpoch && generation === state.backupDirlistGeneration;
+    let result;
+    try {
+        result = await transfer();
+    } catch (error) {
+        if (isCurrent()) setBackupDirlist(null);
+        throw error;
+    }
+    if (!isCurrent() || result === null) return result;
+    if (result !== 0) {
+        setBackupDirlist(null);
+        return result;
+    }
+
+    const jsonPath = `/backup-dirlist-${generation}.json`;
+    let entries = null;
+    try {
+        const parsed = await ccallAsync(module, 'calc_backup_dirlist_json', 'number', ['string', 'string'],
+            [backupPath, jsonPath]);
+        if (isCurrent() && parsed === 0) {
+            const data = JSON.parse(module.FS.readFile(jsonPath, { encoding: 'utf8' }));
+            if (Array.isArray(data.vars)) entries = data.vars;
+        }
+    } catch (error) {
+        if (isCurrent()) console.warn('[WebTILP] Unable to read the backup variable listing', error);
+    } finally {
+        try { module.FS.unlink(jsonPath); } catch { /* No listing file. */ }
+    }
+    if (isCurrent()) {
+        setBackupDirlist(entries);
+        log(entries ? `Backup variable listing loaded: ${entries.length} entries.`
+            : 'Cannot list this backup: its format, checksum, or variable table is invalid or unsupported.');
+    }
+    return result;
+}
+
 async function refreshBackupDirlist(module, handle) {
     if (state.backupDirlistInProgress) return;
     const hasBackup = (state.features & (FEATURE_FLAGS.OPS_BACKUP | FEATURE_FLAGS.FTS_BACKUP)) !== 0;
@@ -6989,33 +7038,15 @@ async function refreshBackupDirlist(module, handle) {
     setButtonLoading(els.btnBackupDirlist, true);
     const epoch = state.operationEpoch;
     const backupPath = '/dirlist-backup.bin';
-    const jsonPath = '/dirlist-backup.json';
     try {
-        const result = await ccallAsync(module, 'calc_recv_backup', 'number', ['number', 'string'],
-            [handle, backupPath], { timeoutMs: null, useProgress: true, progressLabel: 'Receiving backup for variable listing' });
-        if (epoch !== state.operationEpoch) return;
-        if (result !== 0) {
+        const result = await transferBackupWithDirlist(module, backupPath, () =>
+            ccallAsync(module, 'calc_recv_backup', 'number', ['number', 'string'],
+                [handle, backupPath], { timeoutMs: null, useProgress: true, progressLabel: 'Receiving backup for variable listing' }));
+        if (epoch === state.operationEpoch && result !== 0) {
             log(`Backup listing receive failed (${formatErrorResult(module, result)}).`);
-            return;
         }
-        const parsed = await ccallAsync(module, 'calc_backup_dirlist_json', 'number', ['string', 'string'],
-            [backupPath, jsonPath]);
-        if (epoch !== state.operationEpoch) return;
-        if (parsed !== 0) {
-            log('Cannot list this backup: its format, checksum, or variable table is invalid or unsupported.');
-            return;
-        }
-        const data = JSON.parse(module.FS.readFile(jsonPath, { encoding: 'utf8' }));
-        state.dirlist = data.vars;
-        state.backupDirlistLoaded = true;
-        renderDirlist(state.dirlist);
-        els.varsPanel?.classList.remove('hidden');
-        els.backupDirlistNote?.classList.remove('hidden');
-        log(`Backup variable listing loaded: ${state.dirlist.length} entries.`);
     } finally {
-        for (const path of [backupPath, jsonPath]) {
-            try { module.FS.unlink(path); } catch { /* Best-effort cleanup. */ }
-        }
+        try { module.FS.unlink(backupPath); } catch { /* No backup file. */ }
         try {
             if (module.FS.readFile('/last_recv_path.txt', { encoding: 'utf8' }).trim() === backupPath) {
                 module.FS.unlink('/last_recv_path.txt');
@@ -9724,6 +9755,11 @@ async function performTransfers(plan, module, options) {
                 const manualRestore = item.fileClass === 'backup' && [2, 6, 7].includes(model);
                 const deferEot = needsEot && isVar;
                 if (!deferEot) await finishVarSend();
+                if (deferEot) {
+                    // A variable send can change memory even if the batch later fails.
+                    state.backupDirlistGeneration++;
+                    if (state.backupDirlistLoaded) setBackupDirlist(null);
+                }
                 // A failed send may leave the protocol out of sync. Only
                 // finalize after a successful data exchange, never after abort.
                 pendingEot = false;
@@ -9749,8 +9785,10 @@ async function performTransfers(plan, module, options) {
                         );
                     }
                 };
+                const restore = needsEot && item.fileClass === 'backup'
+                    ? () => transferBackupWithDirlist(module, item.path, send) : send;
                 result = item.fileClass === 'backup' && [2, 3, 6, 7].includes(model)
-                    ? await runGuidedLinkTransfer('restore', displayName, send) : await send();
+                    ? await runGuidedLinkTransfer('restore', displayName, restore) : await send();
                 if (result === null) break;
                 pendingEot = deferEot && result === 0;
             } finally {
@@ -9766,7 +9804,7 @@ async function performTransfers(plan, module, options) {
             if (result === 0) {
                 log(`Sent ${displayName} successfully.`);
                 successCount += 1;
-                if (isVar && targetName && item.entryType != null) {
+                if (isVar && !needsEot && targetName && item.entryType != null) {
                     state.dirlist.push({
                         name: targetName,
                         type: item.entryType,
@@ -10044,12 +10082,6 @@ async function processIncomingTransfers(files, options = {}) {
                 setSelectedFiles([]);
                 if (!hasOsTransfer && (state.features & FEATURE_FLAGS.OPS_DIRLIST) !== 0) {
                     await refreshDirlist();
-                } else if (state.backupDirlistLoaded) {
-                    state.backupDirlistLoaded = false;
-                    state.dirlist = [];
-                    renderDirlist(state.dirlist);
-                    els.varsPanel?.classList.add('hidden');
-                    els.backupDirlistNote?.classList.add('hidden');
                 }
             }
         } finally {
@@ -10185,11 +10217,18 @@ async function receiveBackup() {
         }
         const filename = `backup.${extension}`;
         const target = `/downloads/${filename}`;
-        const manualBackup = !isTigroup && [2, 6, 7].includes(getActiveCalcModelId());
-        if (manualBackup) log(getNativeBackupWaitingLabel(getActiveCalcModelId()));
+        const model = getActiveCalcModelId();
+        const manualBackup = !isTigroup && [2, 6, 7].includes(model);
+        const progressLabel = manualBackup ? getNativeBackupWaitingLabel(model) : 'Receiving backup';
+        if (manualBackup) log(progressLabel);
+        const receive = () => ccallAsync(module, 'calc_recv_backup', 'number', ['number', 'string'],
+            [handle, target], { timeoutMs: manualBackup ? null : PROGRESS_IDLE_TIMEOUT_MS, useProgress: true, progressLabel });
+        const epoch = state.operationEpoch;
         const result = isTigroup
             ? await ccallAsync(module, 'calc_recv_tigroup', 'number', ['number', 'string', 'number'], [handle, target, backupChoice.mode], { timeoutMs: PROGRESS_IDLE_TIMEOUT_MS, useProgress: true, progressLabel: 'Receiving backup (tigroup)' })
-            : await runGuidedLinkTransfer('receive', '', () => ccallAsync(module, 'calc_recv_backup', 'number', ['number', 'string'], [handle, target], { timeoutMs: manualBackup ? null : PROGRESS_IDLE_TIMEOUT_MS, useProgress: true, progressLabel: manualBackup ? getNativeBackupWaitingLabel(getActiveCalcModelId()) : 'Receiving backup' }));
+            : await runGuidedLinkTransfer('receive', '', [2, 6].includes(model)
+                ? () => transferBackupWithDirlist(module, target, receive) : receive);
+        if (epoch !== state.operationEpoch) return;
         if (result !== 0) {
             log(`Backup failed (${formatErrorResult(module, result)}).`);
             return;

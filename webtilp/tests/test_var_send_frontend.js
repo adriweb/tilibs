@@ -4,17 +4,22 @@ const fs = require('node:fs');
 const vm = require('node:vm');
 const app = fs.readFileSync(require.resolve('../app.js'), 'utf8');
 const source = app.slice(app.indexOf('async function performTransfers('), app.indexOf('\nasync function sendNumWorksFiles('));
+const snapshotSource = app.slice(app.indexOf('function setBackupDirlist('), app.indexOf('async function refreshBackupDirlist('));
 
 function item(name, extra = {}) {
     return { path: `/${name}.82p`, file: {name, size: 12}, fileClass: 'single', entryName: name,
         entryType: 5, defaultLocation: 'ram', locationMask: 1, ...extra };
 }
-async function run(model, plan, {finishResult = 0, sendResult = 0, rawResult = 0, rejectSend = false, decline = false} = {}) {
+async function run(model, plan, {finishResult = 0, sendResult = 0, rawResult = 0, rejectSend = false,
+    decline = false, previousSnapshot = false, cancelRestore = false, parseResult = 0} = {}) {
     const calls = [];
     let confirmations = 0;
-    const state = {settings: {}, dirlist: decline ? [{name: 'SKIP'}] : []};
+    const state = {settings: {}, operationEpoch: 0, backupDirlistGeneration: 0, backupDirlistLoaded: previousSnapshot,
+        dirlist: previousSnapshot ? [{kind: 'backup-var', name: 'OLD'}] : decline ? [{name: 'SKIP'}] : []};
+    const module = {_get_raw_protocol_code: () => rawResult,
+        FS: {readFile: () => '{"vars":[{"kind":"backup-var","name":"RESTORED"}]}', unlink() {}}};
     const context = vm.createContext({
-        state, console, Number, Error, TICALCS_EVO_ERROR: 510,
+        state, els: {}, console, Number, Error, TICALCS_EVO_ERROR: 510,
         ensureCableOpen: async () => 1, getActiveCalcModelId: () => model,
         isVarFileClass: type => ['single', 'group', 'regular', 'tigroup'].includes(type),
         confirmEvoOsModelMismatch: () => true,
@@ -23,9 +28,11 @@ async function run(model, plan, {finishResult = 0, sendResult = 0, rawResult = 0
         hasSilverlinkConnected: () => true, isTI89TActive: () => false,
         clearNativeWarnings() {}, log() {}, getNativeWarningSuffix: () => '',
         formatErrorResult: (_module, result) => String(result),
-        runGuidedLinkTransfer: async (_direction, _name, operation) => operation(),
+        renderDirlist() {},
+        runGuidedLinkTransfer: async (_direction, _name, operation) => cancelRestore ? null : operation(),
         async ccallAsync(_module, name, _ret, types, args, options) {
             calls.push({name, types: [...types], args: [...args]});
+            if (name === 'calc_backup_dirlist_json') return parseResult;
             if (name === 'finish_var_send') return finishResult;
             assert.ok(['send_file_custom', 'send_file_entry_custom'].includes(name));
             assert.equal(types.length, args.length);
@@ -34,10 +41,10 @@ async function run(model, plan, {finishResult = 0, sendResult = 0, rawResult = 0
             return sendResult;
         }
     });
-    vm.runInContext(source, context);
+    vm.runInContext(snapshotSource + source, context);
     let result, error;
-    try { result = await context.performTransfers(plan, {_get_raw_protocol_code: () => rawResult}, {}); } catch (err) { error = err; }
-    return {calls, result, error, confirmations};
+    try { result = await context.performTransfers(plan, module, {}); } catch (err) { error = err; }
+    return {calls, result, error, state, confirmations};
 }
 async function main() {
     for (const model of [2, 3, 6, 7, 13, 50]) {
@@ -86,10 +93,30 @@ async function main() {
             assert.ok(failed.error);
             assert.equal(failed.calls.length, 1, 'stop on protocol errors without EOT or another VAR');
         }
-        const mixed = await run(model, [item('ONE'), item('BACKUP', {fileClass: 'backup'})]);
+        const backup = item('BACKUP', {path: model === 2 ? '/BACKUP.82b' : '/BACKUP.85b', fileClass: 'backup'});
+        const mixed = await run(model, [item('ONE'), backup], {previousSnapshot: true});
         assert.ifError(mixed.error);
-        assert.deepEqual(mixed.calls.map(call => call.name), ['send_file_custom', 'finish_var_send', 'send_file_custom']);
-        assert.equal(mixed.calls.at(-1).args.at(-1), 0);
+        assert.deepEqual(mixed.calls.map(call => call.name),
+            ['send_file_custom', 'finish_var_send', 'send_file_custom', 'calc_backup_dirlist_json']);
+        assert.equal(mixed.calls[2].args.at(-1), 0);
+        assert.equal(mixed.calls[3].args[0], backup.path);
+        assert.equal(mixed.state.dirlist[0].name, 'RESTORED');
+        assert.equal(mixed.state.backupDirlistLoaded, true);
+        const afterRestore = await run(model, [backup, item('ONE')]);
+        assert.ifError(afterRestore.error);
+        assert.equal(afterRestore.state.backupDirlistLoaded, false, 'a later variable send invalidates the snapshot');
+        assert.equal(afterRestore.state.dirlist.length, 0);
+        for (const failure of [{sendResult: 4}, {rejectSend: true}, {sendResult: 256}, {parseResult: -4}]) {
+            const failed = await run(model, [backup], {...failure, previousSnapshot: true});
+            assert.equal(failed.calls.length, failure.parseResult ? 2 : 1, 'parse only after successful send');
+            assert.equal(failed.state.backupDirlistLoaded, false);
+            assert.equal(failed.state.dirlist.length, 0);
+            if (failure.parseResult) assert.equal(failed.result.successCount, 1, 'a parser failure preserves transfer success');
+            else assert.ok(failed.error);
+        }
+        const cancelledRestore = await run(model, [backup], {previousSnapshot: true, cancelRestore: true});
+        assert.equal(cancelledRestore.calls.length, 0);
+        assert.equal(cancelledRestore.state.dirlist[0].name, 'OLD');
     }
     for (const model of [3, 7, 13]) {
         const duplicate = await run(model, [item('SKIP')], {decline: true});
