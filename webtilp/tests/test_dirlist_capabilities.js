@@ -56,7 +56,7 @@ let listings = 0;
 let rendered = 0;
 const state = {
     activeFamily: 'ti', handle: 1, features: 0, dirlist: [], dirlistPromptPromise: null,
-    operationEpoch: 0, backupDirlistLoaded: false,
+    operationEpoch: 0, backupDirlistLoaded: false, backupDirlistGeneration: 0,
     module: { FS: { readFile: path => path === '/last_recv_path.txt' ? '/dirlist-backup.bin' : '{"vars":[],"apps":[]}', unlink(path) {unlinked.push(path);} } }
 };
 const context = vm.createContext({
@@ -97,7 +97,8 @@ const context = vm.createContext({
 vm.runInContext(app.slice(app.indexOf('const FEATURE_FLAGS ='), app.indexOf('const TIG_MODE ='))
     + '\nglobalThis.flags = FEATURE_FLAGS;', context);
 for (const name of ['setButtonLoading', 'updateDeviceInfoCapability', 'applyActiveFamilyUiState', 'updateCapabilities',
-    'getDeviceInfo', 'formatVariableDisplayName', 'refreshBackupDirlist', 'refreshDirlist', 'ensureDirlistLoadedWithPrompt', 'processIncomingTransfers']) {
+    'getDeviceInfo', 'formatVariableDisplayName', 'setBackupDirlist', 'transferBackupWithDirlist',
+    'refreshBackupDirlist', 'refreshDirlist', 'ensureDirlistLoadedWithPrompt', 'processIncomingTransfers']) {
     vm.runInContext(extractFunction(name), context);
 }
 
@@ -165,26 +166,28 @@ async function main() {
             assert.equal(els.varsPanel.classList.contains('hidden'), false);
             assert.equal(els.backupDirlistNote.classList.contains('hidden'), false);
             assert.equal(els.btnBackupDirlist.classList.contains('loading'), false);
-            assert.ok(unlinked.includes('/dirlist-backup.bin') && unlinked.includes('/dirlist-backup.json'));
+            assert.ok(unlinked.includes('/dirlist-backup.bin') && unlinked.some(path => /^\/backup-dirlist-\d+\.json$/.test(path)));
             context.applyActiveFamilyUiState({ tiCapabilitiesKnown: true });
             await context.updateCapabilities();
             assert.equal(els.varsPanel.classList.contains('hidden'), false, 'snapshot survives capability/translation refresh');
-            await context.processIncomingTransfers([{ name: 'file.82p' }], { useModal: false });
-            assert.equal(receives, startReceives + 1, 'sending never fetches another backup');
-            assert.equal(state.backupDirlistLoaded, false, 'sending invalidates the old snapshot');
-            assert.equal(els.varsPanel.classList.contains('hidden'), true);
-
-            for (const failure of ['receive', 'parse', 'disconnect']) {
+            for (const failure of ['receive', 'parse']) {
+                context.setBackupDirlist([{kind: 'backup-var', name: 'Previous'}]);
                 receiveResult = failure === 'receive' ? 42 : 0;
                 parseResult = failure === 'parse' ? -4 : 0;
-                disconnectedDuringReceive = failure === 'disconnect';
                 const oldParses = parses;
                 await context.refreshDirlist({ manual: true });
-                assert.equal(state.backupDirlistLoaded, false, `${failure} cannot publish a listing`);
+                assert.equal(state.backupDirlistLoaded, false, `${failure} clears the previous listing`);
+                assert.equal(state.dirlist.length, 0);
+                assert.equal(els.varsPanel.classList.contains('hidden'), true);
                 if (failure !== 'parse') assert.equal(parses, oldParses, 'failed or stale receive is not parsed');
                 assert.equal(state.backupDirlistInProgress, false);
             }
             receiveResult = parseResult = 0;
+            const oldParses = parses;
+            disconnectedDuringReceive = true;
+            await context.refreshDirlist({ manual: true });
+            assert.equal(parses, oldParses, 'a disconnected receive is not parsed');
+            assert.equal(state.backupDirlistLoaded, false);
             disconnectedDuringReceive = false;
         }
 
@@ -216,6 +219,17 @@ async function main() {
     await context.refreshDirlist({manual: true});
     assert.equal(receives, unsupportedReceives, 'unimplemented model format means no fallback');
     assert.ok(rendered > 0, 'supported directory responses still render');
+
+    context.setBackupDirlist([{kind: 'backup-var', name: 'Previous'}]);
+    let finishParse;
+    context.ccallAsync = () => new Promise(resolve => { finishParse = resolve; });
+    const olderTransfer = context.transferBackupWithDirlist(state.module, '/old.82b', async () => 0);
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(typeof finishParse, 'function');
+    assert.equal(await context.transferBackupWithDirlist(state.module, '/new.82b', async () => 4), 4);
+    finishParse(0);
+    assert.equal(await olderTransfer, 0);
+    assert.equal(state.backupDirlistLoaded, false, 'a delayed parse cannot republish a snapshot after a newer failure');
     console.log('TI directory-list capability tests passed (TI-82/85 and TI-83/86 controls)');
 }
 main().catch(error => { console.error(error); process.exitCode = 1; });
