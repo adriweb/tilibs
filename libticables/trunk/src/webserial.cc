@@ -345,6 +345,9 @@ EM_ASYNC_JS(int, webserial_read_js, (int kind, uint8_t *data, int len, int timeo
 				state.queue.shift();
 			}
 		}
+		if (copied && kind === 2) { // GrayLink
+			Module.__manualLinkWaiting = false;
+		}
 		return copied;
 	};
 	let copied = dequeue();

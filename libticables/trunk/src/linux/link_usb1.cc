@@ -37,6 +37,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#ifdef __EMSCRIPTEN__
+#include <emscripten.h>
+#endif
 #if defined(__BSD__) || defined(__MACOSX__) || defined(__EMSCRIPTEN__)
 #include <libusb.h>
 #else
@@ -1108,7 +1111,18 @@ static int slv_get_(CableHandle *h, uint8_t *data)
 			}
 			else
 			{
-				ret = slv_bulk_read(uHdl, uInEnd, (unsigned char*)rBuf, max_ps_in, &len, to);
+				unsigned int read_timeout = to;
+#ifdef __EMSCRIPTEN__
+				// libusb can mark a pending WebUSB read as cancelled even
+				// when the browser is still waiting. Keep this first read
+				// open until reply bytes arrive or the browser closes it.
+				if (tigl_devices[h->address].pid == PID_TIGLUSB
+					&& EM_ASM_INT({ return Module.__manualLinkWaiting === true; }))
+				{
+					read_timeout = 0;
+				}
+#endif
+				ret = slv_bulk_read(uHdl, uInEnd, (unsigned char*)rBuf, max_ps_in, &len, read_timeout);
 			}
 			#ifdef __EMSCRIPTEN__
 			if (ret == LIBUSB_ERROR_PIPE && tigl_devices[h->address].pid == PID_TIGLUSB)
