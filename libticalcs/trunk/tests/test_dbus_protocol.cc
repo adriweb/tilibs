@@ -815,6 +815,73 @@ static void append_wire_packet(std::vector<uint8_t> &wire, uint8_t mid, uint8_t 
 	}
 }
 
+static void check_nonsilent_variables(CalcModel model, uint8_t host, uint8_t mid, uint8_t type)
+{
+	const std::vector<uint8_t> data = {1, 0, 0x31};
+	const std::vector<uint8_t> header = model == CALC_TI82
+		? std::vector<uint8_t>{3, 0, type, 'A', 0, 0, 0, 0, 0, 0, 0}
+		: std::vector<uint8_t>{3, 0, type, 1, 'A'};
+	for (int count : {1, 2})
+	{
+		for (int last : {DBUS_CMD_EOT, DBUS_CMD_CTS, 0})
+		{
+			MockCalculator calc(model);
+			FileContent *content = tifiles_content_create_regular(model);
+			std::vector<uint8_t> expected;
+			for (int i = 0; i < count; i++)
+			{
+				packet(mid, DBUS_CMD_VAR, header);
+				packet(mid, DBUS_CMD_ACK);
+				packet(mid, DBUS_CMD_XDP, data);
+				for (uint8_t cmd : {DBUS_CMD_ACK, DBUS_CMD_CTS, DBUS_CMD_ACK})
+					append_wire_packet(expected, host, cmd);
+			}
+			if (last) packet(mid, (uint8_t)last);
+			else receive_failure = ERROR_READ_TIMEOUT;
+			if (last == DBUS_CMD_EOT) append_wire_packet(expected, host, DBUS_CMD_ACK);
+			VarEntry *single = nullptr;
+			CHECK(ticalcs_calc_recv_var_ns(calc.handle, MODE_NORMAL, content, &single)
+				== (last == DBUS_CMD_EOT ? 0 : last ? ERR_INVALID_CMD : ERROR_READ_TIMEOUT));
+			CHECK(content->num_entries == (unsigned int)count && outgoing == expected);
+			CHECK(content->entries[0]->type == type && !strcmp(content->entries[0]->name, "A"));
+			CHECK(content->entries[0]->size == data.size());
+			CHECK(!memcmp(content->entries[0]->data, data.data(), data.size()));
+			CHECK((single != nullptr) == (last == DBUS_CMD_EOT && count == 1));
+			if (single) tifiles_ve_delete(single);
+			tifiles_content_delete_regular(content);
+		}
+	}
+
+	// A rejected VAR or failed cable write must not trigger EOT or execution.
+	for (CalcMode mode : {MODE_SEND_LAST_VAR, MODE_SEND_EXEC_ASM})
+	{
+		for (int failure : {int(ERR_ABORT), int(ERROR_WRITE_TIMEOUT)})
+		{
+			MockCalculator calc(model);
+			FileContent *content = tifiles_content_create_regular(model);
+			VarEntry *entry = tifiles_ve_create();
+			strcpy(entry->name, "A");
+			entry->type = type;
+			entry->size = data.size();
+			entry->data = (uint8_t *)tifiles_ve_alloc_data(data.size());
+			memcpy(entry->data, data.data(), data.size());
+			tifiles_content_add_entry(content, entry);
+			std::vector<uint8_t> expected;
+			append_wire_packet(expected, host, DBUS_CMD_VAR, header);
+			if (failure == ERR_ABORT)
+			{
+				packet(mid, DBUS_CMD_ACK);
+				packet(mid, DBUS_CMD_SKP, {DBUS_REJ_EXIT});
+				append_wire_packet(expected, host, DBUS_CMD_ACK);
+			}
+			else send_failure = failure;
+			CHECK(ticalcs_calc_send_var_ns(calc.handle, mode, content) == failure);
+			CHECK(outgoing == expected && received == incoming.size());
+			tifiles_content_delete_regular(content);
+		}
+	}
+}
+
 // Independent packet expectations from the TI link guide: a three-part
 // backup ends with the calculator's final DATA ACK, with no further PC ACK.
 static void check_send_backup(BackupContent *content, bool final_ack_timeout = false)
@@ -1500,6 +1567,8 @@ int main(int argc, char **argv)
 		tifiles_content_delete_backup(content);
 	}
 	check_ack_header_word();
+	check_nonsilent_variables(CALC_TI82, 0x02, 0x82, TI82_PRGM);
+	check_nonsilent_variables(CALC_TI85, 0x05, 0x85, TI85_PRGM);
 	check_checksum_recovery();
 	check_bad_screenshot(CALC_TI86, 0x86, 0x06, 1024);
 	check_bad_screenshot(CALC_TI83P, 0x73, 0x23, 768);
