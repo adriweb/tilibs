@@ -22,15 +22,20 @@ function button() {
         removeEventListener(event) { delete handlers[event]; },
         click() { handlers.click(); } };
 }
-async function check(model, format = 'backup', cancel = false) {
+async function check(model, format = 'backup', {cancel = false, failure, parseFailure = false} = {}) {
     const note = {};
     const els = Object.fromEntries(['backupModal', 'backupFormatBackup', 'backupFormatTigroup',
         'tigroupOptions', 'backupIncludeRam', 'backupIncludeArchive', 'backupIncludeFlash',
         'btnConfirmBackup', 'btnCancelBackup', 'btnCloseBackup', 'btnReceiveBackup'].map(k => [k, button()]));
     const events = [];
-    const module = { FS: { analyzePath: () => ({ exists: true }), mkdir() {} }, ccall: () => '86b' };
+    const extension = model === 2 ? '82b' : model === 6 ? '85b' : '86b';
+    const vars = [{kind: 'backup-var', name: 'NEW', size: 42}];
+    const module = { FS: { analyzePath: () => ({ exists: true }), mkdir() {}, unlink() {},
+        readFile: () => JSON.stringify({vars}) }, ccall: () => extension };
+    const state = {features: format === 'tigroup' ? 1 : 0, operationEpoch: 0, backupDirlistGeneration: 0,
+        backupDirlistLoaded: true, dirlist: [{kind: 'backup-var', name: 'OLD'}]};
     const context = vm.createContext({
-        state: { features: format === 'tigroup' ? 1 : 0 }, els, document: { getElementById: () => note },
+        state, els, document: { getElementById: () => note },
         getActiveCalcModelId: () => model, t: key => messages[key],
         setTextContent: (el, text) => { el.textContent = text; }, setBackupModalLoading() {},
         TIG_MODE: { RAM: 1, ARCHIVE: 2, FLASH: 4, NONE: 0 }, FEATURE_FLAGS: { FTS_FLASH: 1 },
@@ -39,11 +44,18 @@ async function check(model, format = 'backup', cancel = false) {
         isHPPrimeActive: () => false, isNumWorksActive: () => false,
         authorizeDevice: async () => {}, initModule: async () => module, ensureHandle: async () => 42,
         updateCapabilities: async () => {}, estimateBackupSize: () => 0,
-        log: text => events.push({ log: text }), logError(error) { throw error; },
-        ccallAsync: async (_m, name, _r, _types, args, options) => { events.push({ name, args, options }); return 0; },
+        renderDirlist: entries => events.push({rendered: entries}), formatErrorResult: (_, code) => String(code),
+        log: text => events.push({ log: text }), logError: error => events.push({error}),
+        async ccallAsync(_m, name, _r, _types, args, options) {
+            events.push({name, args, options});
+            if (name === 'calc_backup_dirlist_json') return parseFailure ? -4 : 0;
+            if (failure === 'exception') throw new Error('read failed');
+            return failure === 'result' ? 4 : 0;
+        },
         downloadLastReceived: async () => events.push({ download: true })
     });
-    vm.runInContext(['getNativeBackupSteps', 'getNativeBackupWaitingLabel', 'runGuidedLinkTransfer', 'openBackupModal', 'receiveBackup'].map(extract).join('\n'), context);
+    vm.runInContext(['getNativeBackupSteps', 'getNativeBackupWaitingLabel', 'runGuidedLinkTransfer',
+        'setBackupDirlist', 'transferBackupWithDirlist', 'openBackupModal', 'receiveBackup'].map(extract).join('\n'), context);
     const receive = context.receiveBackup();
     // Reach the real modal after authorization/capability setup.
     await new Promise(resolve => setImmediate(resolve));
@@ -53,19 +65,35 @@ async function check(model, format = 'backup', cancel = false) {
     if (cancel) els.btnCancelBackup.click(); else els.btnConfirmBackup.click();
     await receive;
     const calls = events.filter(e => e.name);
-    if (cancel) { assert.equal(calls.length, 0); return; }
-    assert.equal(calls.length, 1);
+    if (cancel) {
+        assert.equal(calls.length, 0);
+        assert.equal(state.dirlist[0].name, 'OLD');
+        return;
+    }
+    const snapshot = format === 'backup' && [2, 6].includes(model);
+    assert.equal(calls.length, snapshot && !failure ? 2 : 1);
     assert.equal(calls[0].name, format === 'tigroup' ? 'calc_recv_tigroup' : 'calc_recv_backup');
     assert.equal(calls[0].options.timeoutMs, manual && format === 'backup' ? null : 5000);
     if (manual && format === 'backup') {
         assert.equal(events[0].log, messages[model === 2 ? 'backup_wait_82' : 'backup_wait_8586'], 'instructions appear before the receive starts');
         assert.equal(calls[0].options.progressLabel, messages[model === 2 ? 'backup_wait_82' : 'backup_wait_8586']);
     }
-    assert.ok(events.some(e => e.download));
+    if (snapshot && !failure) {
+        assert.equal(calls[1].name, 'calc_backup_dirlist_json');
+        assert.equal(calls[1].args[0], `/downloads/backup.${extension}`);
+        assert.ok(events.indexOf(calls[1]) < events.findIndex(e => e.download), 'parse before download removes the file');
+    }
+    assert.equal(events.some(e => e.download), !failure, 'a parser failure still permits the backup download');
+    assert.equal(state.dirlist[0]?.name, snapshot ? (failure || parseFailure ? undefined : 'NEW') : 'OLD');
+    assert.equal(state.backupDirlistLoaded, !snapshot || (!failure && !parseFailure));
 }
 (async () => {
     for (const model of [2, 6, 7, 3, 4, 9]) await check(model);
-    await check(7, 'backup', true);
+    await check(2, 'backup', {cancel: true});
+    await check(7, 'backup', {cancel: true});
+    await check(2, 'backup', {failure: 'result'});
+    await check(6, 'backup', {failure: 'exception'});
+    await check(6, 'backup', {parseFailure: true});
     await check(4, 'tigroup');
     await checkGuides();
     console.log('Manual link instructions, receive ordering, cancellation and automatic controls passed');
