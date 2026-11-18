@@ -11,6 +11,7 @@ function item(name, extra = {}) {
 }
 async function run(model, plan, {finishResult = 0, sendResult = 0, rawResult = 0, rejectSend = false, decline = false} = {}) {
     const calls = [];
+    let confirmations = 0;
     const state = {settings: {}, dirlist: decline ? [{name: 'SKIP'}] : []};
     const context = vm.createContext({
         state, console, Number, Error, TICALCS_EVO_ERROR: 510,
@@ -18,11 +19,11 @@ async function run(model, plan, {finishResult = 0, sendResult = 0, rawResult = 0
         isVarFileClass: type => ['single', 'group', 'regular', 'tigroup'].includes(type),
         confirmEvoOsModelMismatch: () => true,
         findDirlistMatch: name => name === 'SKIP' ? {attr: 0} : null,
-        confirm: () => !decline, tFormat: name => name,
+        confirm() { confirmations++; return !decline; }, tFormat: name => name,
         hasSilverlinkConnected: () => true, isTI89TActive: () => false,
         clearNativeWarnings() {}, log() {}, getNativeWarningSuffix: () => '',
         formatErrorResult: (_module, result) => String(result),
-        runGuidedBackup: async (_direction, _name, operation) => operation(),
+        runGuidedLinkTransfer: async (_direction, _name, operation) => operation(),
         async ccallAsync(_module, name, _ret, types, args, options) {
             calls.push({name, types: [...types], args: [...args]});
             if (name === 'finish_var_send') return finishResult;
@@ -36,7 +37,7 @@ async function run(model, plan, {finishResult = 0, sendResult = 0, rawResult = 0
     vm.runInContext(source, context);
     let result, error;
     try { result = await context.performTransfers(plan, {_get_raw_protocol_code: () => rawResult}, {}); } catch (err) { error = err; }
-    return {calls, result, error};
+    return {calls, result, error, confirmations};
 }
 async function main() {
     for (const model of [2, 3, 6, 7, 13, 50]) {
@@ -64,11 +65,15 @@ async function main() {
             assert.equal(calls.at(-1).name, 'finish_var_send');
             assert.ok(calls.slice(0, -1).every(call => call.args.at(-1) === 1));
         }
-        const skipped = await run(model, [item('ONE'), item('SKIP')], {decline: true});
+        const skipped = await run(model, [item('ONE'), item('SKIP', {path: ''})]);
         assert.ifError(skipped.error);
         assert.equal(skipped.result.successCount, 1);
         assert.deepEqual(skipped.calls.map(call => call.name), ['send_file_custom', 'finish_var_send']);
-        for (const plan of [[], [item('SKIP')], [{...item('NONE'), path: ''}]]) {
+        const duplicate = await run(model, [item('SKIP')], {decline: true});
+        assert.ifError(duplicate.error);
+        assert.equal(duplicate.confirmations, 0, 'the calculator handles non-silent overwrite decisions');
+        assert.equal(duplicate.result.successCount, 1);
+        for (const plan of [[], [item('NONE', {path: ''})]]) {
             const empty = await run(model, plan, {decline: true});
             assert.ifError(empty.error);
             assert.equal(empty.calls.length, 0);
@@ -87,6 +92,10 @@ async function main() {
         assert.equal(mixed.calls.at(-1).args.at(-1), 0);
     }
     for (const model of [3, 7, 13]) {
+        const duplicate = await run(model, [item('SKIP')], {decline: true});
+        assert.ifError(duplicate.error);
+        assert.equal(duplicate.confirmations, 1, 'silent transfers still ask before replacing a variable');
+        assert.equal(duplicate.calls.length, 0);
         const backup = await run(model, [item('BACKUP', {fileClass: 'backup'})]);
         assert.ifError(backup.error);
         assert.equal(backup.result.successCount, 1);

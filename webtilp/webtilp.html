@@ -142,6 +142,7 @@
                         <button class="btn subtle send-idle" id="btnSendFiles" disabled>📤 Send Selected Files</button>
                     </div>
                     <div class="quick-actions">
+                        <button class="btn ghost hidden" id="btnReceiveVars">⬇️ Receive Variables</button>
                         <button class="btn ghost" id="btnReceiveBackup">📥  Make Backup</button>
                         <button class="btn ghost hidden" id="btnBackupDirlist">List from backup…</button>
                         <button class="btn ghost hidden" id="btnReceiveOs">📥  Receive OS</button>
@@ -315,6 +316,7 @@
                     </table>
                 </div>
                 <div class="form-note" id="transferNote">Location/folder options depend on calculator capabilities. Existing variables are overwritten only if confirmed.</div>
+                <p class="form-note hidden" id="transferManualLinkNote"></p>
                 <label class="form-option transfer-overwrite-option">
                     <input type="checkbox" id="transferOverwriteAll">
                     <span id="transferOverwriteAllLabel">Overwrite all existing items (no per-file confirmation)</span>
