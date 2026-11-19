@@ -174,6 +174,7 @@ test:
 	node tests/test_python_bytecode.cjs
 	node tests/test_numworks_backend.js
 	node tests/test_numworks_frontend.js
+	node tests/test_casio_frontend.js
 	python3 i18n/check.py
 
 $(TARGET): $(SRC) $(LIBS) $(PREJS)
