@@ -632,7 +632,7 @@ const I18N_EN = {
     "sharp_serial_choose_port": "Select the Sharp adapter's COM/serial port. All serial ports are shown, including ports without USB IDs.",
     "sharp_serial_diagnostics": "Sharp serial discovery (actual browser metadata): {details}",
     "sharp_serial_unknown_ids": "USB IDs not exposed",
-    "sharp_connected": "Sharp cable connected. Leave the calculator powered on at its normal screen for transfers; use REPROGRAM for system or ROM reception.",
+    "sharp_connected": "Sharp cable connected. Use the normal screen for variable transfers. For an OS recovery, select the exact model in Settings, choose REPROGRAM → 1:Receive on the calculator, and click Recover OS.",
     "sharp_model": "Selected model",
     "sharp_transport": "Transport",
     "sharp_protocol": "Protocol",
@@ -644,11 +644,19 @@ const I18N_EN = {
     "sharp_receive": "Receiving Sharp variables",
     "sharp_send": "Sending Sharp files",
     "sharp_dump": "Receiving Sharp dump",
+    "sharp_send_os": "Sending Sharp OS",
+    "sharp_recover_os": "Recover OS",
+    "sharp_recover_os_select_model": "Select the exact Sharp model in Settings and connect before recovering its OS.",
+    "sharp_os_one_file": "Send one Sharp firmware .bin at a time, on its own.",
+    "sharp_os_confirm": "Install {file} ({model} {version})? This rewrites the system flash. Back up your data first and keep the calculator powered and connected until the update completes.",
+    "sharp_os_auto_entry": "Leave the calculator at its normal screen. If it is already in REPROGRAM, cancel and use Recover OS.",
+    "sharp_os_manual_entry": "Before continuing, choose Diagnostics → REPROGRAM → 1:Receive on the calculator.",
+    "sharp_os_sent": "The calculator accepted the OS update. Reconnect after it restarts.",
     "sharp_operation_failed": "Sharp operation failed",
     "sharp_busy": "Connect the Sharp calculator first and wait for any current operation to finish.",
     "sharp_vars_title": "Sharp variables",
     "sharp_drop_title": "Send Sharp PC-Link files",
-    "sharp_drop_hint": "Native g4 files and groups, BASIC source (.bas/.txt), and pictures (.png/.jpg/.bmp/.gif/.webp). Leave the calculator powered on at its normal screen.",
+    "sharp_drop_hint": "Native g4 files and groups, firmware (.bin), BASIC source (.bas/.txt), and pictures (.png/.jpg/.bmp/.gif/.webp).",
     "sharp_confirm_send": "Send {count} Sharp file(s)? Existing fixed variables may be replaced; duplicate program names are rejected.",
     "sharp_confirm_restore": "Restore the native Sharp RAM backup? This replaces calculator memory. Select the exact model in Settings and ensure this backup comes from that same model and firmware version.",
     "sharp_program_name": "Calculator program name for {file} (1–8 letters, digits or underscores, starting with a letter):",
@@ -3650,6 +3658,7 @@ const els = {
     btnBackupDirlist: document.getElementById('btnBackupDirlist'),
     backupDirlistNote: document.getElementById('backupDirlistNote'),
     btnReceiveOs: document.getElementById('btnReceiveOs'),
+    btnSharpRecoverOs: document.getElementById('btnSharpRecoverOs'),
     btnDownloadOsPartial: document.getElementById('btnDownloadOsPartial'),
     btnDumpRom: document.getElementById('btnDumpRom'),
     btnLeaveExam: document.getElementById('btnLeaveExam'),
@@ -4439,6 +4448,7 @@ async function applyTranslations() {
     setIconLabel(els.btnReceiveVars, 'download', t('receive_variables'), '⬇️');
     setIconLabel(els.btnReceiveBackup, 'archive', t('make_backup'), '📥');
     setIconLabel(els.btnReceiveOs, 'download', t('receive_os'), '📥');
+    setIconLabel(els.btnSharpRecoverOs, 'upload', t('sharp_recover_os'), '📤');
     setIconLabel(els.btnDownloadOsPartial, 'download', t('download_os_so_far'), '⬇️');
     setIconLabel(els.btnDumpRom, 'cpu', t('dump_rom'), '🧠');
     setIconLabel(els.btnLeaveExam, 'log-out', t('leave_exam_mode'), '👨‍🎓');
@@ -5170,7 +5180,7 @@ function updateFileInputAccept() {
     if (!els.fileInput) return;
     let extensions = [];
     if (state?.activeFamily === 'sharp') {
-        extensions = ['g4p', 'g4e', 'g4s', 'g4y', 'g4m', 'g4i', 'g4d', 'g4l', 'g4n', 'g4v', 'g4z', 'g4w', 'g4t', 'g4b', 'g4g'];
+        extensions = ['g4p', 'g4e', 'g4s', 'g4y', 'g4m', 'g4i', 'g4d', 'g4l', 'g4n', 'g4v', 'g4z', 'g4w', 'g4t', 'g4b', 'g4g', 'bin'];
         if (state.settings?.convertScriptFiles !== false) extensions.push('bas', 'txt', 'png', 'jpg', 'jpeg', 'bmp', 'gif', 'webp');
     } else if (isHPPrimeActive()) {
         extensions = Array.from(HP_PRIME_UPLOAD_EXTENSIONS);
@@ -5363,6 +5373,7 @@ function updateDeviceInfoCapability(tiCapabilitiesKnown = false) {
 
 function applyActiveFamilyUiState(options = {}) {
     updateDeviceInfoCapability(Boolean(options.tiCapabilitiesKnown));
+    els.btnSharpRecoverOs?.classList.toggle('hidden', state.activeFamily !== DEVICE_FAMILY_SHARP);
     if (!options.tiCapabilitiesKnown) {
         els.varsPanel?.classList.remove('hidden');
         els.btnBackupDirlist?.classList.add('hidden');
@@ -12195,6 +12206,7 @@ function bindEvents() {
     els.btnReceiveVars.addEventListener('click', receiveVariables);
     els.btnReceiveBackup.addEventListener('click', receiveBackup);
     els.btnReceiveOs.addEventListener('click', receiveOs);
+    els.btnSharpRecoverOs?.addEventListener('click', pickSharpRecoveryFile);
     els.btnDownloadOsPartial.addEventListener('click', downloadPartialOs);
     els.btnDumpRom.addEventListener('click', dumpRom);
     if (els.btnLeaveExam) {
@@ -12861,7 +12873,9 @@ async function connectSharp(usbDevice = null, serialDevice = null) {
         | FEATURE_FLAGS.OPS_BACKUP | FEATURE_FLAGS.OPS_ROMDUMP | FEATURE_FLAGS.OPS_OS;
     state.dirlist = []; renderDirlist([]); readSharpInfo(); applyActiveFamilyUiState();
     setConnected(true); setStatus('status_connected', true); log(t('sharp_connected'));
-    await getDeviceInfo({ automatic: true });
+    // An explicitly selected CE-LK4 can already be in REPROGRAM with no
+    // running OS. Opening the cable must not send any PC-Link commands.
+    if (model === 'sharp-auto') await getDeviceInfo({ automatic: true });
 }
 
 function readSharpInfo(version = null) {
@@ -12972,9 +12986,47 @@ async function previewSharpEntry(entry) {
     });
 }
 
-async function sendSharpFiles(files) {
+function pickSharpRecoveryFile() {
+    const backend = state.sharpBackend, generation = state.sharpConnectionGeneration;
+    if (state.activeFamily !== DEVICE_FAMILY_SHARP || !backend) return;
+    if (backend.model === 'sharp-auto' || state.settings?.calcModel !== backend.model) {
+        log(t('sharp_recover_os_select_model')); return;
+    }
+    if (backend.busy) { log(t('sharp_busy')); return; }
+    const picker = document.createElement('input');
+    picker.type = 'file';
+    picker.accept = buildFileInputAccept(['bin']);
+    picker.addEventListener('change', async () => {
+        if (state.sharpBackend !== backend || state.sharpConnectionGeneration !== generation) return;
+        await sendSharpFiles(Array.from(picker.files), { reprogram: true });
+    }, { once: true });
+    picker.click();
+}
+
+async function sendSharpFiles(files, { reprogram = false } = {}) {
     if (!files.length) return;
     const backend = state.sharpBackend, generation = state.sharpConnectionGeneration;
+    if (reprogram || files.some(file => /\.bin$/i.test(file.name))) {
+        if (typeof backend?.sendOs !== 'function') {
+            log(t('sharp_backend_unavailable')); return;
+        }
+        if (files.length !== 1 || !/\.bin$/i.test(files[0].name)) { log(t('sharp_os_one_file')); return; }
+        const [file] = files;
+        let image, os;
+        try {
+            image = new Uint8Array(await file.arrayBuffer());
+            os = globalThis.WebTILPSharp.inspectOsImage(image, backend.model);
+        } catch (error) { logError(error, t('sharp_operation_failed')); return; }
+        if (state.sharpBackend !== backend || generation !== state.sharpConnectionGeneration) return;
+        if (reprogram && state.settings?.calcModel !== backend.model) { log(t('sharp_recover_os_select_model')); return; }
+        const notice = tFormat('sharp_os_confirm', { file: file.name, model: globalThis.WebTILPSharp.MODELS[os.model], version: os.version });
+        if (!confirm(notice + '\n\n' + t(reprogram || os.manual ? 'sharp_os_manual_entry' : 'sharp_os_auto_entry'))) return;
+        await runSharpOperation(t('sharp_send_os'), async current => {
+            await current.sendOs(image, { reprogram });
+            if (state.sharpBackend === current) log(t('sharp_os_sent'));
+        });
+        return;
+    }
     // Convert and validate the entire batch (including groups) before sending.
     const prepared = [], codec = globalThis.WebTILPSharpFiles;
     try {

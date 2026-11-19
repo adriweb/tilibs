@@ -122,8 +122,7 @@ async function main() {
     c.requestSupportedWebUsbDevice = () => { throw new Error('Sharp model must bypass the USB chooser'); };
     await c.connect(); assert.equal(requests, 1); assert.equal(opens, 1); assert.equal(c.state.activeFamily, 'sharp');
     assert.equal(c.state.sharpBackend.model, 'sharp-el9950');
-    assert.equal(c.state.sharpBackend.infoReads, 1, 'connection automatically refreshes device information');
-    assert.equal(c.state.sharpBackend.infoOptions.keepOpenOnSilentStart, true);
+    assert.equal(c.state.sharpBackend.infoReads, undefined, 'an exact EL-99xx connection opens the cable without probing the OS');
     assert.equal(c.state.features & (1 << 6), 0, 'no flash capability');
     const backend = c.state.sharpBackend;
     const usb = { vendorId: 0x04FC, productId: 0x0201 };
@@ -258,6 +257,76 @@ async function main() {
     await c.sendSharpFiles([variableFile, { name: 'backup.g4b', arrayBuffer: async () => tagged.buffer }]);
     assert.equal(sent, 1, 'model mismatch blocks all preceding variables');
     assert.equal(confirms, 2);
+    // The picker and drop paths both route a single .bin through OS preflight.
+    {
+        const notices = [], firmware = [{ name: 'update.BIN', arrayBuffer: async () => new Uint8Array(2).buffer }];
+        let writes = 0, allow = true;
+        const c = context({
+            getActiveCalcModelId: () => 0,
+            updateSendFilesButtonState() {},
+            confirm(message) { notices.push(message); return allow; },
+            WebTILPSharp: { ...sharp, inspectOsImage(image, model) {
+                assert.equal(image.length, 2); assert.equal(model, 'sharp-el9950');
+                return { model, version: '1.21', manual: false };
+            } },
+        });
+        c.state.activeFamily = 'sharp';
+        c.state.selectedFiles = firmware;
+        c.els.fileInput = element();
+        c.state.sharpBackend = { model: 'sharp-el9950', async sendOs(image) { assert.equal(image.length, 2); writes++; } };
+        for (const name of ['buildFileInputAccept', 'updateFileInputAccept', 'sendSelectedFiles', 'sendDroppedFiles']) {
+            vm.runInContext(extract(name), c);
+        }
+        c.updateFileInputAccept();
+        assert.ok(c.els.fileInput.accept.split(',').includes('.BIN'));
+        await c.sendSelectedFiles(); await c.sendDroppedFiles(firmware);
+        assert.equal(writes, 2); assert.ok(notices.every(message => /1\.21.*\n\nsharp_os_auto_entry/.test(message)));
+        await c.sendDroppedFiles([...firmware, variableFile]);
+        assert.ok(c.logs.includes('sharp_os_one_file'));
+        assert.equal(notices.length, 2);
+        allow = false;
+        await c.sendSelectedFiles();
+        assert.equal(writes, 2, 'cancelling the firmware confirmation leaves the transfer untouched');
+        allow = true;
+        await c.sendDroppedFiles([{ ...firmware[0], arrayBuffer: async () => {
+            c.state.sharpConnectionGeneration++; return new Uint8Array(2).buffer;
+        } }]);
+        assert.equal(notices.length, 3, 'a stale file read never prompts or flashes');
+    }
+    // Recovery is explicit, bypasses PC-Link, and cannot reuse a stale picker
+    // after the selected model or connection changes.
+    {
+        let picker, writes = 0;
+        const notices = [], file = { name: 'update.bin', arrayBuffer: async () => new Uint8Array(2).buffer };
+        const c = context({
+            document: { createElement(tag) {
+                assert.equal(tag, 'input');
+                return picker = { files: [file],
+                    addEventListener(event, callback) { assert.equal(event, 'change'); this.onChange = callback; },
+                    click() { this.clicked = true; },
+                };
+            } },
+            confirm(message) { notices.push(message); return true; },
+            WebTILPSharp: { ...sharp, inspectOsImage(image, model) { return {model, version: '1.21', manual: false}; } },
+        });
+        c.state.activeFamily = 'sharp';
+        c.state.sharpBackend = {model: 'sharp-el9950', async sendOs(image, options) {
+            assert.deepEqual(image, new Uint8Array(2)); assert.equal(options.reprogram, true); writes++;
+        } };
+        for (const name of ['buildFileInputAccept', 'pickSharpRecoveryFile']) vm.runInContext(extract(name), c);
+        c.pickSharpRecoveryFile();
+        assert.equal(picker, undefined, 'the user must select an exact recovery model');
+        assert.ok(c.logs.includes('sharp_recover_os_select_model'));
+        c.state.settings.calcModel = 'sharp-el9950';
+        c.pickSharpRecoveryFile();
+        assert.ok(picker.clicked && picker.accept.split(',').includes('.bin'));
+        await picker.onChange();
+        assert.equal(writes, 1); assert.match(notices[0], /sharp_os_manual_entry/);
+        c.pickSharpRecoveryFile();
+        c.state.sharpConnectionGeneration++;
+        await picker.onChange();
+        assert.equal(writes, 1); assert.equal(notices.length, 1);
+    }
     // Conversion is available for explicitly selected Sharp models and Auto
     // after Sharp detection, without passing Sharp strings to a TI native enum.
     {
