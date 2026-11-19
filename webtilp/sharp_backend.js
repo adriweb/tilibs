@@ -1,10 +1,14 @@
-/* Sharp EL-99xx PC-Link and receive-only REPROGRAM support.
+/* Sharp EL-99xx PC-Link and REPROGRAM support.
  * Firmware provenance and wire/file layouts: docs/SHARP_PROTOCOL.md.
  */
 (function (scope) {
 'use strict';
 const VENDOR_ID = 0x04FC, PRODUCT_ID = 0x0201;
 const RAM_SIZE = 0xE32B, BASE = 0xF00000, OS_END = 0xFFC000, ROM_END = 0x1000000;
+const OS_SIZE = OS_END - BASE, FLASH_CHECKSUM_OFFSET = 0xFBFE0;
+// All supported ROMs share the boot region. REPROGRAM preserves it and checks
+// the sum of the entire flash, including the boot bytes already on the device.
+const BOOT_CHECKSUM = 0x4F7D;
 const MODELS = Object.freeze({
     'sharp-auto': 'Sharp EL-99xx',
     'sharp-el9900': 'Sharp EL-9900',
@@ -48,6 +52,44 @@ function frame(payload, identity = '11') {
     const body = concat(ascii(identity), payload);
     const sum = checksum(body);
     return concat(body, Uint8Array.of(sum & 255, sum >>> 8));
+}
+function reprogramFrame(address, payload) {
+    const packet = new Uint8Array(8 + payload.length);
+    const fields = view(packet);
+    fields.setUint32(0, address, true);
+    fields.setUint16(4, payload.length, true);
+    packet.set(payload, 6);
+    fields.setUint16(packet.length - 2, checksum(packet.subarray(0, -2)), true);
+    return packet;
+}
+function inspectOsImage(data, expectedModel) {
+    if (!MODELS[expectedModel] || expectedModel === 'sharp-auto') {
+        throw new Error('Select the exact Sharp EL-99xx model in Settings before sending an OS.');
+    }
+    if (data.length !== ROM_END - BASE) throw new Error('A Sharp OS update requires a complete 1 MiB .bin image.');
+    const fields = view(data);
+    const sum = fields.getUint16(FLASH_CHECKSUM_OFFSET, true);
+    if (fields.getUint16(FLASH_CHECKSUM_OFFSET + 2, true) !== (sum ^ 0xFFFF) ||
+        fields.getUint16(FLASH_CHECKSUM_OFFSET + 10, true) !== 0 ||
+        checksum(data.subarray(OS_SIZE)) !== BOOT_CHECKSUM || checksum(data) !== sum ||
+        !data.subarray(0, 32).every((byte, index) => byte === 0x81 + index)) {
+        throw new Error('Invalid Sharp firmware image or flash checksum.');
+    }
+    // The diagnostic routine loads the actual banner, while generic strings for
+    // other models can occur elsewhere. Match the banner and packed BCD version.
+    const bannerOffset = fields.getUint32(0x35814, true) - BASE;
+    const major = data[FLASH_CHECKSUM_OFFSET + 4], minor = data[FLASH_CHECKSUM_OFFSET + 5];
+    const banner = data[0x35813] === 0x43 && bannerOffset >= 0 && bannerOffset + 22 <= OS_SIZE
+        ? /^EL\x8a(9900G SII|9900G|9900|9950) +Ver  !/.exec(text(data.subarray(bannerOffset, bannerOffset + 22)))?.[1]
+        : null;
+    const model = major === 4 && banner === '9900G SII' ? 'sharp-el9900gsii'
+        : major === 3 && banner === '9900G' ? 'sharp-el9900g'
+        : major === 1 && banner === '9900' ? 'sharp-el9900'
+        : major === 1 && banner === '9950' ? 'sharp-el9950' : null;
+    if (!model || (minor >> 4) > 9 || (minor & 15) > 9) throw new Error('Unrecognized Sharp firmware model or version.');
+    if (model !== expectedModel) throw new Error(`This firmware is for ${MODELS[model]}, but ${MODELS[expectedModel]} is selected.`);
+    return { model, version: `${major}.${minor.toString(16).padStart(2, '0')}`,
+        manual: model === 'sharp-el9900' || model === 'sharp-el9900g' };
 }
 function validateObject(object, category) {
     const minimum = category.dynamic ? 20 : 10;
@@ -283,7 +325,7 @@ class SharpBackend {
         // Never retry an uncertain/partial serial write.
         // Stream large payloads through the UART in bounded writes so progress
         // reflects completed writes, rather than a single queued USB transfer.
-        const chunkSize = onProgress ? 1024 : data.length;
+        const chunkSize = 1024;
         for (let offset = 0; offset < data.length; offset += chunkSize) {
             const chunk = data.subarray(offset, offset + chunkSize);
             await Promise.race([this.writer.write(chunk), new Promise((_, reject) => {
@@ -310,8 +352,7 @@ class SharpBackend {
             const packet = concat(prefix, await this.read(extraLength + 2, timeoutMs));
             if (view(packet).getUint16(packet.length - 2, true) === checksum(packet.subarray(0, packet.length - 2))) {
                 this.identity = identity;
-                // Only 9: uniquely identifies a supported model. The 9900,
-                // 9900G and SII all use 99, so leave that family ambiguous.
+                // 99 is shared by all EL-9900 variants.
                 if (this.model === 'sharp-auto' && identity === '9:') this.model = 'sharp-el9950';
                 return packet.slice(2, -2);
             }
@@ -548,17 +589,79 @@ class SharpBackend {
         }, { finish: false }); // Screenshot handler exits PC-Link after our ACK.
     }
     async readVersion({ keepOpenOnSilentStart = false } = {}) {
-        // Auto can identify the 9950 from the session ACK before sending 74.
-        // The 99 identity cannot distinguish SII from older models lacking 74.
+        // Auto identifies the EL-9950 from the session ACK. 99 can also be
+        // an older model without command 74.
         if (!['sharp-auto', 'sharp-el9900gsii', 'sharp-el9950'].includes(this.model)) return null;
         return this.operation(async () => {
             if (this.model === 'sharp-auto') return null;
-            await this.write(frame(Uint8Array.of(0x74)));
-            const digits = text(await this.receive(6));
-            if (!/^\d{6}$/.test(digits)) throw new Error('Invalid Sharp firmware version.');
-            this.version = `${digits[0]}.${digits.slice(1, 3)}`;
-            return this.version;
+            return this.readVersionInSession();
         }, { keepOpenOnSilentStart });
+    }
+    async readVersionInSession() {
+        await this.write(frame(Uint8Array.of(0x74)));
+        const digits = text(await this.receive(6));
+        if (!/^\d{6}$/.test(digits)) throw new Error('Invalid Sharp firmware version.');
+        this.version = `${digits[0]}.${digits.slice(1, 3)}`;
+        return this.version;
+    }
+    async sendOs(data, { reprogram = false } = {}) {
+        // Take a private copy before validation and retain it across awaits.
+        const image = bytes(data);
+        const os = inspectOsImage(image, this.model);
+        return this.operation(async () => {
+            let enteringFromPcLink = false;
+            if (!reprogram && !os.manual) {
+                const before = this.receivedBytes;
+                let sessionStarted = false;
+                try {
+                    await this.startSession(); sessionStarted = true;
+                } catch (error) {
+                    // An idle REPROGRAM receiver also ignores PC-Link starts.
+                    if (error.code !== 'SHARP_RESPONSE_TIMEOUT' || this.receivedBytes !== before || this.queue.length) throw error;
+                }
+                if (sessionStarted) {
+                    const installedVersion = await this.readVersionInSession();
+                    if (installedVersion[0] !== os.version[0]) {
+                        throw new Error('The connected Sharp firmware series does not match the firmware image.');
+                    }
+                    // The calculator ACKs 73 and leaves PC-Link immediately.
+                    await this.command(0x73);
+                    enteringFromPcLink = true;
+                }
+            }
+            await this.configureSerial(19200, 1);
+            // Allow the bootloader to initialize the calculator and its UART
+            // after acknowledging the PC-Link command.
+            if (enteringFromPcLink) await new Promise(resolve => setTimeout(resolve, 500));
+            await this.sendReprogramFrame(0, Uint8Array.of(0x39, 0x39, 0x33, 0x80, 0x00), Math.min(2000, this.timeoutMs));
+            await this.configureSerial(38400, 1);
+            this.onProgress({ completed: 0, total: OS_SIZE });
+            for (let address = BASE; address < OS_END;) {
+                const size = address < 0xFF0000 ? 0x4000 : 0x2000;
+                const block = image.subarray(address - BASE, address - BASE + size);
+                // The first block erases the entire system region. As in PC-Link,
+                // erased pages can be omitted after that erase has been ACKed.
+                if (address === BASE || block.some(byte => byte !== 0xFF)) await this.sendReprogramFrame(address, block);
+                address += size;
+                this.onProgress({ completed: Math.min(address - BASE, OS_SIZE - 1), total: OS_SIZE });
+            }
+            await this.sendReprogramFrame(0xFFFFFFFF, new Uint8Array());
+            this.onProgress({ completed: OS_SIZE, total: OS_SIZE });
+            await this.close();
+        }, { session: false });
+    }
+    async sendReprogramFrame(address, payload, timeoutMs = 600000) {
+        await this.write(reprogramFrame(address, payload));
+        const location = address === 0 ? 'the update header' : '0x' + address.toString(16).toUpperCase();
+        let response;
+        try { response = text(await this.read(2, timeoutMs)); }
+        catch (error) {
+            if (error.code === 'SHARP_RESPONSE_TIMEOUT') {
+                error.message = `Sharp REPROGRAM timed out at ${location}. Use REPROGRAM → 1:Receive to retry the update.`;
+            }
+            throw error;
+        }
+        if (response !== 'OK' || this.queue.length) throw new Error(`Unexpected Sharp REPROGRAM response at ${location}.`);
     }
     async receiveDump({ includeBoot = false } = {}) {
         return this.operation(async () => {
@@ -637,7 +740,7 @@ class SharpBackend {
     }
 }
 const api = { SharpBackend, DumpReceiver, MODELS, CATEGORIES, VENDOR_ID, PRODUCT_ID,
-    RAM_SIZE, frame, checksum, decodeNative, encodeNative, nativeHeader, decodeScreenshot, validateRestore,
+    RAM_SIZE, frame, checksum, decodeNative, encodeNative, nativeHeader, decodeScreenshot, validateRestore, inspectOsImage,
     isSharpUsbDevice: device => device?.vendorId === VENDOR_ID && device?.productId === PRODUCT_ID,
     isSharpSerialInfo: info => info?.usbVendorId === VENDOR_ID && info?.usbProductId === PRODUCT_ID };
 scope.WebTILPSharp = api;

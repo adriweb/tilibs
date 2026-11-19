@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const crypto = require('node:crypto');
 const { SharpBackend, DumpReceiver, CATEGORIES, RAM_SIZE, frame, checksum,
-    decodeNative, encodeNative, nativeHeader, decodeScreenshot } = require('../sharp_backend.js');
+    decodeNative, encodeNative, nativeHeader, decodeScreenshot, inspectOsImage } = require('../sharp_backend.js');
 const ascii = s => Uint8Array.from(Buffer.from(s, 'latin1'));
 const cat = c => ascii(c.name.padEnd(11, ' '));
 const join = (...parts) => Uint8Array.from(Buffer.concat(parts.map(p => Buffer.from(p))));
@@ -396,6 +396,96 @@ async function main() {
         const h = Buffer.alloc(6); h.writeUInt32LE(address); h.writeUInt16LE(payload.length, 4);
         const body = join(h, payload), sum = checksum(body); return join(body, [sum & 255, sum >>> 8]);
     };
+    // PC-Link host-to-calculator Repro uses a different header from dumps.
+    {
+        const osImage = (banner, major, minor) => {
+            const rom = Buffer.alloc(0x100000, 0xFF);
+            for (let i = 0; i < 32; i++) rom[i] = 0x81 + i;
+            rom.write(`EL\x8a${banner.padEnd(11)}Ver  !`, 0x200, 'latin1');
+            rom[0x35813] = 0x43; rom.writeUInt32LE(0xF00200, 0x35814);
+            rom.writeUInt16LE(0, 0xFBFE0);
+            rom[0xFBFE4] = major; rom[0xFBFE5] = minor;
+            rom.writeUInt16LE(0, 0xFBFEA);
+            rom.fill(0, 0xFC04F); rom[0xFC04F] = 204; // Synthetic boot region with the shared boot sum.
+            const sum = checksum(rom);
+            rom.writeUInt16LE(sum, 0xFBFE0); rom.writeUInt16LE(sum ^ 0xFFFF, 0xFBFE2);
+            return rom;
+        };
+        const cases = [
+            ['el9900gs_ver109', 'sharp-el9900', '9900', 1, 0x09, null],
+            ['el9900gs_ver301', 'sharp-el9900g', '9900G', 3, 0x01, null],
+            ['el9900gs_ver410', 'sharp-el9900gsii', '9900G SII', 4, 0x10, '99'],
+            ['el9950_ver120', 'sharp-el9950', '9950', 1, 0x20, '9:'],
+            ['el9950_ver121', 'sharp-el9950', '9950', 1, 0x21, '9:'],
+        ];
+        const ok = ascii('OK'), ng = ascii('NG');
+        const beginOs = Buffer.from('00000000050039393380002a01', 'hex');
+        const finishOs = Buffer.from('ffffffff0000fc03', 'hex');
+        const osSteps = rom => {
+            const steps = [[beginOs, ok]];
+            for (const [start, stop, size] of [[0, 0xF0000, 0x4000], [0xF0000, 0xFC000, 0x2000]]) {
+                for (let offset = start; offset < stop; offset += size) {
+                    const data = rom.subarray(offset, offset + size);
+                    if (data.some(byte => byte !== 0xFF)) steps.push([packet(0xF00000 + offset, data), ok]);
+                }
+            }
+            steps.push([finishOs, ok]);
+            return steps;
+        };
+        for (const [name, model, banner, major, minor, installedIdentity] of cases) {
+            const rom = process.env.SHARP_OS_DIR ? fs.readFileSync(`${process.env.SHARP_OS_DIR}/${name}.bin`) : osImage(banner, major, minor);
+            const version = `${major}.${minor.toString(16).padStart(2, '0')}`;
+            assert.deepEqual(inspectOsImage(rom, model), {model, version, manual: !installedIdentity});
+            const entry = installedIdentity ? [
+                [command(0x42), reply(1, installedIdentity)],
+                [command(0x74), reply(ascii(version.replace('.', '') + '000'), installedIdentity)],
+                [command(0x73), reply(1, installedIdentity)],
+            ] : [];
+            const progress = [], peer = await connected([...entry, ...osSteps(rom)], {model, onProgress: p => progress.push(p)});
+            if (name.endsWith('121')) peer.port.setOptions = async options => { peer.port.options.push(options); };
+            await peer.backend.sendOs(rom);
+            assert.deepEqual(peer.port.options.map(o => [o.baudRate, o.stopBits]), [[38400, 2], [19200, 1], [38400, 1]]);
+            assert.equal(peer.port.script.length, 0, 'all expected frames including the terminator were written');
+            assert.equal(peer.backend.closed, true);
+            assert.ok(progress.slice(1, -1).every(p => p.completed < p.total));
+            assert.deepEqual(progress.at(-1), {completed: 0xFC000, total: 0xFC000});
+            if (process.env.SHARP_OS_DIR) console.log(`${name}: ${osSteps(rom).length - 2} checked system blocks and final ACK`);
+        }
+        const image = osImage('9950', 1, 0x20);
+        const invalid = await connected([], {model: 'sharp-el9950'});
+        const corrupt = Buffer.from(image); corrupt[0x45000] ^= 1;
+        await assert.rejects(invalid.backend.sendOs(corrupt), /checksum/);
+        await assert.rejects(invalid.backend.sendOs(image.subarray(0, 0xFC000)), /1 MiB/);
+        await assert.rejects(invalid.backend.sendOs(osImage('9900', 1, 0x09)), /firmware is for Sharp EL-9900/);
+        assert.equal(invalid.port.writes.length, 0); await invalid.backend.close();
+        const mismatch = await connected([[command(0x42), reply(1, '9:')],
+            [command(0x74), reply(ascii('301000'), '9:')]], {model: 'sharp-el9950'});
+        await assert.rejects(mismatch.backend.sendOs(image), /series does not match/);
+        assert.equal(mismatch.port.writes.length, 2, 'wrong connected model never receives the update command');
+        for (const inPlace of [false, true]) {
+            const direct = await connected(osSteps(image), {model: 'sharp-el9950'});
+            assert.equal(direct.port.writes.length, 0, 'the cable opens passively');
+            if (inPlace) direct.port.setOptions = async options => { direct.port.options.push(options); };
+            await direct.backend.sendOs(image, {reprogram: true});
+            assert.deepEqual(direct.port.options.map(o => [o.baudRate, o.stopBits]), [[38400, 2], [19200, 1], [38400, 1]]);
+            assert.deepEqual(Buffer.from(direct.port.writes[0]), beginOs, 'the first transmission is the bootloader header');
+            assert.equal(direct.port.script.length, 0);
+        }
+        const recovery = Array.from({length: 5}, () => [command(0x42)]);
+        const bootloader = await connected([...recovery, ...osSteps(image)], {model: 'sharp-el9950', timeoutMs: 5});
+        await bootloader.backend.sendOs(image);
+        assert.equal(bootloader.port.script.length, 0, 'a silent PC-Link start falls back to manual REPROGRAM');
+        for (const rejectIndex of [0, 1, osSteps(image).length - 1]) {
+            const progress = [], steps = osSteps(image).slice(0, rejectIndex + 1);
+            steps[rejectIndex][1] = ng;
+            const peer = await connected([...recovery, ...steps], {
+                model: 'sharp-el9950', timeoutMs: 5, onProgress: p => progress.push(p),
+            });
+            await assert.rejects(peer.backend.sendOs(image), /Unexpected Sharp REPROGRAM response/);
+            assert.ok(progress.every(p => p.completed === undefined || p.completed < p.total));
+            assert.equal(peer.port.script.length, 0); assert.equal(peer.backend.closed, true);
+        }
+    }
     // Run the full backend around both baud transitions. A synthetic peer waits
     // for each OK and delivers data on the reopened port, like a paced sender.
     class DumpPort extends Port {
