@@ -172,15 +172,15 @@ Choose the exact Sharp model in **Settings → Calculator model**, or select the
 Sunplus cable in the normal Connect chooser. The exact setting goes directly
 to the appropriate Sharp transport chooser. Multiple authorized matching ports require a chooser. If a
 chained chooser loses browser user activation, click Connect again to authorize
-the serial port. After opening the transport, connection automatically refreshes device
-information through a serialized PC-Link version/identity probe. A completely
-silent initial probe leaves the transport open so REPROGRAM remains available;
-a partial reply, rejection or established-session failure still closes it. Normal operations leave the calculator powered
-on at its normal screen. No calculator flash-writing commands are exposed.
+the serial port. An explicitly selected EL-99xx opens the cable without
+sending PC-Link commands. Use **Refresh Device Info** from the normal screen
+to query the installed firmware. Auto still probes on connection. A wholly
+silent startup probe leaves the cable open.
+Normal PC-Link operations use the calculator's normal screen.
 
-Auto mode identifies an EL-9950 from a checksum-validated `9:` reply during
-normal operations. Refresh Device Info starts a session, identifies that model
-and requests firmware with command `74` in the same session; the displayed model
+Auto mode identifies an EL-9950 from a checksum-validated `9:` reply.
+Refresh Device Info requests the firmware version with command `74` in the
+same session; the displayed model
 and firmware are retained across later operations without changing Settings.
 A first RAM backup can identify the model through a separate clean session
 before requesting its data. The shared `99` identity remains ambiguous between
@@ -397,7 +397,43 @@ The downloaded `CE-LK4 for EL-9950 Ver1.10/CE-LK4_EL-9950.msi` has SHA-256
 Its statically extracted PC-LINK executable matches the analyzed archive copy:
 `9e540b532857242b6fad867d1cbba7cf77dd10cd0656b53d1c8854c016d55a16`.
 
-## Receive-only REPROGRAM dumps
+## Sending a Sharp OS
+
+Connect an EL-99xx and select or drop a single complete 1 MiB `.bin`.
+WebTiLP checks the flash checksum and its complement, checks the shared boot
+region's sum, and identifies the image from the diagnostic banner and BCD
+version. Use the exact calculator model in Settings if Auto leaves it
+ambiguous. The confirmation shows the target model and firmware version.
+
+EL-9900G SII and EL-9950 can enter the receiver from the normal screen. WebTiLP
+starts a PC-Link session, checks the installed version with `74`, and sends
+`73`, which ACKs before jumping to the bootloader. The older EL-9900 1.09 and
+EL-9900G 3.01 dispatchers lack these commands.
+
+To recover a calculator with no working OS, select its exact model in
+Settings, enter **REPROGRAM → 1:Receive**, then connect the cable in WebTiLP.
+Use **Recover OS** to choose the image and confirm. This path starts at
+19200 8N1 and sends the REPROGRAM header directly. The bootloader protocol
+is shared, so recovery relies on choosing the correct model.
+
+The EL-9900 and EL-9950 PC-Link Repro senders share the frame format below.
+The shipped EL-9950 `repro.ini` supplies the five-byte header
+`39 39 33 80 00` at address zero, sent at 19200 8N1. The final zero selects a
+system-only write. After the header's raw `OK`, mode `80` switches to 38400
+8N1. The first system block at `F00000` triggers the system erase. Subsequent
+blank blocks are omitted, and `FFC000–FFFFFF` is preserved. The shared
+bootloader verifies the whole flash and commits it before ACKing the
+terminator. WebTiLP reports completion after this final `OK` and closes the
+connection so the user can reconnect after the restart.
+
+The bootloader's header, erase, and final checksum paths are at
+`FFE397`, `FFE748`, and `FFE5DB`. A scripted serial peer checks the write
+sequence and both baud transitions. Set `SHARP_OS_DIR` to the directory with
+the five reference firmware images to run that test against the actual files.
+Critor reported a successful EL-9950 update from the normal screen. The
+direct recovery path still awaits a hardware retest.
+
+## Receiving REPROGRAM dumps
 
 Use Receive OS for system-only (**REPROGRAM → 2:Send**), or Dump ROM for the
 full image (**REPROGRAM → 3:Send(with Boot Page)**). Open the calculator's
