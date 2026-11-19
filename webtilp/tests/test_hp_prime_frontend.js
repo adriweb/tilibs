@@ -108,7 +108,8 @@ async function testFamilyUiState() {
             els.btnDeleteSelected.disabled = state.activeFamily === 'hp-prime';
         },
         HP_PRIME_UPLOAD_EXTENSIONS: new Set(['hpprgm', 'hpapp']),
-        getActiveCalcModelId: () => 0
+        getActiveCalcModelId: () => 0,
+        isCasioActive() { return false; }
     };
     vm.createContext(context);
     for (const name of [

@@ -378,6 +378,33 @@ body {
     color: var(--muted);
 }
 
+.splash-link {
+    margin-top: 18px;
+    padding: 4px 0;
+    border: 0;
+    background: none;
+    color: var(--muted);
+    font: inherit;
+    font-style: italic;
+    font-size: 0.875rem;
+    text-decoration: underline;
+    text-decoration-style: dotted;
+    text-decoration-thickness: 1px;
+    text-underline-offset: 4px;
+    cursor: pointer;
+}
+
+.splash-link:disabled {
+    opacity: 0.6;
+    cursor: default;
+}
+
+#casioFlashError:not(:empty) {
+    margin-top: 8px;
+    font-size: 0.875rem;
+    color: var(--muted);
+}
+
 /* Show startup progress before scripts load and while isolation may reload the page. */
 .initialization-screen {
     display: none;
@@ -1320,6 +1347,23 @@ a {
 
 .modal-card.modal-wide {
     width: min(980px, 100%);
+}
+
+#casioFlashDialog {
+    width: min(720px, calc(100% - 32px));
+    max-height: calc(100% - 32px);
+    overflow: auto;
+    padding: 0;
+    color: var(--text);
+}
+
+#casioFlashDialog:not([open]) {
+    display: none;
+}
+
+#casioFlashDialog::backdrop {
+    background: rgba(7, 9, 14, 0.75);
+    backdrop-filter: blur(6px);
 }
 
 .modal-header {

@@ -14,6 +14,7 @@ const CABLE_DIRECTLINK = '5';
 const DEVICE_FAMILY_TI = 'ti';
 const DEVICE_FAMILY_HP_PRIME = 'hp-prime';
 const DEVICE_FAMILY_NUMWORKS = 'numworks';
+const DEVICE_FAMILY_CASIO = 'casio';
 const HP_VENDOR_ID = 0x03F0;
 const HP_PRIME_PRODUCT_IDS = new Set([0x0441, 0x1541, 0x2441]);
 const NUMWORKS_VENDOR_ID = 0x0483;
@@ -539,6 +540,9 @@ const state = {
     sharpConnectionGeneration: 0,
     pendingSharpUsbDevice: null,
     sharpProgress: null,
+    casioFlashDrive: null,
+    casioFlashRefresh: null,
+    casioFlashWriting: false,
     numWorksBackend: null,
     selectedFiles: [],
     logLines: [],
@@ -817,7 +821,45 @@ const I18N_EN = {
     "numworks_script_deleted": "Deleted {name}.py from NumWorks storage.",
     "numworks_download_failed": "NumWorks download failed",
     "rm_loader_settings_hint": "Connect opens the native RM OS loader over WebSerial (19200 baud, 8O2), independently of the TI cable setting. Hold OPTN + EXP at power-on; close FA-124 first.",
+    "casio_error_unknown": "unknown Cahute error",
+    "casio_connection_failed": "Casio connection failed: {error}",
+    "casio_info_product": "Product",
+    "casio_info_protocol": "Protocol",
+    "casio_dropzone_title": "Drop files to send to Casio storage",
+    "casio_files_title": "Casio Storage Files",
+    "casio_type_directory": "Directory",
+    "casio_type_storage_file": "Storage file",
+    "casio_files_loaded": "Casio storage loaded: {count} entries.",
+    "casio_file_listing_failed": "Casio storage listing failed: {error}.",
+    "casio_duplicate_filename": "Skipped duplicate Casio upload filename {file}.",
+    "casio_confirm_overwrite": "“{file}” already exists in {folder}. Replace it?",
+    "casio_overwrite_skipped": "Skipped {file}; overwrite was not confirmed.",
+    "casio_storage_root": "storage root",
+    "casio_progress_sending_file": "Sending {file} to Casio storage",
+    "casio_file_sent": "Sent {file} to Casio storage.",
+    "casio_file_send_failed": "Failed to send {file} to Casio storage: {error}.",
+    "casio_upload_failed": "Casio upload failed",
+    "casio_file_received": "Received {file} from Casio storage.",
+    "casio_file_receive_failed": "Failed to receive {file} from Casio storage: {error}.",
+    "casio_download_failed": "Casio download failed",
+    "casio_progress_deleting_file": "Deleting {file} from Casio storage",
+    "casio_file_deleted": "Deleted {file} from Casio storage.",
+    "casio_file_delete_failed": "Failed to delete {file} from Casio storage: {error}.",
+    "casio_progress_renaming_file": "Renaming {file} in Casio storage",
+    "casio_rename_target_exists": "Cannot rename: {file} already exists in this Casio storage folder.",
+    "casio_file_renamed": "Renamed {old} to {name} in Casio storage.",
+    "casio_file_rename_failed": "Failed to rename {file} in Casio storage: {error}.",
     "connect_calculator": "Connect Calculator",
+    "casio_flash_open": "… or use Casio calculator flash drive",
+    "casio_flash_open_instructions": "Connect your calculator in USB Flash mode. In the folder picker, select the calculator’s flash drive, then allow your browser to read and write files on it.",
+    "casio_flash_choose_drive": "Choose drive…",
+    "casio_flash_close": "Close flash drive",
+    "casio_flash_drive": "Flash drive",
+    "casio_flash_mode": "USB Flash",
+    "casio_flash_transfer_hint": "Copy files to or from the drive. When finished, eject it through your operating system.",
+    "casio_flash_mainmem_change": "This file represents data in the calculator’s main memory.",
+    "casio_flash_rename_remove_failed": "Copied the file to {name}. Removing the original failed ({error}).",
+    "casio_flash_feature_unavailable": "This operation is unavailable in USB Flash mode.",
     "welcome_title": "Welcome to WebTILP!",
     "welcome_text": "Plug in your calculator, then click \"Connect Calculator\"; WebTILP will detect its family automatically.",
     "webusb_unavailable_title": "WebUSB is not available in this browser.",
@@ -3691,6 +3733,11 @@ const els = {
     splashScreen: document.getElementById('splashScreen'),
     mainContent: document.getElementById('mainContent'),
     btnSplashConnect: document.getElementById('btnSplashConnect'),
+    btnCasioFlash: document.getElementById('btnCasioFlash'),
+    casioFlashError: document.getElementById('casioFlashError'),
+    casioFlashDialog: document.getElementById('casioFlashDialog'),
+    btnCancelCasioFlash: document.getElementById('btnCancelCasioFlash'),
+    btnChooseCasioFlash: document.getElementById('btnChooseCasioFlash'),
     splashWebUsbWarning: document.getElementById('splashWebUsbWarning'),
     btnCloseSettings: document.getElementById('btnCloseSettings'),
     btnCloseNewFolder: document.getElementById('btnCloseNewFolder'),
@@ -4225,6 +4272,9 @@ function updateSourceConversionSettingAvailability() {
 }
 
 function resolveDeviceModelName(infoProductName) {
+    if (state.casioFlashDrive) {
+        return { primary: state.deviceModelName, secondary: '' };
+    }
     if (state.activeFamily === DEVICE_FAMILY_SHARP) {
         return { primary: state.deviceModelName || 'Sharp EL-99xx', secondary: '' };
     }
@@ -4427,12 +4477,17 @@ async function applyTranslations() {
 
     setTextContent(document.getElementById('brandSubtitle'), t('brand_subtitle'));
     setIconLabel(els.btnSettings, 'settings', t('settings'), '⚙️');
-    setIconLabel(els.btnConnect, 'zap', t('connect_calculator'), '🔌');
+    setIconLabel(els.btnConnect, 'zap', t(state.casioFlashDrive ? 'casio_flash_close' : 'connect_calculator'), '🔌');
     setTextContent(document.getElementById('splashTitle'), t('welcome_title'));
     setTextContent(document.getElementById('splashText'), t('welcome_text'));
     setTextContent(document.getElementById('splashWebUsbWarningTitle'), t('webusb_unavailable_title'));
     setTextContent(document.getElementById('splashWebUsbWarningText'), t('webusb_unavailable_text'));
     setIconLabel(els.btnSplashConnect, 'zap', t('connect_calculator'), '🔌');
+    setTextContent(els.btnCasioFlash, t('casio_flash_open'));
+    setTextContent(document.getElementById('casioFlashTitle'), t('casio_flash_open'));
+    setTextContent(document.getElementById('casioFlashInstructions'), t('casio_flash_open_instructions'));
+    setTextContent(els.btnCancelCasioFlash, t('cancel'));
+    setTextContent(els.btnChooseCasioFlash, t('casio_flash_choose_drive'));
 
     setTextContent(document.getElementById('panelDeviceTitle'), t('device'));
     setTextContent(document.getElementById('labelModel'), t('model'));
@@ -4972,8 +5027,10 @@ function setStatus(text, active) {
 function setConnected(connected) {
     state.connected = connected;
     if (els.btnNuke) {
-        els.btnNuke.classList.toggle('hidden', !connected);
+        els.btnNuke.classList.toggle('hidden', !connected || Boolean(state.casioFlashDrive));
     }
+    if (state.casioFlashDrive) els.btnConnect?.classList.remove('hidden');
+    setIconLabel(els.btnConnect, 'zap', t(state.casioFlashDrive ? 'casio_flash_close' : 'connect_calculator'), '🔌');
     if (els.splashScreen && els.mainContent) {
         els.splashScreen.classList.toggle('hidden', connected);
         els.mainContent.classList.toggle('hidden', !connected);
@@ -5006,6 +5063,7 @@ function updateTransportSplashState() {
     if (els.btnSplashConnect) {
         els.btnSplashConnect.classList.toggle('hidden', !supported);
     }
+    els.btnCasioFlash?.classList.toggle('hidden', typeof window.showDirectoryPicker !== 'function');
     if (els.btnConnect) {
         els.btnConnect.classList.toggle('hidden', !supported);
     }
@@ -5153,6 +5211,10 @@ function getVariableReceiveTimeout(entry) {
 
 function isHPPrimeActive() {
     return state.activeFamily === DEVICE_FAMILY_HP_PRIME;
+}
+
+function isCasioActive() {
+    return state.activeFamily === DEVICE_FAMILY_CASIO;
 }
 
 function isNumWorksActive() {
@@ -5356,6 +5418,46 @@ function setNumWorksUiState() {
     updateSelectionActionButtons();
 }
 
+function setCasioUiState() {
+    updateKeyControlsState(false);
+    if (els.keyCodeInput) {
+        els.keyCodeInput.removeAttribute('list');
+    }
+    clearKeyMapDataList();
+    if (els.fileInput) {
+        els.fileInput.disabled = false;
+        els.fileInput.accept = '';
+    }
+    updateSendFilesButtonState();
+    [els.btnSyncClock, els.btnNewFolder, els.btnReceiveBackup].forEach(button => {
+        if (button) {
+            button.disabled = true;
+            button.classList.add('disabled');
+            button.title = t('casio_flash_feature_unavailable');
+        }
+    });
+    if (els.btnRefreshDirlist) {
+        els.btnRefreshDirlist.disabled = false;
+        els.btnRefreshDirlist.classList.remove('disabled');
+        els.btnRefreshDirlist.title = t('refresh_list');
+    }
+    if (els.btnScreenshot) {
+        els.btnScreenshot.disabled = true;
+        els.btnScreenshot.classList.add('disabled');
+        els.btnScreenshot.title = t('casio_flash_feature_unavailable');
+    }
+    els.btnIsReady?.classList.add('hidden');
+    els.btnReceiveOs?.classList.add('hidden');
+    els.btnDownloadOsPartial?.classList.add('hidden');
+    els.btnDumpRom?.classList.add('hidden');
+    els.btnLeaveExam?.classList.add('hidden');
+    setTextContent(document.getElementById('dropzoneTitle'), t('casio_dropzone_title'));
+    setTextContent(document.getElementById('dropzoneSubtitle'),
+        t('casio_flash_transfer_hint'));
+    setTextContent(document.getElementById('panelVarsTitle'), t('casio_files_title'));
+    updateSelectionActionButtons();
+}
+
 function updateDeviceInfoCapability(tiCapabilitiesKnown = false) {
     const unsupported = tiCapabilitiesKnown && state.activeFamily === DEVICE_FAMILY_TI
         && (state.features & FEATURE_FLAGS.OPS_VERSION) === 0;
@@ -5374,6 +5476,7 @@ function updateDeviceInfoCapability(tiCapabilitiesKnown = false) {
 function applyActiveFamilyUiState(options = {}) {
     updateDeviceInfoCapability(Boolean(options.tiCapabilitiesKnown));
     els.btnSharpRecoverOs?.classList.toggle('hidden', state.activeFamily !== DEVICE_FAMILY_SHARP);
+    document.getElementById('screenshotPanel')?.classList.toggle('hidden', Boolean(state.casioFlashDrive));
     if (!options.tiCapabilitiesKnown) {
         els.varsPanel?.classList.remove('hidden');
         els.btnBackupDirlist?.classList.add('hidden');
@@ -5390,6 +5493,8 @@ function applyActiveFamilyUiState(options = {}) {
         setHPPrimeUiState();
     } else if (isNumWorksActive()) {
         setNumWorksUiState();
+    } else if (isCasioActive()) {
+        setCasioUiState();
     } else {
         setTiUiState(Boolean(options.tiCapabilitiesKnown));
     }
@@ -5404,7 +5509,7 @@ function getActiveKeyMapConfig() {
     if (isHPPrimeActive()) {
         return KEYMAP_CONFIG_HP_PRIME;
     }
-    if (isNumWorksActive()) {
+    if (isNumWorksActive() || isCasioActive()) {
         return null;
     }
     if (isNspireActive()) {
@@ -5664,6 +5769,196 @@ async function authorizeHPPrimeDevice(forcePrompt = false, discoveryUsbDevice = 
     }
     state.authorizedDevice = device;
     return device;
+}
+
+async function listCasioFlashFiles(directory, folder = '', entries = []) {
+    for await (const handle of directory.values()) {
+        if (handle.name.startsWith('.')) continue;
+        const isFolder = handle.kind === 'directory';
+        if (isFolder && !folder
+            && /^(?:System Volume Information|\$RECYCLE\.BIN|RECYCLER|RECYCLED)$/i.test(handle.name)) continue;
+        if (!isFolder && /^(?:desktop\.ini|Thumbs\.db|\.DS_Store)$/i.test(handle.name)) continue;
+        let size = 0;
+        if (!isFolder) {
+            try {
+                size = (await handle.getFile()).size;
+            } catch (error) {
+                if (error.name === 'NotFoundError') continue;
+                throw error;
+            }
+        }
+        const path = folder ? `${folder}/${handle.name}` : handle.name;
+        entries.push({
+            kind: 'casio',
+            name: handle.name,
+            folder,
+            is_folder: Number(isFolder),
+            size,
+            type_name: t(isFolder ? 'casio_type_directory' : 'casio_type_storage_file')
+        });
+        if (isFolder) await listCasioFlashFiles(handle, path, entries);
+    }
+    return entries;
+}
+
+function applyCasioFlashSnapshot(drive, entries) {
+    const mainMemory = entries.filter(entry => /^@mainmem(?:\/|$)/i.test(entry.folder));
+    const hasG4m = mainMemory.some(entry => !entry.is_folder && /\.g4m$/i.test(entry.name));
+    const hasG3m = mainMemory.some(entry => !entry.is_folder && /\.g3m$/i.test(entry.name));
+    const hasNumIneq = mainMemory.some(entry => !entry.is_folder && /^@mainmem$/i.test(entry.folder)
+        && /^numineq\.g4m$/i.test(entry.name));
+    let model = 'Casio';
+    if (hasG4m && !hasG3m) {
+        model = hasNumIneq ? 'Graph Math+ / fx-CG100' : 'Graph Math+ / fx-CG100 / fx-1AU GRAPH';
+    } else if (hasG3m && !hasG4m) {
+        model = 'fx-CG (G3M)';
+    }
+    state.features = FEATURE_FLAGS.FTS_FOLDER | FEATURE_FLAGS.OPS_RENAME | FEATURE_FLAGS.OPS_DELVAR;
+    state.dirlist = entries;
+    state.deviceInfoEntries = [
+        { key: t('casio_info_product'), value: model },
+        { key: t('casio_info_protocol'), value: t('casio_flash_mode') },
+        { key: t('casio_flash_drive'), value: drive.name }
+    ];
+    state.deviceModelName = model;
+    state.deviceInfoProductName = model;
+    renderDeviceInfo(state.deviceInfoEntries);
+    updateDeviceModelDisplay(model);
+    renderDirlist(entries);
+    log(tFormat('casio_files_loaded', { count: entries.length }));
+}
+
+function openCasioFlashDialog() {
+    if (state.connected || state.connectInProgress || els.casioFlashDialog.open) return;
+    setTextContent(els.casioFlashError, '');
+    els.casioFlashDialog.showModal();
+}
+
+async function connectCasioFlash() {
+    if (state.connected || state.connectInProgress) return;
+    state.connectInProgress = true;
+    els.btnCancelCasioFlash.disabled = true;
+    els.btnChooseCasioFlash.disabled = true;
+    try {
+        const drive = await window.showDirectoryPicker({ mode: 'readwrite' });
+        if (els.casioFlashDialog.open) els.casioFlashDialog.close();
+        const entries = await listCasioFlashFiles(drive);
+        if (state.authorizedDevice) await releaseDeviceForSwitch(null);
+        state.activeFamily = DEVICE_FAMILY_CASIO;
+        state.casioFlashDrive = drive;
+        applyCasioFlashSnapshot(drive, entries);
+        applyActiveFamilyUiState();
+        setConnected(true);
+        setStatus('status_connected', true);
+    } catch (error) {
+        if (error.name !== 'AbortError') {
+            const message = tFormat('casio_connection_failed', { error: error.message });
+            setTextContent(els.casioFlashError, message);
+        }
+    } finally {
+        state.connectInProgress = false;
+        els.btnCancelCasioFlash.disabled = false;
+        els.btnChooseCasioFlash.disabled = false;
+        if (els.casioFlashDialog.open) els.casioFlashDialog.close();
+    }
+}
+
+async function refreshCasioFlash(drive) {
+    const refresh = {};
+    state.casioFlashRefresh = refresh;
+    try {
+        const entries = await listCasioFlashFiles(drive);
+        if (drive === state.casioFlashDrive && refresh === state.casioFlashRefresh) {
+            applyCasioFlashSnapshot(drive, entries);
+        }
+    } catch (error) {
+        throw new Error(tFormat('casio_file_listing_failed', { error: error.message }), { cause: error });
+    }
+}
+
+async function getCasioFlashFolder(drive, folder) {
+    let handle = drive;
+    for (const name of normalizeFolderPath(folder).split('/').filter(Boolean)) {
+        handle = await handle.getDirectoryHandle(name);
+    }
+    return handle;
+}
+
+function isCasioFlashMainMemory(folder) {
+    return /^@mainmem(?:\/|$)/i.test(normalizeFolderPath(folder));
+}
+
+async function writeCasioFlashFile(folder, name, file, replace = false) {
+    const handle = await folder.getFileHandle(name, { create: true });
+    try {
+        await file.stream().pipeTo(await handle.createWritable());
+    } catch (error) {
+        if (!replace) await folder.removeEntry(name).catch(() => {});
+        throw error;
+    }
+}
+
+async function renameCasioFlashFile(folder, source, newName) {
+    const targetKey = newName.toLowerCase();
+    const targetExists = () => new Error(tFormat('casio_rename_target_exists', { file: newName }));
+    for await (const name of folder.keys()) {
+        if (name.toLowerCase() === targetKey) throw targetExists();
+    }
+    // Also let the filesystem resolve names that alias existing entries, such as FAT short names.
+    try {
+        await folder.getFileHandle(newName);
+        throw targetExists();
+    } catch (error) {
+        if (error.name === 'TypeMismatchError') throw targetExists();
+        if (error.name !== 'NotFoundError') throw error;
+    }
+    await writeCasioFlashFile(folder, newName, await source.getFile());
+    try {
+        await folder.removeEntry(source.name);
+    } catch (error) {
+        throw new Error(tFormat('casio_flash_rename_remove_failed', {
+            name: newName, error: error.message
+        }), { cause: error });
+    }
+}
+
+async function mutateCasioFlashFile(drive, entry, newName = '') {
+    if (entry.isFolder || entry.is_folder === 1 || state.casioFlashWriting) return;
+    const file = entry.name;
+    const progress = tFormat(newName ? 'casio_progress_renaming_file' : 'casio_progress_deleting_file', { file });
+    state.casioFlashWriting = true;
+    els.btnConnect.disabled = true;
+    startProgress(progress);
+    try {
+        const folder = await getCasioFlashFolder(drive, entry.folder);
+        const source = await folder.getFileHandle(file);
+        if (newName) {
+            await renameCasioFlashFile(folder, source, newName);
+            log(tFormat('casio_file_renamed', { old: file, name: newName }));
+        } else {
+            await folder.removeEntry(source.name);
+            if (drive === state.casioFlashDrive) {
+                state.dirlist = state.dirlist.filter(candidate => candidate.is_folder
+                    || candidate.folder !== (entry.folder || '') || candidate.name !== file);
+                renderDirlist(state.dirlist);
+            }
+            log(tFormat('casio_file_deleted', { file }));
+        }
+    } catch (error) {
+        log(tFormat(newName ? 'casio_file_rename_failed' : 'casio_file_delete_failed', {
+            file, error: error.message
+        }));
+    } finally {
+        try {
+            await refreshCasioFlash(drive);
+        } catch (error) {
+            logError(error);
+        } finally {
+            stopProgress(progress);
+            state.casioFlashWriting = false;
+            els.btnConnect.disabled = false;
+        }
+    }
 }
 
 function getHPPrimeModelName(device = state.authorizedDevice) {
@@ -5992,6 +6287,7 @@ async function autoConnectIfAuthorized() {
         return;
     }
     const sharpPorts = await getAuthorizedSharpSerialDevices();
+    if (state.connectInProgress || state.connected) return;
     if (String(state.settings?.calcModel).startsWith('sharp-')) {
         if (sharpPorts.length === 1) {
             state.connectInProgress = true;
@@ -6003,6 +6299,7 @@ async function autoConnectIfAuthorized() {
     }
     let autoDetectedTiDevice = null;
     const devices = navigator.usb ? await getAuthorizedSupportedWebUsbDevices() : [];
+    if (state.connectInProgress || state.connected) return;
     if (devices.length > 1) {
         setStatus('status_select_device', false);
         return;
@@ -6034,6 +6331,7 @@ async function autoConnectIfAuthorized() {
         }
         if (detectedFamily === DEVICE_FAMILY_HP_PRIME) {
             const hpDevices = await getAuthorizedHPPrimeDevices(device);
+            if (state.connectInProgress || state.connected) return;
             if (hpDevices.length === 1) {
                 try {
                     state.connectInProgress = true;
@@ -6051,6 +6349,7 @@ async function autoConnectIfAuthorized() {
         autoDetectedTiDevice = device;
     } else if (hasHPPrimeWebHidTransport()) {
         const hpDevices = await getAuthorizedHPPrimeDevices();
+        if (state.connectInProgress || state.connected) return;
         if (hpDevices.length === 1) {
             try {
                 state.connectInProgress = true;
@@ -6068,12 +6367,14 @@ async function autoConnectIfAuthorized() {
     if (String(state.settings?.cableModel ?? 'auto') === CABLE_GRAYLINK) {
         return;
     }
-    if (state.connectInProgress) {
+    if (state.connectInProgress || state.connected) {
         return;
     }
     const module = await initModule();
+    if (state.connectInProgress || state.connected) return;
     if (!navigator.usb) {
         const serialDevice = await getAuthorizedEvoSerialDevice();
+        if (state.connectInProgress || state.connected) return;
         if (!serialDevice) {
             return;
         }
@@ -6085,6 +6386,7 @@ async function autoConnectIfAuthorized() {
         const devices = autoDetectedTiDevice
             ? [autoDetectedTiDevice]
             : await getAuthorizedDevices();
+        if (state.connectInProgress || state.connected) return;
         if (!devices || !devices.length) {
             return;
         }
@@ -6092,6 +6394,7 @@ async function autoConnectIfAuthorized() {
         const usbDevice = devices[0];
         if (isEvoUsbDevice(usbDevice)) {
             const serialDevice = await getAuthorizedEvoSerialDevice(usbDevice);
+            if (state.connectInProgress || state.connected) return;
             if (!serialDevice) {
                 return;
             }
@@ -6385,6 +6688,11 @@ async function connectTI(forcePrompt = true, selectedUsbDevice = null) {
 }
 
 async function releaseDeviceForSwitch(device) {
+    if (state.casioFlashDrive) {
+        clearDeviceData();
+        setConnected(false);
+        return;
+    }
     const previous = state.authorizedDevice;
     if (!previous || deviceMatches(previous, device)) return;
     const module = state.module;
@@ -6417,6 +6725,10 @@ async function releaseDeviceForSwitch(device) {
 }
 
 async function connect() {
+    if (state.casioFlashDrive) {
+        if (!state.casioFlashWriting) resetToSplashState();
+        return;
+    }
     if (['casio-rm7000', 'casio-rm9000'].includes(state.settings?.calcModel)) {
         window.location.href = 'rm-loader.html';
         return;
@@ -6570,6 +6882,10 @@ async function getDeviceInfo({ automatic = false } = {}) {
             readNumWorksInfo();
             applyNumWorksStorageSnapshot();
             log(t('numworks_info_refreshed'));
+            return;
+        }
+        if (state.casioFlashDrive) {
+            await refreshCasioFlash(state.casioFlashDrive);
             return;
         }
         if (isTi92Selected()) {
@@ -6938,6 +7254,7 @@ function clearDeviceData() {
     state.hpFileRefreshGeneration += 1;
     state.hpFileRenderGeneration = 0;
     state.hpPrimeProtocolVersion = null;
+    state.casioFlashDrive = null;
     setSelectedFiles([]);
     state.nspireOsReceiveStarted = false;
     updateNspireOsButtons(false, false);
@@ -7112,6 +7429,10 @@ async function refreshDirlist({ manual = false } = {}) {
             log(tFormat('numworks_scripts_refreshed', { count }));
             return;
         }
+        if (state.casioFlashDrive) {
+            await refreshCasioFlash(state.casioFlashDrive);
+            return;
+        }
         await authorizeDevice();
         const module = await initModule();
         const handle = await ensureHandle();
@@ -7145,8 +7466,8 @@ async function refreshDirlist({ manual = false } = {}) {
 
 function renderDirlist(entries) {
     const filter = (els.filterInput.value || '').toLowerCase();
-    const showLocation = !isNspireActive() && !isHPPrimeActive() && !isNumWorksActive();
-    const showKind = !isNspireActive() && !isHPPrimeActive() && !isNumWorksActive();
+    const showLocation = !isNspireActive() && !isHPPrimeActive() && !isNumWorksActive() && !isCasioActive();
+    const showKind = !isNspireActive() && !isHPPrimeActive() && !isNumWorksActive() && !isCasioActive();
     const table = els.varTableBody.closest('table');
     if (table) {
         table.classList.toggle('hide-location', !showLocation);
@@ -7341,7 +7662,9 @@ function renderTableView(entries, filter) {
             row.title = t('hp_prime_app_folder_hint');
         }
         row.classList.toggle('integrity-invalid', Boolean(entry.invalid || appContainerInvalid));
-        const mutableStorageEntry = state?.activeFamily !== 'sharp' && entry.kind !== 'backup-var';
+        const mutableStorageEntry = state?.activeFamily !== 'sharp'
+            && entry.kind !== 'backup-var'
+            && !(isCasioActive() && isFolder);
         const canRename = mutableStorageEntry
             && ((entry.hpAppChildEditable && state.hpFileSnapshotLoaded)
                 || (state.features & FEATURE_FLAGS.OPS_RENAME) !== 0);
@@ -7738,7 +8061,8 @@ function updateSelectionActionButtons() {
         els.btnRecvSelected.disabled = !hasSelection;
     }
     if (els.btnDeleteSelected) {
-        const disabled = !hasSelection || state?.activeFamily === 'sharp' || isHPPrimeActive();
+        const disabled = !hasSelection || state?.activeFamily === 'sharp' || isHPPrimeActive()
+            || Boolean(state.casioFlashDrive);
         els.btnDeleteSelected.disabled = disabled;
         els.btnDeleteSelected.classList.toggle('disabled', disabled);
     }
@@ -8168,6 +8492,8 @@ function updateStickyFolderHeader() {
     const padCell = current.querySelector('td');
     const padWidth = padCell ? padCell.offsetWidth : 0;
     const tr = document.createElement('tr');
+    tr.dataset.folderPath = fullPath;
+    tr.dataset.isFolder = '1';
     tr.innerHTML = `
         <td style="${padWidth ? `width:${padWidth}px;min-width:${padWidth}px;` : ''}"></td>
         <td class="folder-sticky-name" colspan="6">
@@ -8381,6 +8707,14 @@ async function sendDroppedFiles(files, dropFolder) {
         return;
     }
     log(`Dropped ${files.length} file(s) for transfer.`);
+    if (state.casioFlashDrive) {
+        try {
+            await sendCasioFlashFiles(state.casioFlashDrive, files, dropFolder);
+        } catch (error) {
+            logError(error, t('casio_upload_failed'));
+        }
+        return;
+    }
     if (isHPPrimeActive()) {
         const appRoot = findHPPrimeAppRoot(dropFolder);
         if (appRoot && !files.some(file => file.hpAppDirectory)) {
@@ -9907,6 +10241,66 @@ async function sendNumWorksFiles(files) {
     log(tFormat('numworks_scripts_sent', { count: pending.length }));
 }
 
+async function sendCasioFlashFiles(drive, files, directory) {
+    if (state.casioFlashWriting) return;
+    state.casioFlashWriting = true;
+    els.btnConnect.disabled = true;
+    let copied = 0;
+    try {
+        let folderPath = normalizeFolderPath(directory);
+        let folder = drive;
+        if (directory === undefined) {
+            for await (const entry of drive.values()) {
+                if (entry.kind === 'directory' && entry.name.toLowerCase() === '@mainmem') {
+                    folder = entry;
+                    folderPath = entry.name;
+                    break;
+                }
+            }
+        } else {
+            folder = await getCasioFlashFolder(drive, folderPath);
+        }
+        const existing = new Map();
+        for await (const entry of folder.values()) existing.set(entry.name.toLowerCase(), entry);
+        const sentNames = new Set();
+        for (const file of files) {
+            const name = file.name;
+            const key = name.toLowerCase();
+            const previous = existing.get(key);
+            if (sentNames.has(key)) {
+                log(tFormat('casio_duplicate_filename', { file: name }));
+                continue;
+            }
+            sentNames.add(key);
+            if (previous?.kind === 'file' && !confirm(tFormat('casio_confirm_overwrite', {
+                file: previous.name,
+                folder: folderPath || t('casio_storage_root')
+            }))) {
+                log(tFormat('casio_overwrite_skipped', { file: name }));
+                continue;
+            }
+            const progress = tFormat('casio_progress_sending_file', { file: name });
+            startProgress(progress);
+            try {
+                await writeCasioFlashFile(folder, previous?.name ?? name, file, Boolean(previous));
+                copied++;
+                log(tFormat('casio_file_sent', { file: name }));
+            } catch (error) {
+                log(tFormat('casio_file_send_failed', { file: name, error: error.message }));
+            } finally {
+                stopProgress(progress);
+            }
+        }
+        if (copied) {
+            setSelectedFiles([]);
+            await refreshDirlist();
+        }
+    } finally {
+        state.casioFlashWriting = false;
+        els.btnConnect.disabled = false;
+    }
+}
+
 async function sendSelectedFiles() {
     const files = state.selectedFiles.length
         ? state.selectedFiles
@@ -9917,6 +10311,14 @@ async function sendSelectedFiles() {
     }
     setButtonLoading(els.btnSendFiles, true);
     try {
+        if (state.casioFlashDrive) {
+            try {
+                await sendCasioFlashFiles(state.casioFlashDrive, files);
+            } catch (error) {
+                logError(error, t('casio_upload_failed'));
+            }
+            return;
+        }
         if (state?.activeFamily === 'sharp') { await sendSharpFiles(files); return; }
         if (isHPPrimeActive()) {
             const module = await initModule();
@@ -10471,6 +10873,53 @@ function downloadNumWorksEntry(entry) {
     return true;
 }
 
+async function downloadCasioEntry(entry) {
+    const drive = state.casioFlashDrive;
+    if (!drive || entry.isFolder || entry.is_folder === 1) return false;
+    const folder = await getCasioFlashFolder(drive, entry.folder);
+    const handle = await folder.getFileHandle(entry.name);
+    const file = await handle.getFile();
+    if (drive !== state.casioFlashDrive) return false;
+    triggerDownload(entry.name, file);
+    log(tFormat('casio_file_received', { file: entry.name }));
+    return true;
+}
+
+async function downloadCasioEntries(selections) {
+    const drive = state.casioFlashDrive;
+    const selectedFolders = selections
+        .filter(entry => entry.isFolder || entry.is_folder === 1)
+        .map(entry => normalizeFolderPath(entry.folderPath || entry.name))
+        .filter(Boolean);
+    const files = state.dirlist.filter(entry => entry.kind === 'casio'
+        && entry.is_folder !== 1
+        && (selections.some(selected => selected.kind === 'casio'
+            && !selected.isFolder && selected.name === entry.name
+            && (selected.folder || '') === (entry.folder || ''))
+            || selectedFolders.some(folder => {
+                const path = normalizeFolderPath(entry.folder);
+                return path === folder || (drive && path.startsWith(`${folder}/`));
+            })));
+    if (selectedFolders.length
+        && !confirm(tFormat('confirm_download_items_from_folders', {
+            items: files.length,
+            folders: selectedFolders.length
+        }))) {
+        return;
+    }
+    for (let index = 0; index < files.length; index++) {
+        if (drive && drive !== state.casioFlashDrive) return;
+        try {
+            await downloadCasioEntry(files[index], index);
+        } catch (error) {
+            log(tFormat('casio_file_receive_failed', {
+                file: files[index].name,
+                error: error?.message || t('casio_error_unknown')
+            }));
+        }
+    }
+}
+
 async function receiveSelected() {
     if (state?.activeFamily === 'sharp') {
         const entries = getSelectedVarInputs().map(buildEntryFromCheckbox);
@@ -10489,6 +10938,17 @@ async function receiveSelected() {
         setButtonLoading(els.btnRecvSelected, true);
         try {
             await downloadHPPrimeEntries(selections);
+        } finally {
+            setButtonLoading(els.btnRecvSelected, false);
+        }
+        return;
+    }
+    if (state.casioFlashDrive) {
+        setButtonLoading(els.btnRecvSelected, true);
+        try {
+            await downloadCasioEntries(selections);
+        } catch (err) {
+            logError(err, t('casio_download_failed'));
         } finally {
             setButtonLoading(els.btnRecvSelected, false);
         }
@@ -10675,7 +11135,7 @@ async function deleteEntriesWithSession(module, handle, selections) {
 }
 
 async function deleteSelected() {
-    if (state?.activeFamily === 'sharp') return;
+    if (state?.activeFamily === 'sharp' || state.casioFlashDrive) return;
 
     const selections = getSelectedVarInputs()
         .map(buildEntryFromCheckbox);
@@ -10709,13 +11169,17 @@ async function deleteSelected() {
 
 async function renameEntry(entry) {
     if (state?.activeFamily === 'sharp') return;
+    const flashDrive = state.casioFlashDrive;
+    if (flashDrive && (state.casioFlashWriting || entry.isFolder || entry.is_folder === 1)) return;
     if (entry.isFolder && !isNspireActive()) {
         log('Folder renaming is only supported on TI-Nspire.');
         return;
     }
     const label = entry.isFolder ? 'folder' : 'item';
     const currentName = entry.name || '';
-    const newName = prompt(tFormat('prompt_rename_entry', { kind: label }), currentName);
+    const message = tFormat('prompt_rename_entry', { kind: label });
+    const newName = prompt(flashDrive && isCasioFlashMainMemory(entry.folder)
+        ? `${message}\n\n${t('casio_flash_mainmem_change')}` : message, currentName);
     if (!newName) {
         log('Rename cancelled.');
         return;
@@ -10727,6 +11191,10 @@ async function renameEntry(entry) {
     }
     if (trimmed.includes('/')) {
         log('Folder or item names cannot include "/".');
+        return;
+    }
+    if (flashDrive) {
+        await mutateCasioFlashFile(flashDrive, entry, trimmed);
         return;
     }
 
@@ -10804,10 +11272,18 @@ async function renameEntry(entry) {
 
 async function deleteEntry(entry) {
     if (state?.activeFamily === 'sharp') return;
-    if (!confirm(tFormat(entry.isFolder ? 'confirm_delete_folder_contents' : 'confirm_delete_entry', {
+    const flashDrive = state.casioFlashDrive;
+    if (flashDrive && (state.casioFlashWriting || entry.isFolder || entry.is_folder === 1)) return;
+    const message = tFormat(entry.isFolder ? 'confirm_delete_folder_contents' : 'confirm_delete_entry', {
         kind: t(entry.isFolder ? 'kind_folder' : 'kind_item'),
         name: entry.name
-    }))) {
+    });
+    if (!confirm(flashDrive && isCasioFlashMainMemory(entry.folder)
+        ? `${message}\n\n${t('casio_flash_mainmem_change')}` : message)) {
+        return;
+    }
+    if (flashDrive) {
+        await mutateCasioFlashFile(flashDrive, entry);
         return;
     }
     setButtonLoading(els.btnDeleteSelected, true);
@@ -10877,6 +11353,21 @@ async function downloadEntry(entry) {
             await downloadHPPrimeEntry(entry);
         } catch (err) {
             logError(err, t('hp_prime_download_failed'));
+        } finally {
+            setButtonLoading(els.btnRecvSelected, false);
+        }
+        return;
+    }
+    if (state.casioFlashDrive) {
+        setButtonLoading(els.btnRecvSelected, true);
+        try {
+            if (entry.isFolder || entry.is_folder === 1) {
+                await downloadCasioEntries([entry]);
+            } else {
+                await downloadCasioEntry(entry);
+            }
+        } catch (err) {
+            logError(err, t('casio_download_failed'));
         } finally {
             setButtonLoading(els.btnRecvSelected, false);
         }
@@ -12261,6 +12752,8 @@ function bindEvents() {
     if (els.btnSplashConnect) {
         els.btnSplashConnect.addEventListener('click', connect);
     }
+    els.btnCasioFlash?.addEventListener('click', openCasioFlashDialog);
+    els.btnChooseCasioFlash?.addEventListener('click', connectCasioFlash);
     if (els.selectAllVars) {
         els.selectAllVars.addEventListener('change', () => {
             const checkboxes = Array.from(els.varTableBody.querySelectorAll('input[type="checkbox"]:not(:disabled)'));
@@ -12502,9 +12995,7 @@ function bindEvents() {
         clearDropHighlight();
         const folderNode = event.target.closest('[data-folder-path]');
         const row = event.target.closest('tr');
-        const folder = folderNode
-            ? (folderNode.dataset.folderPath || '')
-            : (row ? (row.dataset.folderTarget || '') : '');
+        const folder = folderNode?.dataset.folderPath ?? row?.dataset.folderTarget;
         try {
             const files = await getDroppedTransferFiles(event);
             if (files.length) await sendDroppedFiles(files, folder);
@@ -12626,6 +13117,7 @@ bootstrap().catch(err => {
 });
 
 function isUnrelatedTransportEvent(event) {
+    if (state.casioFlashDrive) return true;
     if (!event) return false;
     const selected = state.authorizedDevice;
     if (!selected) return Boolean(state.connectInProgress);
