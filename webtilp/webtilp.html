@@ -94,6 +94,10 @@
                 <p id="splashWebUsbWarningText">Please use a WebUSB-compatible browser like Chrome, Edge, or Brave.</p>
             </div>
             <button class="btn primary" id="btnSplashConnect" type="button">🔌 Connect Calculator</button>
+            <div>
+                <button class="splash-link hidden" id="btnCasioFlash" type="button">… or use Casio calculator flash drive</button>
+                <div id="casioFlashError" role="status"></div>
+            </div>
         </div>
     </section>
 
@@ -207,7 +211,7 @@
             </div>
         </section>
 
-        <section class="panel">
+        <section class="panel" id="screenshotPanel">
             <div class="panel-header">
                 <h2 id="panelScreenshotTitle">Screenshot</h2>
                 <div class="panel-actions">
@@ -431,6 +435,19 @@
             </div>
         </div>
     </div>
+
+    <dialog class="modal-card" id="casioFlashDialog" aria-labelledby="casioFlashTitle" aria-describedby="casioFlashInstructions">
+        <div class="modal-header">
+            <h3 id="casioFlashTitle">Use Casio calculator flash drive…</h3>
+        </div>
+        <div class="modal-body">
+            <p id="casioFlashInstructions"></p>
+        </div>
+        <form class="modal-footer" method="dialog">
+            <button class="btn ghost" id="btnCancelCasioFlash">Cancel</button>
+            <button class="btn primary" id="btnChooseCasioFlash" type="button" autofocus>Choose drive…</button>
+        </form>
+    </dialog>
 
     <div class="modal hidden" id="connectionHelpModal" aria-hidden="true">
         <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="connectionHelpTitle">
