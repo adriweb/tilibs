@@ -5478,6 +5478,7 @@ function applyActiveFamilyUiState(options = {}) {
     els.btnSharpRecoverOs?.classList.toggle('hidden', state.activeFamily !== DEVICE_FAMILY_SHARP);
     document.getElementById('screenshotPanel')?.classList.toggle('hidden', Boolean(state.casioFlashDrive));
     if (!options.tiCapabilitiesKnown) {
+        els.btnSyncClock?.classList.add('hidden');
         els.varsPanel?.classList.remove('hidden');
         els.btnBackupDirlist?.classList.add('hidden');
         els.backupDirlistNote?.classList.add('hidden');
@@ -6598,15 +6599,10 @@ async function updateCapabilities() {
         els.btnNewFolder.title = '';
     }
 
-    if (!hasClock) {
-        els.btnSyncClock.classList.add('disabled');
-        els.btnSyncClock.disabled = true;
-        els.btnSyncClock.title = 'Clock sync not supported by this calculator';
-    } else {
-        els.btnSyncClock.classList.remove('disabled');
-        els.btnSyncClock.disabled = false;
-        els.btnSyncClock.title = '';
-    }
+    els.btnSyncClock.classList.toggle('hidden', !hasClock);
+    els.btnSyncClock.classList.toggle('disabled', !hasClock);
+    els.btnSyncClock.disabled = !hasClock || els.btnSyncClock.classList.contains('loading');
+    els.btnSyncClock.title = '';
 
     if (isNspire) {
         els.btnDumpRom.classList.add('hidden'); // for now
