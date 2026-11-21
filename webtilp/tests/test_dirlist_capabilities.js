@@ -116,6 +116,7 @@ async function main() {
         state.backupDirlistLoaded = false;
         await context.updateCapabilities();
         assert.equal(els.varsPanel.classList.contains('hidden'), !supported, model);
+        assert.equal(els.btnSyncClock.classList.contains('hidden'), true, `${model} has no clock sync`);
         assert.equal(els.deviceInfoNote.classList.contains('hidden'), false, `${model} has no VER`);
         assert.equal(els.btnGetInfo.disabled, true);
         await context.getDeviceInfo();
@@ -196,7 +197,20 @@ async function main() {
         assert.equal(els.deviceInfoNote.classList.contains('hidden'), true, 'unknown capabilities clear the message');
         assert.equal(els.btnGetInfo.disabled, false, 'a new connection can request info');
     }
+    features = context.flags.OPS_VERSION | context.flags.OPS_CLOCK;
+    await context.updateCapabilities();
+    assert.equal(els.btnSyncClock.classList.contains('hidden'), false, 'clock support reveals the button');
+    assert.equal(els.btnSyncClock.disabled, false);
+    context.applyActiveFamilyUiState({ tiCapabilitiesKnown: true });
+    assert.equal(els.btnSyncClock.classList.contains('hidden'), false, 'translation preserves clock visibility');
+    context.applyActiveFamilyUiState();
+    assert.equal(els.btnSyncClock.classList.contains('hidden'), true, 'a new connection starts with clock sync hidden');
+    await context.updateCapabilities();
+    assert.equal(els.btnSyncClock.classList.contains('hidden'), false, 'capability discovery restores clock sync');
     features = context.flags.OPS_VERSION;
+    await context.updateCapabilities();
+    assert.equal(els.btnSyncClock.classList.contains('hidden'), true, 'losing clock support hides the button again');
+    assert.equal(els.btnSyncClock.disabled, true);
     state.module._consume_cable_reopen_flag = () => 0;
     await context.getDeviceInfo();
     assert.equal(infoRequests, 1, 'supported TI models still request info');
