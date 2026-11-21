@@ -2,6 +2,7 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
+const zeroApi = require('../zero_backend.js');
 const source = fs.readFileSync(require.resolve('../app.js'), 'utf8');
 
 function extract(name) {
@@ -129,6 +130,76 @@ async function main() {
     assert.equal(await context.authorizeHPPrimeDevice(), hp, 'multiple HP Primes use the chooser');
     state.authorizedDevice = null;
     assert.equal(await context.authorizeNumWorksDevice(), nw, 'multiple NumWorks devices use the chooser');
+    const zero = { ...zeroApi.USB_FILTER, serialNumber: 'ZGC4' };
+    const zeroPort = { getInfo: () => zeroApi.SERIAL_FILTER };
+    const anotherZero = { ...zero, serialNumber: 'ZGC4-b' };
+    let serialPorts = [];
+    let serialResponses = [];
+    context.WebTILPZero = zeroApi;
+    context.DEVICE_FAMILY_ZERO = 'zero';
+    context.DEVICE_FAMILY_TI = 'ti';
+    context.SHARP_VENDOR_ID = 0x04fc;
+    context.SHARP_PRODUCT_ID = 0x0201;
+    context.TI_VENDOR_ID = 0x0451;
+    context.TI_USB_DEVICES = [];
+    context.TI_USB_PRODUCT_IDS = new Set([ce.productId]);
+    context.HP_VENDOR_ID = 0x03f0;
+    context.HP_PRIME_PRODUCT_IDS = new Set();
+    context.NUMWORKS_VENDOR_ID = 0x0483;
+    context.NUMWORKS_PRODUCT_ID = 0xa291;
+    context.SERIAL_KIND_ZERO = 5;
+    context.SERIAL_KIND_EVO = 1;
+    context.PID_TI84_EVO_SERIAL = 0xe018;
+    context.zeroSerialPortsByUsb = new WeakMap();
+    context.hasEvoWebSerialTransport = () => true;
+    context.navigator.serial = {
+        async getPorts() { return serialPorts; },
+        async requestPort({ filters }) {
+            assert.equal(filters[0], zeroApi.SERIAL_FILTER);
+            assert.ok(serialResponses.length, 'unexpected serial chooser');
+            const response = serialResponses.shift();
+            if (response instanceof DOMException) throw response;
+            return response;
+        }
+    };
+    for (const name of ['getWebUsbDeviceFamily', 'getSupportedWebUsbFilters', 'serialPortToDevice',
+        'zeroSerialDevice', 'getAuthorizedZeroDevice', 'requestZeroSerialDevice', 'requestZeroForUsbDevice']) {
+        vm.runInContext(extract(name), context);
+    }
+    assert.equal(context.getWebUsbDeviceFamily(zero), 'zero');
+    assert.ok(context.getSupportedWebUsbFilters().includes(zeroApi.USB_FILTER));
+    devices = [zero];
+
+    const noSelection = new DOMException('No port selected', 'NotFoundError');
+    const needsGesture = new DOMException('User activation required', 'SecurityError');
+    for (const responses of [[zeroPort], [noSelection, zeroPort]]) {
+        serialResponses = responses;
+        const device = await context.requestZeroForUsbDevice(zero);
+        assert.equal(device.serialPort, zeroPort, 'serial permission completes on the original Connect click');
+        assert.equal(device.usbDevice, zero);
+        assert.equal(serialResponses.length, 0);
+    }
+    serialPorts = [zeroPort];
+    assert.equal((await context.requestZeroForUsbDevice(zero)).serialPort, zeroPort,
+        'existing serial permission skips the chooser');
+    serialPorts = [];
+
+    for (const responses of [[needsGesture], [noSelection, needsGesture], [noSelection, noSelection]]) {
+        serialResponses = responses;
+        assert.equal(await context.requestZeroForUsbDevice(zero), null);
+        assert.equal(serialResponses.length, 0);
+        assert.equal(state.pendingZeroUsbDevice, zero, 'WebUSB discovery survives the fresh-click requirement');
+        assert.equal(calls.pop(), 'status_zero_serial_authorization_required');
+    }
+    serialResponses = [zeroPort];
+    const serialDevice = await context.requestZeroSerialDevice(zero);
+    assert.equal(serialDevice.serialPort, zeroPort);
+    assert.equal(serialDevice.usbDevice, zero);
+    devices = [zero, anotherZero];
+    serialPorts = [zeroPort];
+    assert.equal(await context.getAuthorizedZeroDevice(anotherZero), null, 'ambiguous USB devices require a chooser');
+    assert.equal((await context.getAuthorizedZeroDevice(zero)).serialPort, zeroPort, 'explicit association survives ambiguity');
+
     console.log('USB device selection: exact binding, ambiguity, disconnects, switching and session retention passed.');
 }
 main().catch(error => { console.error(error); process.exitCode = 1; });

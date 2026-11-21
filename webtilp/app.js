@@ -5,6 +5,8 @@ const PID_TI84_EVO_SERIAL = 0xE018;
 const SERIAL_KIND_EVO = 1;
 const SERIAL_KIND_GRAYLINK = 2;
 const SERIAL_KIND_SHARP = 4;
+const SERIAL_KIND_ZERO = 5;
+const DEVICE_FAMILY_ZERO = 'zero';
 const DEVICE_FAMILY_SHARP = 'sharp';
 const SHARP_VENDOR_ID = 0x04FC;
 const SHARP_PRODUCT_ID = 0x0201;
@@ -50,6 +52,7 @@ const TI_USB_PRODUCT_IDS = new Set(TI_USB_DEVICES.map(device => device.productId
 // opens PORT_1, regardless of the device chosen in the browser's picker.
 const webUsbSelections = new WeakMap();
 const evoSerialPortsByUsb = new WeakMap();
+const zeroSerialPortsByUsb = new WeakMap();
 async function getAuthorizedWebUsbDevices() {
     const usb = navigator.usb;
     if (!usb) return [];
@@ -77,6 +80,7 @@ function bindWebUsbDeviceSelection(device) {
 }
 
 function getWebUsbDeviceFamily(device) {
+    if (globalThis.WebTILPZero?.matchesUsbDevice?.(device)) return DEVICE_FAMILY_ZERO;
     if (device?.vendorId === SHARP_VENDOR_ID && device?.productId === SHARP_PRODUCT_ID) return DEVICE_FAMILY_SHARP;
     if (isHPPrimeDevice(device)) {
         return DEVICE_FAMILY_HP_PRIME;
@@ -91,6 +95,7 @@ function getWebUsbDeviceFamily(device) {
 }
 
 function getSupportedWebUsbFilters() {
+    const zeroFilter = globalThis.WebTILPZero?.USB_FILTER;
     return [
         ...TI_USB_DEVICES.map(device => ({
             vendorId: TI_VENDOR_ID,
@@ -101,7 +106,8 @@ function getSupportedWebUsbFilters() {
             productId
         })),
         { vendorId: NUMWORKS_VENDOR_ID, productId: NUMWORKS_PRODUCT_ID },
-        { vendorId: SHARP_VENDOR_ID, productId: SHARP_PRODUCT_ID }
+        { vendorId: SHARP_VENDOR_ID, productId: SHARP_PRODUCT_ID },
+        ...(zeroFilter ? [zeroFilter] : [])
     ];
 }
 
@@ -524,6 +530,7 @@ const state = {
     cableOpen: false,
     authorizedDevice: null,
     pendingEvoUsbDevice: null,
+    pendingZeroUsbDevice: null,
     deviceModelName: '',
     deviceInfoProductName: '',
     deviceInfoEntries: [],
@@ -538,6 +545,9 @@ const state = {
     hpFileRenderGeneration: 0,
     hpPrimeProtocolVersion: null,
     sharpBackend: null,
+    zeroBackend: null,
+    zeroProgress: null,
+    zeroVariableSnapshot: null,
     sharpConnectionGeneration: 0,
     pendingSharpUsbDevice: null,
     sharpProgress: null,
@@ -632,6 +642,30 @@ const LANGUAGE_OPTIONS = [
 ];
 
 const I18N_EN = {
+    "status_zero_serial_authorization_required": "Click Connect Calculator again to authorize the Zero ZGC4 serial port.",
+    "zero_connect_hint": "Connect the Zero ZGC4 over USB with Zero Connect closed, then select its serial port in the browser.",
+    "zero_webserial_required": "Zero ZGC4 linking requires WebSerial on HTTPS or localhost.",
+    "zero_port_mismatch": "The selected serial port does not match the Zero ZGC4.",
+    "zero_backend_unavailable": "The Zero link backend failed to load.",
+    "zero_drop_hint": "Use an ASCII filename with up to 14 characters before the extension and up to three after it.",
+    "zero_files": "Zero files and variables",
+    "zero_variable_snapshot": "Refresh List reads the latest calculator variables for these read-only previews.",
+    "zero_type_number": "Number",
+    "zero_type_string": "String",
+    "zero_type_list": "List",
+    "zero_type_matrix": "Matrix",
+    "zero_type_function": "Function",
+    "zero_type_zerobasic": "ZeroBasic program",
+    "zero_device_name": "Device name",
+    "zero_hardware_version": "Hardware version",
+    "zero_firmware_version": "Firmware version",
+    "zero_protocol_version": "Protocol version",
+    "zero_busy": "Wait for the current Zero operation to finish.",
+    "zero_failed": "Zero operation failed",
+    "zero_empty_file": "Zero Connect requires non-empty upload files: {name}",
+    "zero_overwrite": "Replace {name} on the calculator?",
+    "zero_firmware_updater": "Official Zero firmware updater",
+    "zero_firmware_use_updater": "Use the official Zero updater for firmware .bin files.",
     "sharp_backend_unavailable": "The Sharp link backend failed to load.",
     "sharp_serial_required": "Sharp PC-Link requires WebSerial and the Sunplus serial driver. Use a Chromium browser on HTTPS or localhost.",
     "status_sharp_serial_authorization_required": "Click Connect Calculator again to authorize the Sharp serial port.",
@@ -1100,6 +1134,7 @@ const STATUS_I18N_KEYS = new Set([
     'status_connection_failed',
     'status_sharp_serial_authorization_required',
     'status_evo_serial_authorization_required',
+    'status_zero_serial_authorization_required',
     'status_disconnected',
     'status_device_connected',
     'status_webusb_unsupported',
@@ -2054,13 +2089,15 @@ const CALC_MODEL_GROUPS = [
     { id: 'evo', label: 'Evo' },
     { id: 'accessories', label: 'Accessories', labelKey: 'calc_group_accessories' },
     { id: 'casio', label: 'Casio' },
-    { id: 'sharp', label: 'Sharp' }
+    { id: 'sharp', label: 'Sharp' },
+    { id: 'zero', label: 'Zero' }
 ];
 
 const CALC_MODEL_OPTIONS = [
     { value: 'auto', label: 'Auto' },
     { value: 'casio-rm7000', label: 'Casio RM-7000 (native OS loader)', group: 'casio' },
     { value: 'casio-rm9000', label: 'Casio RM-9000 (native OS loader)', group: 'casio' },
+    { value: 'zero-zgc4', label: 'Zero ZGC4', group: 'zero' },
     { value: 'sharp-auto', label: 'Sharp EL-99xx (auto)', group: 'sharp' },
     { value: 'sharp-el9900', label: 'Sharp EL-9900', group: 'sharp' },
     { value: 'sharp-el9900g', label: 'Sharp EL-9900G', group: 'sharp' },
@@ -4167,7 +4204,8 @@ function applySettingsToModule() {
     }
 
 
-    if (settings.calcModel === 'auto' || String(settings.calcModel).startsWith('sharp-')) {
+    if (settings.calcModel === 'auto' || settings.calcModel === 'zero-zgc4'
+        || String(settings.calcModel).startsWith('sharp-')) {
         module._set_calc_model(0);
         module._set_force_calc(0);
     } else {
@@ -4251,7 +4289,7 @@ function getActiveCalcModelString() {
 }
 
 function getActiveCalcModelId() {
-    if (state?.activeFamily === 'sharp') return 0;
+    if (state?.activeFamily === 'sharp' || state.zeroBackend) return 0;
 
     if (!state.module) {
         return 0;
@@ -4297,7 +4335,7 @@ function updateSourceConversionSettingAvailability() {
 }
 
 function resolveDeviceModelName(infoProductName) {
-    if (state.casioFlashDrive) {
+    if (state.casioFlashDrive || state.zeroBackend) {
         return { primary: state.deviceModelName, secondary: '' };
     }
     if (state.activeFamily === DEVICE_FAMILY_SHARP) {
@@ -4467,16 +4505,20 @@ function sortCalcOptions(options) {
 
 function getCalcOptionsForCable(cableModel) {
     if (String(cableModel) === CABLE_SILVERLINK || String(cableModel) === CABLE_GRAYLINK) {
-        return sortCalcOptions(CALC_MODEL_OPTIONS.filter(option => option.value === 'auto' || ['casio-rm7000', 'casio-rm9000'].includes(option.value) || String(option.value).startsWith('sharp-') || SILVERLINK_CALC_VALUES.has(Number(option.value))));
+        return sortCalcOptions(CALC_MODEL_OPTIONS.filter(option => option.value === 'auto' || option.value === 'zero-zgc4' || ['casio-rm7000', 'casio-rm9000'].includes(option.value) || String(option.value).startsWith('sharp-') || SILVERLINK_CALC_VALUES.has(Number(option.value))));
     }
     if (String(cableModel) === CABLE_DIRECTLINK) {
-        return sortCalcOptions(CALC_MODEL_OPTIONS.filter(option => option.value === 'auto' || ['casio-rm7000', 'casio-rm9000'].includes(option.value) || String(option.value).startsWith('sharp-') || DIRECTLINK_CALC_VALUES.has(Number(option.value))));
+        return sortCalcOptions(CALC_MODEL_OPTIONS.filter(option => option.value === 'auto' || option.value === 'zero-zgc4' || ['casio-rm7000', 'casio-rm9000'].includes(option.value) || String(option.value).startsWith('sharp-') || DIRECTLINK_CALC_VALUES.has(Number(option.value))));
     }
     return sortCalcOptions(CALC_MODEL_OPTIONS);
 }
 
 function updateCalcHint(cableModel) {
     if (!els.settingCalcHint) {
+        return;
+    }
+    if (els.settingCalcModel?.value === 'zero-zgc4') {
+        els.settingCalcHint.textContent = t('zero_connect_hint');
         return;
     }
     if (['casio-rm7000', 'casio-rm9000'].includes(els.settingCalcModel?.value)) {
@@ -4509,6 +4551,7 @@ async function applyTranslations() {
     setTextContent(document.getElementById('splashWebUsbWarningText'), t('webusb_unavailable_text'));
     setIconLabel(els.btnSplashConnect, 'zap', t('connect_calculator'), '🔌');
     setTextContent(els.btnCasioFlash, t('casio_flash_open'));
+    setTextContent(document.getElementById('zeroFirmwareUpdater'), t('zero_firmware_updater'));
     setTextContent(document.getElementById('casioFlashTitle'), t('casio_flash_open'));
     setTextContent(document.getElementById('casioFlashInstructions'), t('casio_flash_open_instructions'));
     setTextContent(els.btnCancelCasioFlash, t('cancel'));
@@ -4944,8 +4987,8 @@ function formatRate(bytesPerMs) {
 }
 
 function refreshProgressDetails() {
-    if (state?.activeFamily === 'sharp') {
-        const progress = state.sharpProgress;
+    if (state?.activeFamily === 'sharp' || state.zeroBackend) {
+        const progress = state.zeroBackend ? state.zeroProgress : state.sharpProgress;
         if (!els.progressBarFill) return;
         const percent = Number.isFinite(progress?.total) && progress.total > 0 && Number.isFinite(progress.completed)
             ? Math.max(0, Math.min(100, Math.floor(progress.completed / progress.total * 100))) : null;
@@ -5123,6 +5166,7 @@ function resetToSplashState() {
     state.cableOpen = false;
     state.authorizedDevice = null;
     state.pendingEvoUsbDevice = null;
+    state.pendingZeroUsbDevice = null;
     state.connectInProgress = false;
     state.handlePromise = null;
     state.needsReauthorize = false;
@@ -5281,7 +5325,7 @@ function updateFileInputAccept() {
         extensions = Array.from(HP_PRIME_UPLOAD_EXTENSIONS);
     } else if (isNumWorksActive()) {
         extensions = ['py'];
-    } else {
+    } else if (!state.zeroBackend) {
         const modelId = getActiveCalcModelId() || Number(state.settings?.calcModel) || 0;
         try {
             const getExtensions = model => (state.module?.ccall(
@@ -5451,6 +5495,22 @@ function setNumWorksUiState() {
     updateSelectionActionButtons();
 }
 
+function setZeroUiState() {
+    setTiUiState();
+    if (els.btnRefreshDirlist) {
+        els.btnRefreshDirlist.disabled = false;
+        els.btnRefreshDirlist.classList.remove('disabled');
+    }
+    // setTiUiState disables deletion while initializing a TI session.
+    updateSelectionActionButtons();
+    setTextContent(document.getElementById('dropzoneTitle'), t('dropzone_title'));
+    setTextContent(document.getElementById('dropzoneSubtitle'), t('zero_drop_hint'));
+    setTextContent(document.getElementById('panelVarsTitle'), t('zero_files'));
+    els.btnBackupDirlist?.classList.toggle('hidden', Boolean(state.zeroVariableSnapshot));
+    setTextContent(els.backupDirlistNote, t('zero_variable_snapshot'));
+    els.backupDirlistNote?.classList.toggle('hidden', !state.zeroVariableSnapshot?.length);
+}
+
 function setCasioUiState() {
     updateKeyControlsState(false);
     if (els.keyCodeInput) {
@@ -5510,7 +5570,8 @@ function applyActiveFamilyUiState(options = {}) {
     updateDeviceInfoCapability(Boolean(options.tiCapabilitiesKnown));
     if (els.btnNspireLiveScreen) updateNspireLiveScreenControl();
     els.btnSharpRecoverOs?.classList.toggle('hidden', state.activeFamily !== DEVICE_FAMILY_SHARP);
-    document.getElementById('screenshotPanel')?.classList.toggle('hidden', Boolean(state.casioFlashDrive));
+    document.getElementById('screenshotPanel')?.classList.toggle('hidden', Boolean(state.casioFlashDrive) || state.zeroBackend);
+    document.getElementById('zeroFirmwareUpdater')?.classList.toggle('hidden', !state.zeroBackend);
     if (!options.tiCapabilitiesKnown) {
         els.btnSyncClock?.classList.add('hidden');
         els.varsPanel?.classList.remove('hidden');
@@ -5528,6 +5589,8 @@ function applyActiveFamilyUiState(options = {}) {
         setHPPrimeUiState();
     } else if (isNumWorksActive()) {
         setNumWorksUiState();
+    } else if (state.zeroBackend) {
+        setZeroUiState();
     } else if (isCasioActive()) {
         setCasioUiState();
     } else {
@@ -5544,7 +5607,7 @@ function getActiveKeyMapConfig() {
     if (isHPPrimeActive()) {
         return KEYMAP_CONFIG_HP_PRIME;
     }
-    if (isNumWorksActive() || isCasioActive()) {
+    if (isNumWorksActive() || isCasioActive() || state.zeroBackend) {
         return null;
     }
     if (isNspireActive()) {
@@ -6259,6 +6322,188 @@ function readNumWorksInfo() {
     return info;
 }
 
+function zeroSerialDevice(port, usbDevice = null) {
+    return serialPortToDevice(port, { usbDevice, serialKind: SERIAL_KIND_ZERO, productName: 'Zero ZGC4' });
+}
+
+async function getAuthorizedZeroDevice(usbDevice = null) {
+    const api = globalThis.WebTILPZero;
+    if (!api || !hasEvoWebSerialTransport()) return null;
+    const ports = (await navigator.serial.getPorts()).filter(port => api.matchesSerialPort(port.getInfo()));
+    const mapped = usbDevice && zeroSerialPortsByUsb.get(usbDevice);
+    if (ports.includes(mapped)) return zeroSerialDevice(mapped, usbDevice);
+    if (ports.length !== 1) return null;
+    if (usbDevice && (await getAuthorizedWebUsbDevices()).filter(api.matchesUsbDevice).length > 1) return null;
+    return zeroSerialDevice(ports[0], usbDevice);
+}
+
+async function requestZeroSerialDevice(usbDevice = null) {
+    const api = globalThis.WebTILPZero;
+    if (!api) throw new Error(t('zero_backend_unavailable'));
+    if (!hasEvoWebSerialTransport()) throw new Error(t('zero_webserial_required'));
+    let port;
+    try {
+        port = await navigator.serial.requestPort({ filters: [api.SERIAL_FILTER] });
+    } catch (error) {
+        if (error.name === 'NotFoundError') return null;
+        throw error;
+    }
+    if (!api.matchesSerialPort(port.getInfo())) throw new Error(t('zero_port_mismatch'));
+    if (usbDevice) zeroSerialPortsByUsb.set(usbDevice, port);
+    return zeroSerialDevice(port, usbDevice);
+}
+
+async function requestZeroForUsbDevice(usbDevice) {
+    const authorized = await getAuthorizedZeroDevice(usbDevice);
+    if (authorized) return authorized;
+    try {
+        let device = await requestZeroSerialDevice(usbDevice);
+        if (!device) {
+            // As with Evo, the chained chooser can return no selection without appearing.
+            device = await requestZeroSerialDevice(usbDevice);
+        }
+        if (device) return device;
+    } catch (error) {
+        if (error.name !== 'SecurityError' || !/user gesture|user activation/i.test(error.message)) throw error;
+    }
+    // A fresh click opens the serial chooser without repeating USB discovery.
+    state.pendingZeroUsbDevice = usbDevice;
+    setStatus('status_zero_serial_authorization_required', false);
+    log(t('status_zero_serial_authorization_required'));
+    return null;
+}
+
+async function connectZero(device) {
+    const backend = new globalThis.WebTILPZero.ZeroBackend(device.serialPort);
+    const info = await backend.connect();
+    const files = await backend.listFiles();
+    state.zeroBackend = backend;
+    state.activeFamily = DEVICE_FAMILY_ZERO;
+    state.authorizedDevice = device;
+    state.cableOpen = true;
+    renderZeroInfo(info);
+    renderZeroFiles(files);
+    setConnected(true);
+    setStatus('status_connected', true);
+}
+
+function renderZeroInfo(info) {
+    const labels = {
+        name: 'zero_device_name', hardwareVersion: 'zero_hardware_version',
+        firmwareVersion: 'zero_firmware_version', protocolVersion: 'zero_protocol_version'
+    };
+    state.deviceInfoEntries = Object.entries(labels).map(([field, label]) => ({
+        key: t(label), value: info[field] || t('unknown')
+    }));
+    state.deviceModelName = 'Zero ZGC4';
+    state.features = FEATURE_FLAGS.OPS_DELVAR;
+    renderDeviceInfo(state.deviceInfoEntries);
+    updateDeviceModelDisplay();
+    applyActiveFamilyUiState();
+}
+
+function renderZeroFiles(files) {
+    const fileEntries = files.map(file => {
+        const previewKind = globalThis.WebTILPZeroPreview?.exchangePreviewKind(file);
+        const typeName = previewKind === 'zerobasic' ? t('zero_type_zerobasic')
+            : (getEntryExtension(file).toUpperCase() || t('file'));
+        return { ...file, folder: '', kind: 'zero', type: 0, type_name: typeName, is_folder: 0, attr: 0 };
+    });
+    const variableEntries = (state.zeroVariableSnapshot || []).map(entry => ({
+        ...entry, folder: '', kind: 'zero-var', type_name: t(`zero_type_${entry.type}`), is_folder: 0, attr: 0
+    }));
+    state.dirlist = [...fileEntries, ...variableEntries];
+    renderDirlist(state.dirlist);
+}
+
+async function refreshZeroFiles(backend, includeVariables = false) {
+    const files = await backend.listFiles();
+    const codec = globalThis.WebTILPZeroPreview;
+    if (includeVariables && codec) {
+        const stateFiles = await backend.readVariableState();
+        if (state.zeroBackend !== backend) return;
+        const variables = [];
+        for (const [path, bytes] of stateFiles) {
+            try {
+                variables.push(...codec.decodeState(path, bytes));
+            } catch (error) {
+                logError(new Error(`${path}: ${error.message}`), t('zero_failed'));
+            }
+        }
+        state.zeroVariableSnapshot = variables;
+        els.btnBackupDirlist?.classList.add('hidden');
+        els.backupDirlistNote?.classList.toggle('hidden', !variables.length);
+    }
+    if (state.zeroBackend === backend) renderZeroFiles(files);
+}
+
+async function runZeroOperation(label, action) {
+    const backend = state.zeroBackend;
+    if (!backend || backend.busy || state.progressOps.size) {
+        log(t('zero_busy'));
+        return;
+    }
+    state.zeroProgress = null;
+    startProgress(label);
+    const onProgress = (completed, total) => {
+        if (state.zeroBackend !== backend) return;
+        state.zeroProgress = { completed, total };
+        refreshProgressDetails();
+    };
+    try {
+        await action(backend, onProgress);
+    } catch (error) {
+        if (state.zeroBackend === backend) {
+            logError(error, t('zero_failed'));
+            if (!backend.opened) handleTransportDisconnect({ port: backend.port });
+        }
+    } finally {
+        if (state.zeroBackend === backend) state.zeroProgress = null;
+        stopProgress(label);
+    }
+}
+
+async function sendZeroFiles(files) {
+    if (!files.length) return;
+    await runZeroOperation(t('send_selected_files'), async (backend, onProgress) => {
+        const { uploadName, MAX_FILE_SIZE } = globalThis.WebTILPZero;
+        const pending = new Map();
+        for (const file of files) {
+            if (/\.bin$/i.test(file.name)) throw new Error(t('zero_firmware_use_updater'));
+            const name = uploadName(file.name);
+            if (!file.size) throw new Error(tFormat('zero_empty_file', { name: file.name }));
+            if (file.size > MAX_FILE_SIZE) throw new Error(`${file.name} exceeds ${formatBytes(MAX_FILE_SIZE)}.`);
+            if (pending.has(name)) throw new Error(tFormat('source_conversion_name_conflict', { name }));
+            pending.set(name, file);
+        }
+        const existing = new Set((await backend.listFiles()).map(file => file.name.toUpperCase()));
+        for (const [name, file] of pending) {
+            if (existing.has(name) && !confirm(tFormat('zero_overwrite', { name }))) continue;
+            const data = new Uint8Array(await file.arrayBuffer());
+            await backend.upload(name, data, onProgress);
+        }
+        if (state.zeroBackend === backend) setSelectedFiles([]);
+        await refreshZeroFiles(backend);
+    });
+}
+
+async function downloadZeroFiles(files) {
+    await runZeroOperation(t('receive_selected'), async (backend, onProgress) => {
+        for (const file of files) {
+            const data = await backend.download(file, onProgress);
+            if (state.zeroBackend !== backend) return;
+            triggerDownload(file.name, data);
+        }
+    });
+}
+
+async function deleteZeroFiles(files) {
+    await runZeroOperation(t('delete_selected'), async backend => {
+        for (const file of files) await backend.delete(file);
+        await refreshZeroFiles(backend);
+    });
+}
+
 async function connectNumWorks(forcePrompt = true) {
     const device = await authorizeNumWorksDevice(forcePrompt);
     await state.numWorksBackend?.close().catch(error => {
@@ -6313,6 +6558,15 @@ async function connectHPPrime(forcePrompt = true, discoveryUsbDevice = null) {
 }
 
 async function autoConnectIfAuthorized() {
+    if (state.settings?.calcModel === 'zero-zgc4') {
+        try {
+            const zero = await getAuthorizedZeroDevice();
+            if (zero && !state.connectInProgress && !state.connected) await connect({ zeroDevice: zero });
+        } catch (error) {
+            logError(error, t('zero_failed'));
+        }
+        return;
+    }
     // Native RM bootloaders are explicit WebSerial sessions, never auto-probed.
     if (['casio-rm7000', 'casio-rm9000'].includes(state.settings?.calcModel)) return;
     if (!hasAnySupportedTransport()) {
@@ -6348,6 +6602,15 @@ async function autoConnectIfAuthorized() {
                 try { await connectSharp(device, sharpPorts[0]); }
                 catch (error) { logError(error, t('sharp_operation_failed')); }
                 finally { state.connectInProgress = false; }
+            }
+            return;
+        }
+        if (detectedFamily === 'zero') {
+            try {
+                const zero = await getAuthorizedZeroDevice(device);
+                if (zero && !state.connectInProgress && !state.connected) await connect({ zeroDevice: zero });
+            } catch (error) {
+                logError(error, t('zero_failed'));
             }
             return;
         }
@@ -6733,6 +6996,7 @@ async function releaseDeviceForSwitch(device) {
         await state.sharpBackend?.close();
         state.sharpBackend = null;
         await state.numWorksBackend?.close();
+        await state.zeroBackend?.close();
         if (module) {
             await getModuleCallState(module).tail;
             if (isHPPrimeActive()) {
@@ -6748,6 +7012,7 @@ async function releaseDeviceForSwitch(device) {
         state.cableOpen = false;
         state.authorizedDevice = null;
         state.numWorksBackend = null;
+        state.zeroBackend = null;
         state.progressHooked = false;
         state.progressTickPtr = null;
         state.needsReauthorize = false;
@@ -6757,12 +7022,12 @@ async function releaseDeviceForSwitch(device) {
     }
 }
 
-async function connect() {
+async function connect({ zeroDevice = null } = {}) {
     if (state.casioFlashDrive) {
         if (!state.casioFlashWriting) resetToSplashState();
         return;
     }
-    if (['casio-rm7000', 'casio-rm9000'].includes(state.settings?.calcModel)) {
+    if (!zeroDevice && ['casio-rm7000', 'casio-rm9000'].includes(state.settings?.calcModel)) {
         window.location.href = 'rm-loader.html';
         return;
     }
@@ -6775,6 +7040,24 @@ async function connect() {
     let switchedDevice = false;
     try {
         state.connectInProgress = true;
+        if (zeroDevice || state.pendingZeroUsbDevice
+            || state.settings?.calcModel === 'zero-zgc4') {
+            const usbDevice = state.pendingZeroUsbDevice;
+            state.pendingZeroUsbDevice = null;
+            const device = zeroDevice || await requestZeroSerialDevice(usbDevice);
+            if (!device) {
+                setStatus(hadWorkingConnection ? 'status_connected' : 'status_select_device', hadWorkingConnection);
+                return;
+            }
+            if (deviceMatches(state.authorizedDevice, device) && state.zeroBackend?.opened) {
+                setStatus('status_connected', true);
+                return;
+            }
+            switchedDevice = Boolean(state.authorizedDevice);
+            await releaseDeviceForSwitch(device);
+            await connectZero(device);
+            return;
+        }
         const wantsSharp = String(state.settings?.calcModel).startsWith('sharp-');
         if (wantsSharp || state.pendingSharpUsbDevice) {
             const usbDevice = state.pendingSharpUsbDevice;
@@ -6813,10 +7096,19 @@ async function connect() {
             }
             state.pendingEvoUsbDevice = null;
             const detectedFamily = getWebUsbDeviceFamily(device);
-            const selectedDevice = detectedFamily === DEVICE_FAMILY_TI
-                ? await requestEvoSerialForUsbDevice(device) : device;
+            let selectedDevice = device;
+            if (detectedFamily === DEVICE_FAMILY_TI) selectedDevice = await requestEvoSerialForUsbDevice(device);
+            if (detectedFamily === 'zero') {
+                selectedDevice = await requestZeroForUsbDevice(device);
+                if (!selectedDevice || (deviceMatches(state.authorizedDevice, selectedDevice)
+                    && state.zeroBackend?.opened)) return;
+            }
             switchedDevice = Boolean(state.authorizedDevice && !deviceMatches(state.authorizedDevice, selectedDevice));
             await releaseDeviceForSwitch(selectedDevice);
+            if (detectedFamily === 'zero') {
+                await connectZero(selectedDevice);
+                return;
+            }
             state.authorizedDevice = selectedDevice;
             if (detectedFamily === DEVICE_FAMILY_SHARP) {
                 await connectSharp(device);
@@ -6904,6 +7196,13 @@ async function getDeviceInfo({ automatic = false } = {}) {
 
     setButtonLoading(els.btnGetInfo, true);
     try {
+        if (state.zeroBackend) {
+            await runZeroOperation(t('refresh_device_info'), async backend => {
+                const info = await backend.getInfo();
+                if (state.zeroBackend === backend) renderZeroInfo(info);
+            });
+            return;
+        }
         if (isHPPrimeActive()) {
             const module = await initModule();
             readHPPrimeInfo(module);
@@ -7282,6 +7581,8 @@ function clearDeviceData() {
     state.nspireLiveScreen = null;
     state.sharpConnectionGeneration = (state.sharpConnectionGeneration || 0) + 1;
     state.sharpProgress = null;
+    state.zeroProgress = null;
+    state.zeroVariableSnapshot = null;
     state.dirlist = [];
     state.backupDirlistLoaded = false;
     state.backupDirlistGeneration++;
@@ -7479,6 +7780,10 @@ async function refreshDirlist({ manual = false } = {}) {
     if (isNspireActive() && els.btnRefreshDirlist?.classList.contains('loading')) return;
     setButtonLoading(els.btnRefreshDirlist, true);
     try {
+        if (state.zeroBackend) {
+            await runZeroOperation(t('loading_dirlist'), backend => refreshZeroFiles(backend, manual));
+            return;
+        }
         if (isHPPrimeActive()) {
             const module = await initModule();
             const refresh = beginHPPrimeFileSnapshot(module);
@@ -7556,8 +7861,8 @@ async function refreshDirlist({ manual = false } = {}) {
 function renderDirlist(entries, selectionKeys) {
     const preview = state.nspireDirlistPreview;
     const filter = (els.filterInput.value || '').toLowerCase();
-    const showLocation = !isNspireActive() && !isHPPrimeActive() && !isNumWorksActive() && !isCasioActive();
-    const showKind = !isNspireActive() && !isHPPrimeActive() && !isNumWorksActive() && !isCasioActive();
+    const showLocation = !isNspireActive() && !isHPPrimeActive() && !isNumWorksActive() && !isCasioActive() && !state.zeroBackend;
+    const showKind = !isNspireActive() && !isHPPrimeActive() && !isNumWorksActive() && !isCasioActive() && !state.zeroBackend;
     const table = els.varTableBody.closest('table');
     if (table) {
         table.classList.toggle('hide-location', !showLocation);
@@ -7600,6 +7905,8 @@ function canPreviewVariable(entry, modelId = getActiveCalcModelId()) {
     if (entry.kind === 'sharp') {
         return Boolean(entry.category && entry.selector?.length === 11 && globalThis.WebTILPSharpFiles);
     }
+    if (entry.kind === 'zero-var') return typeof entry.text === 'string';
+    if (entry.kind === 'zero') return Boolean(globalThis.WebTILPZeroPreview?.exchangePreviewKind(entry));
     if (entry.kind === 'numworks') {
         return !entry.invalid;
     }
@@ -7639,7 +7946,7 @@ function getHPPrimePreviewKind(entry) {
 
 function formatVariableDisplayName(entry) {
     const name = entry.filename || entry.name || '';
-    if (entry.kind === 'sharp' || entry.kind === 'backup-var') {
+    if (entry.kind === 'sharp' || entry.kind === 'backup-var' || entry.kind === 'zero-var') {
         return name;
     }
     if (entry.kind === 'numworks') {
@@ -7751,8 +8058,9 @@ function renderTableView(entries, filter, selectionKeys = getSelectedVarKeys(), 
             row.title = t('hp_prime_app_folder_hint');
         }
         row.classList.toggle('integrity-invalid', Boolean(entry.invalid || appContainerInvalid));
+        const previewOnly = entry.kind === 'backup-var' || entry.kind === 'zero-var';
         const mutableStorageEntry = state?.activeFamily !== 'sharp'
-            && entry.kind !== 'backup-var'
+            && !previewOnly
             && !(isCasioActive() && isFolder);
         const canRename = mutableStorageEntry
             && ((entry.hpAppChildEditable && state.hpFileSnapshotLoaded)
@@ -7764,7 +8072,7 @@ function renderTableView(entries, filter, selectionKeys = getSelectedVarKeys(), 
         const rowActions = preview ? '' : `
             <div class="row-actions">
                 ${canPreview ? `<button class="btn ghost btn-inline action-preview" title="${escapeHtml(t('preview'))}" aria-label="${escapeHtml(t('preview'))}">${themeIconMarkup('eye', '👁️')}</button>` : ''}
-                ${entry.kind === 'backup-var' ? '' : `<button class="btn ghost btn-inline action-download" title="Download">${themeIconMarkup('download', '⬇️')}</button>`}
+                ${previewOnly ? '' : `<button class="btn ghost btn-inline action-download" title="Download">${themeIconMarkup('download', '⬇️')}</button>`}
                 ${canRename ? `<button class="btn ghost btn-inline action-rename" title="Rename">${themeIconMarkup('edit-2', '✏️')}</button>` : ''}
                 ${canDelete ? `<button class="btn ghost btn-inline action-delete" title="Delete">${themeIconMarkup('trash-2', '🗑️')}</button>` : ''}
             </div>`;
@@ -7776,7 +8084,7 @@ function renderTableView(entries, filter, selectionKeys = getSelectedVarKeys(), 
             : `${safeName}${integrityWarning}`;
         const summaryText = options.summary ? `<em class="folder-summary">(${options.summary})</em>` : '';
         row.innerHTML = `
-            <td><input type="checkbox" ${preview || entry.kind === 'backup-var' ? 'disabled' : ''} data-name="" data-folder="" data-folder-path="" data-is-folder="${isFolder ? '1' : '0'}" data-type="${entry.type}" data-kind=""></td>
+            <td><input type="checkbox" ${preview || previewOnly ? 'disabled' : ''} data-name="" data-folder="" data-folder-path="" data-is-folder="${isFolder ? '1' : '0'}" data-type="${entry.type}" data-kind=""></td>
             <td>
                 <div class="name-cell">
                     <div class="name-left">${indentBars}${toggleButton}<span class="name-label">${displayName}${summaryText}</span></div>
@@ -8442,8 +8750,8 @@ function applySelectionKeys(keys, container) {
 }
 
 function buildEntryFromCheckbox(checkbox) {
-    if (checkbox.dataset.kind === 'sharp') {
-        return state.dirlist.find(entry => entry.kind === 'sharp' && entry.name === checkbox.dataset.name
+    if (checkbox.dataset.kind === 'sharp' || checkbox.dataset.kind === 'zero-var') {
+        return state.dirlist.find(entry => entry.kind === checkbox.dataset.kind && entry.name === checkbox.dataset.name
             && String(entry.type) === checkbox.dataset.type);
     }
 
@@ -8792,6 +9100,7 @@ function chooseHPPrimeAppForFile(file) {
 
 async function sendDroppedFiles(files, dropFolder) {
     if (state?.activeFamily === 'sharp') { await sendSharpFiles(files); return; }
+    if (state.zeroBackend) { await sendZeroFiles(files); return; }
 
     if (!files.length) {
         return;
@@ -10410,6 +10719,7 @@ async function sendSelectedFiles() {
             return;
         }
         if (state?.activeFamily === 'sharp') { await sendSharpFiles(files); return; }
+        if (state.zeroBackend) { await sendZeroFiles(files); return; }
         if (isHPPrimeActive()) {
             const module = await initModule();
             let successCount = 0;
@@ -11028,6 +11338,10 @@ async function receiveSelected() {
         log('No variables selected.');
         return;
     }
+    if (state.zeroBackend) {
+        await downloadZeroFiles(selections);
+        return;
+    }
     if (isHPPrimeActive()) {
         setButtonLoading(els.btnRecvSelected, true);
         try {
@@ -11281,6 +11595,7 @@ async function deleteSelected() {
     }
     setButtonLoading(els.btnDeleteSelected, true);
     try {
+        if (state.zeroBackend) { await deleteZeroFiles(selections); return; }
         if (isNumWorksActive()) {
             await state.numWorksBackend.deleteScripts(selections.map(entry => entry.name));
             readNumWorksInfo();
@@ -11403,7 +11718,7 @@ async function renameEntry(entry) {
 }
 
 async function deleteEntry(entry) {
-    if (state?.activeFamily === 'sharp') return;
+    if (state?.activeFamily === 'sharp' || entry?.kind === 'zero-var') return;
     const flashDrive = state.casioFlashDrive;
     if (flashDrive && (state.casioFlashWriting || entry.isFolder || entry.is_folder === 1)) return;
     const message = tFormat(entry.isFolder ? 'confirm_delete_folder_contents' : 'confirm_delete_entry', {
@@ -11456,6 +11771,7 @@ async function deleteEntry(entry) {
             }));
             return;
         }
+        if (state.zeroBackend) { await deleteZeroFiles([entry]); return; }
         if (isNumWorksActive()) {
             await state.numWorksBackend.deleteScripts([entry.name]);
             readNumWorksInfo();
@@ -11475,6 +11791,8 @@ async function deleteEntry(entry) {
 }
 
 async function downloadEntry(entry) {
+    if (entry?.kind === 'zero-var') return;
+    if (state.zeroBackend) { await downloadZeroFiles([entry]); return; }
     if (state?.activeFamily === 'sharp') {
         await runSharpOperation(t('sharp_receive'), async backend => saveSharpDownload(await backend.receiveVariable(entry), backend));
         return;
@@ -11793,7 +12111,7 @@ function openPreviewModal(entry, readable) {
         els.previewBasicDownloads.classList.toggle('hidden', !showBasicDownloads);
     }
     if (els.btnDownloadPreview) {
-        els.btnDownloadPreview.classList.toggle('hidden', showBasicDownloads);
+        els.btnDownloadPreview.classList.toggle('hidden', showBasicDownloads || Boolean(previewSession?.previewOnly));
     }
     if (els.previewReindent) {
         els.previewReindent.checked = false;
@@ -11877,7 +12195,15 @@ function downloadTIBasicPreview(targetModel) {
     }
 }
 
+function openZeroPreview(entry, text, data, language = '') {
+    closePreviewModal();
+    const metadata = { ...entry, typeName: entry.typeName || entry.type_name };
+    previewSession = { entry: metadata, previewOnly: !data, data, downloadName: entry.name, language };
+    openPreviewModal(metadata, JSON.stringify({ code: text }));
+}
+
 async function previewEntry(entry, actionButton) {
+    if (!entry) return;
     if (!canPreviewVariable({
         ...entry,
         type_name: entry.typeName,
@@ -11898,6 +12224,22 @@ async function previewEntry(entry, actionButton) {
     try {
         if (entry.kind === 'sharp') {
             await previewSharpEntry(entry);
+            return;
+        }
+        if (entry.kind === 'zero-var') {
+            openZeroPreview(entry, entry.text);
+            return;
+        }
+        if (entry.kind === 'zero') {
+            const codec = globalThis.WebTILPZeroPreview;
+            const kind = codec.exchangePreviewKind(entry);
+            const renderId = previewRenderId;
+            await runZeroOperation(t('preview'), async (backend, onProgress) => {
+                const data = await backend.download(entry, onProgress);
+                if (state.zeroBackend !== backend || renderId !== previewRenderId) return;
+                const text = codec.decodeProgram(kind, data);
+                openZeroPreview(entry, text, data, kind === 'python' ? kind : '');
+            });
             return;
         }
         if (entry.kind === 'numworks') {
@@ -12776,6 +13118,8 @@ async function nukeConnection(tryReconnect = true) {
     const wasSharp = state.activeFamily === DEVICE_FAMILY_SHARP;
     const wasHPPrime = isHPPrimeActive();
     const wasNumWorks = isNumWorksActive();
+    const wasZero = Boolean(state.zeroBackend);
+    if (wasZero) await state.zeroBackend.close().catch(error => console.warn(error));
     if (wasHPPrime && state.module) {
         try {
             await ccallAsync(state.module, 'hp_prime_disconnect', 'number', [], [], { timeoutMs: 8000 });
@@ -12790,14 +13134,14 @@ async function nukeConnection(tryReconnect = true) {
             console.warn('[WebTILP] Failed to close the NumWorks WebUSB session cleanly', err);
         }
     }
-    if (!transport && !wasSharp && !wasHPPrime && !wasNumWorks) {
+    if (!transport && !wasSharp && !wasHPPrime && !wasNumWorks && !wasZero) {
         try { await state.authorizedDevice?.reset(); } catch (e) {}
     }
     if (isNspireActive()) {
         try { await state.authorizedDevice?.forget(); } catch (e) {}
     }
     try {
-        if (state.module && nativeIdle && !wasSharp && !wasHPPrime && !wasNumWorks) {
+        if (state.module && nativeIdle && !wasSharp && !wasHPPrime && !wasNumWorks && !wasZero) {
             try {
                 retireModule(state.module, 'emergency reset');
                 if (transport || grayLink) {
@@ -12814,12 +13158,14 @@ async function nukeConnection(tryReconnect = true) {
         state.handle = 0;
         state.activeFamily = DEVICE_FAMILY_TI;
         state.numWorksBackend = null;
+        state.zeroBackend = null;
         state.module = null;
         state.progressHooked = false;
         state.progressTickPtr = null;
         state.cableOpen = false;
         state.authorizedDevice = null;
         state.pendingEvoUsbDevice = null;
+        state.pendingZeroUsbDevice = null;
         state.connectInProgress = false;
         state.handlePromise = null;
         state.needsReauthorize = false;
@@ -12869,6 +13215,7 @@ async function silentReconnectAfterNspireTransfer() {
         state.cableOpen = false;
         state.authorizedDevice = null;
         state.pendingEvoUsbDevice = null;
+        state.pendingZeroUsbDevice = null;
         state.connectInProgress = false;
         state.handlePromise = null;
         state.needsReauthorize = true;
@@ -13400,6 +13747,9 @@ function isUnrelatedTransportEvent(event) {
 }
 
 function handleTransportDisconnect(event = null) {
+    if (event?.device && deviceMatches(state.pendingZeroUsbDevice, event.device)) {
+        state.pendingZeroUsbDevice = null;
+    }
     if (isUnrelatedTransportEvent(event)) return;
     const numWorksBackend = state.numWorksBackend;
     if (numWorksBackend && event?.device && event.device !== numWorksBackend.device) {
@@ -13410,12 +13760,16 @@ function handleTransportDisconnect(event = null) {
     state.pendingSharpUsbDevice = null;
     state.sharpConnectionGeneration = (state.sharpConnectionGeneration || 0) + 1;
     sharpBackend?.close().catch(error => console.warn(error));
+    const zeroBackend = state.zeroBackend;
+    state.zeroBackend = null;
+    zeroBackend?.close().catch(error => console.warn(error));
     const silent = state.silentReconnectInProgress;
     clearActiveOperations(silent || event?.operationCompleted ? undefined : 'Active operation cancelled due to disconnect.');
     state.handle = 0;
     state.cableOpen = false;
     state.authorizedDevice = null;
     state.pendingEvoUsbDevice = null;
+    state.pendingZeroUsbDevice = null;
     state.connectInProgress = false;
     state.handlePromise = null;
     state.numWorksBackend = null;
@@ -13436,7 +13790,7 @@ function handleTransportDisconnect(event = null) {
 }
 
 function handleTransportConnect(event = null) {
-    if (isUnrelatedTransportEvent(event)) return;
+    if (state.zeroBackend || isUnrelatedTransportEvent(event)) return;
     const numWorksBackend = state.numWorksBackend;
     if (numWorksBackend && event?.device
         && event.device !== numWorksBackend.device) {
@@ -13456,6 +13810,7 @@ function handleTransportConnect(event = null) {
     state.cableOpen = false;
     state.authorizedDevice = null;
     state.pendingEvoUsbDevice = null;
+    state.pendingZeroUsbDevice = null;
     state.connectInProgress = false;
     state.numWorksBackend = null;
     numWorksBackend?.close().catch(error => {

@@ -72,7 +72,7 @@ async function main() {
     }
     const accessories = ['CALC_TIPRESENTER', 'CALC_CBL', 'CALC_CBR', 'CALC_CBL2', 'CALC_CBR2', 'CALC_LABPRO'];
     const groupIds = Array.from(context.config.CALC_MODEL_GROUPS, group => group.id);
-    assert.deepEqual(groupIds, ['z80', 'ez80', '68k', 'nspire', 'evo', 'accessories', 'casio', 'sharp']);
+    assert.deepEqual(groupIds, ['z80', 'ez80', '68k', 'nspire', 'evo', 'accessories', 'casio', 'sharp', 'zero']);
     for (const option of context.config.CALC_MODEL_OPTIONS) {
         if (option.value !== 'auto') assert.ok(groupIds.includes(option.group), `${option.label} has a valid group`);
     }
@@ -83,7 +83,7 @@ async function main() {
         const options = context.getCalcOptionsForCable(cable);
         const values = new Set(options.map(option => option.value));
         const isDbus = cable === context.CABLE_SILVERLINK || cable === context.CABLE_GRAYLINK;
-        const expectedGroups = isDbus ? ['z80', '68k', 'accessories', 'casio', 'sharp'] : groupIds;
+        const expectedGroups = isDbus ? ['z80', '68k', 'accessories', 'casio', 'sharp', 'zero'] : groupIds;
         assert.deepEqual(Array.from(new Set(options.slice(1).map(option => option.group))), expectedGroups,
             'family order survives cable filtering');
         let previousGroup = -1;
@@ -97,6 +97,7 @@ async function main() {
                 `${accessory} visibility for cable ${cable}`);
         }
         assert.equal(options[0].value, 'auto', 'Auto remains the first option');
+        assert.ok(values.has('zero-zgc4'), 'Zero uses WebSerial independently of the TI cable setting');
         if (cable === context.CABLE_SILVERLINK || cable === context.CABLE_GRAYLINK) {
             assert.ok(values.has(models.CALC_TI83P), 'DBUS calculators remain available');
             assert.equal(values.has(models.CALC_TI84P_USB), false, 'USB calculators require DirectLink');
