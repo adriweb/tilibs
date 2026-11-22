@@ -30,11 +30,59 @@ async function wasmHarness(path, model, failReset, productId = 0xe001) {
     module._set_cable_model(productId === 0xe001 ? 4 : 5); module._set_force_cable(1);
     module._set_calc_model(model); module._set_force_calc(1);
     module.__tiUsbDevice = h.device;
-    h.transport.module = module;
+    if (h.transport) h.transport.module = module;
     h.state.handle = await module.ccall('create_handle', 'number', [], [], { async: true });
     assert.ok(h.state.handle);
     assert.equal(await module.ccall('open_cable', 'number', ['number'], [h.state.handle], { async: true }), 0);
     return { ...h, module, writes: h.device.writes };
+}
+
+async function testCxIIAlreadyAssociatedWasm(path) {
+    const h = await wasmHarness(path, 34, false, 0xe022);
+    h.module._set_cable_timeout(10);
+    const packet = (service, sequence, payload = []) => {
+        const bytes = Buffer.alloc(12 + payload.length);
+        bytes.set([0, service, 1, 0xfe]);
+        bytes.writeUInt16BE(bytes.length, 6);
+        bytes.writeUInt16BE(sequence, 8);
+        bytes.set(payload, 12);
+        let sum = 0;
+        for (let i = 0; i < bytes.length; i += 2) {
+            sum += (bytes[i] << 8) | (bytes[i + 1] || 0);
+        }
+        while (sum > 0xffff) sum = (sum & 0xffff) + (sum >> 16);
+        bytes.writeUInt16BE(sum ^ 0xffff, 10);
+        return [...bytes];
+    };
+    let assignments = 0;
+    const write = h.device.transferOut.bind(h.device);
+    h.device.transferOut = (endpoint, bytes) => {
+        const result = write(endpoint, bytes);
+        const message = Buffer.from(bytes);
+        // An already-associated calculator ignores the two address prompts.
+        if (message[1] !== 4) return result;
+        const seq = message.readUInt16BE(8);
+        const service = message.readUInt16BE(20);
+        if (service === 0x4003) {
+            assignments++;
+            // The ACK arrives on the read started during the silent 300 ms
+            // association probe, after the probe's deadline has elapsed.
+            setTimeout(() => h.device.feed(packet(0x84, seq)), 20);
+        } else if (service === 0x4002) {
+            const echo = Buffer.from(message.subarray(12));
+            message.copy(echo, 2, 18, 22);
+            message.copy(echo, 6, 14, 18);
+            echo[15] = echo.subarray(0, 15).reduce((sum, byte) => sum + byte, 0) & 255;
+            h.device.feed([...packet(0x84, seq), ...packet(4, 1, echo)]);
+        }
+        return result;
+    };
+
+    assert.equal(await h.module.ccall('is_ready', 'number', ['number'], [h.state.handle], {async: true}), 0);
+    assert.equal(assignments, 1, 'the first ACK survives the transition out of the association probe');
+    await h.device.close();
+    await h.module.ccall('close_cable', 'number', ['number'], [h.state.handle], {async: true});
+    console.log('Compiled WASM/libusb CX II accepts the first stream ACK after a silent association probe');
 }
 
 async function testDirectLinkWasm(path) {
@@ -423,6 +471,7 @@ async function testGrayLinkOverwrite(path) {
 (async () => {
     const wasmPath = process.argv[2];
     assert.ok(wasmPath, 'Pass the path to the compiled webtilp.js');
+    await testCxIIAlreadyAssociatedWasm(wasmPath);
     await test89ScreenshotWasm(wasmPath);
     await test89FlashWaitWasm(wasmPath);
     await testDirectLinkWasm(wasmPath);
