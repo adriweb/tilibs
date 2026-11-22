@@ -98,8 +98,62 @@ vm.runInContext(app.slice(app.indexOf('const FEATURE_FLAGS ='), app.indexOf('con
     + '\nglobalThis.flags = FEATURE_FLAGS;', context);
 for (const name of ['setButtonLoading', 'updateDeviceInfoCapability', 'applyActiveFamilyUiState', 'updateCapabilities',
     'getDeviceInfo', 'formatVariableDisplayName', 'setBackupDirlist', 'transferBackupWithDirlist',
-    'refreshBackupDirlist', 'refreshDirlist', 'ensureDirlistLoadedWithPrompt', 'processIncomingTransfers']) {
+    'refreshBackupDirlist', 'beginNspireDirlistPreview', 'refreshDirlist', 'ensureDirlistLoadedWithPrompt', 'processIncomingTransfers']) {
     vm.runInContext(extractFunction(name), context);
+}
+
+async function checkNspireProgress() {
+    const module = state.module;
+    const previous = [{name: 'previous.tns'}];
+    const finished = [{name: 'first.tns'}, {name: 'second.tns'}];
+    const selection = new Set(['previous']);
+    let renderPending;
+    let handleUpdate;
+    let completeListing;
+    let displayed, restoredSelection;
+    features = context.flags.OPS_DIRLIST;
+    context.isNspireActive = () => true;
+    context.getSelectedVarKeys = () => selection;
+    context.renderDirlist = (entries, keys) => {
+        displayed = state.nspireDirlistPreview?.entries.map(entry => entry.name) ?? entries.map(entry => entry.name);
+        restoredSelection = keys;
+    };
+    context.setTimeout = callback => { renderPending = callback; return 1; };
+    context.clearTimeout = () => { renderPending = null; };
+    context.ccallAsync = async (_module, name, _type, _types, args) => {
+        if (name === 'calc_features') return features;
+        assert.equal(name, 'calc_dirlist_json');
+        assert.equal(args[2], 1);
+        handleUpdate = module.__nspireDirlistUpdate;
+        return new Promise(resolve => { completeListing = resolve; });
+    };
+    module.FS.readFile = () => JSON.stringify({vars: finished, apps: []});
+
+    for (const result of [0, 42]) {
+        state.dirlist = previous;
+        const refresh = context.refreshDirlist({manual: true});
+        await new Promise(resolve => setImmediate(resolve));
+        handleUpdate(JSON.stringify({name: 'folder', folder: ''}), null);
+        handleUpdate(JSON.stringify({name: 'abandoned.tns', folder: 'folder'}), null);
+        renderPending();
+        assert.deepEqual(Array.from(displayed), ['folder', 'abandoned.tns']);
+        assert.equal(els.btnRefreshDirlist.disabled, true, 'refresh stays disabled while rows arrive');
+        assert.equal(state.dirlist, previous, 'partial rows cannot become the authoritative listing');
+        handleUpdate(null, 'folder');
+        handleUpdate(JSON.stringify({name: 'retried.tns', folder: 'folder'}), null);
+        renderPending();
+        assert.deepEqual(Array.from(displayed), ['folder', 'retried.tns']);
+        handleUpdate(JSON.stringify({name: 'queued.tns', folder: ''}), null);
+        completeListing(result);
+        await refresh;
+        assert.deepEqual(Array.from(displayed), (result === 0 ? finished : previous).map(entry => entry.name));
+        assert.equal(els.btnRefreshDirlist.disabled, false);
+        assert.equal(restoredSelection, selection);
+        assert.equal(renderPending, null);
+        assert.equal(module.__nspireDirlistUpdate, null);
+        handleUpdate(JSON.stringify({name: 'stale.tns', folder: ''}), null);
+        assert.equal(renderPending, null);
+    }
 }
 
 async function main() {
@@ -244,6 +298,7 @@ async function main() {
     finishParse(0);
     assert.equal(await olderTransfer, 0);
     assert.equal(state.backupDirlistLoaded, false, 'a delayed parse cannot republish a snapshot after a newer failure');
-    console.log('TI directory-list capability tests passed (TI-82/85 and TI-83/86 controls)');
+    await checkNspireProgress();
+    console.log('TI directory-list tests passed (TI-82/85, TI-83/86, and Nspire progress and fallback)');
 }
 main().catch(error => { console.error(error); process.exitCode = 1; });
