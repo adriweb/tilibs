@@ -671,6 +671,16 @@ int TICALL nsp_addr_request(CalcHandle *handle)
 		return nsp_nnse_ensure_ready(handle);
 	}
 
+#ifdef __EMSCRIPTEN__
+	// The CX accepts a host-initiated address assignment. WebUSB does not
+	// perform the bus reset that would otherwise prompt the CX to request one.
+	if (handle->model == CALC_NSPIRE_CX || handle->model == CALC_NSPIRE_CX_CAS)
+	{
+		handle->priv.nsp_seq_pc = 1;
+		return 0;
+	}
+#endif
+
 	// Reset connection so that device send an address request packet
 	int ret = handle->cable->cable->reset(handle->cable);
 	if (!ret)
