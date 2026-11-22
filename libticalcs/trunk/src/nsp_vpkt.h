@@ -84,6 +84,8 @@ TIEXPORT3 void TICALL nsp_vtl_pkt_free_data(CalcHandle * handle, void * data);
 
 TIEXPORT3 int TICALL nsp_session_open(CalcHandle *handle, uint16_t port);
 TIEXPORT3 int TICALL nsp_session_close(CalcHandle *handle);
+TIEXPORT3 int TICALL nsp_session_write(CalcHandle *handle, const uint8_t *data, uint32_t size);
+TIEXPORT3 int TICALL nsp_session_read(CalcHandle *handle, uint8_t *data, uint32_t capacity, uint32_t *size);
 
 TIEXPORT3 int TICALL nsp_addr_request(CalcHandle *handle);
 TIEXPORT3 int TICALL nsp_addr_assign(CalcHandle *handle, uint16_t dev_addr);

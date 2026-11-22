@@ -768,6 +768,95 @@ static int nsp_send_ack_for_raw(CalcHandle* handle, const NSPRawPacket* packet)
 }
 
 
+// Live Presenter uses NavNet payloads verbatim, including continuation packets.
+int TICALL nsp_session_write(CalcHandle *handle, const uint8_t *data, uint32_t size)
+{
+	VALIDATE_HANDLE(handle);
+	VALIDATE_NONNULL(data);
+	if (!size || size > NSP_DATA_SIZE)
+	{
+		return ERR_INVALID_PARAMETER;
+	}
+
+	NSPRawPacket packet;
+	memset(&packet, 0, sizeof(packet));
+	packet.src_addr = NSP_SRC_ADDR;
+	packet.src_port = handle->priv.nsp_src_port;
+	packet.dst_addr = NSP_DEV_ADDR;
+	packet.dst_port = handle->priv.nsp_dst_port;
+	packet.data_size = (uint8_t)size;
+	memcpy(packet.data, data, size);
+	const int ret = nsp_send(handle, &packet);
+	return ret ? ret : nsp_recv_ack(handle);
+}
+
+int TICALL nsp_session_read(CalcHandle *handle, uint8_t *data, uint32_t capacity, uint32_t *size)
+{
+	VALIDATE_HANDLE(handle);
+	VALIDATE_NONNULL(data);
+	VALIDATE_NONNULL(size);
+	*size = 0;
+
+	for (;;)
+	{
+		if (nsp_nnse_enabled(handle))
+		{
+			uint8_t msg[NSP_NNSE_MAX_PAYLOAD];
+			NSPParsedRawPacket packet;
+			memset(&packet, 0, sizeof(packet));
+			const int ret = nsp_nnse_recv_raw_packet(handle, &packet, msg, sizeof(msg));
+			if (ret)
+			{
+				return ret;
+			}
+			if (packet.ack || packet.src_port != handle->priv.nsp_dst_port
+			    || packet.dst_port != handle->priv.nsp_src_port)
+			{
+				continue;
+			}
+			if (packet.logical_data_size > capacity)
+			{
+				return ERR_INVALID_PACKET;
+			}
+			*size = packet.logical_data_size;
+			memcpy(data, packet.data, *size);
+			return 0;
+		}
+
+		NSPRawPacket packet;
+		memset(&packet, 0, sizeof(packet));
+		int ret = nsp_recv(handle, &packet);
+		if (ret)
+		{
+			return ret;
+		}
+		if (packet.ack || !packet.data_size)
+		{
+			continue;
+		}
+		if (packet.data_sum != nsp_compute_crc(packet.data, packet.data_size))
+		{
+			return ERR_CHECKSUM;
+		}
+		ret = nsp_send_ack_for_raw(handle, &packet);
+		if (ret)
+		{
+			return ret;
+		}
+		if (packet.src_port != handle->priv.nsp_dst_port || packet.dst_port != handle->priv.nsp_src_port)
+		{
+			continue;
+		}
+		if (packet.data_size > capacity)
+		{
+			return ERR_INVALID_PACKET;
+		}
+		*size = packet.data_size;
+		memcpy(data, packet.data, *size);
+		return 0;
+	}
+}
+
 int TICALL nsp_send_nack(CalcHandle* handle)
 {
 	VALIDATE_HANDLE(handle);
