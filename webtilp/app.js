@@ -558,6 +558,7 @@ const state = {
     needsReauthorize: false,
     partialOsPath: '',
     nspireOsReceiveStarted: false,
+    nspireLiveScreen: null,
     lastCcallTs: 0,
     handlePromise: null,
     expandedFolders: new Set(),
@@ -902,6 +903,9 @@ const I18N_EN = {
     "kind": "Kind",
     "screenshot": "Screenshot",
     "take_screenshot": "Take Screenshot",
+    "nspire_live_view_start": "Start Live View",
+    "nspire_live_view_stop": "Stop Live View",
+    "nspire_live_view_error": "Live view failed ({error}).",
     "download_png": "Download PNG",
     "activity_log": "Activity Log",
     "clear_log": "Clear Log",
@@ -1264,6 +1268,7 @@ function syncStatusTranslation(text) {
 }
 
 const CCALL_TIMEOUT_MS = 12000;
+const NSPIRE_LIVE_FRAME_TIMEOUT_MS = 30000;
 const CCALL_MIN_GAP_MS = 100;
 const SUSPENDED_CCALL_GRACE_MS = 20000;
 const CREATE_HANDLE_RETRY_DELAY_MS = 300;
@@ -1750,7 +1755,7 @@ function installTiUsbTransport(device) {
 async function recoverTiUsbOperation(module, name, returnType, value, handle) {
     const device = module.__tiUsbDevice || state.authorizedDevice;
     const transport = tiUsbTransports.get(device);
-    const protocolCall = /^(calc_(recv_|send_|dump_|del_|new_|rename_|change_|screenshot|dirlist_json|get_clock_json|sync_clock)|send_file_(entry_)?custom$|finish_var_send$|is_ready$)/.test(name);
+    const protocolCall = /^(calc_(recv_|send_|dump_|del_|new_|rename_|change_|screenshot|dirlist_json|get_clock_json|sync_clock)|send_file_(entry_)?custom$|finish_var_send$|is_ready$|nspire_live_screen_stop$)/.test(name);
     const failed = (returnType === 'number' && protocolCall && value !== 0)
         || (name === 'calc_get_info_string' && !value);
     if (!transport || !failed) return value;
@@ -1902,17 +1907,29 @@ async function ccallAsync(module, name, returnType, argTypes, args, options = {}
     };
     throwIfCancelled();
     throwIfDead();
-    // Strict FIFO: take a slot on the module's Asyncify call chain. The slot is
-    // released when the underlying WASM call settles — not when a JS-side
-    // timeout gives up on it — because Asyncify cannot be re-entered while a
-    // call is suspended.
-    const prev = cs.tail;
-    let release;
-    cs.tail = new Promise(resolve => {
-        release = resolve;
-    });
+    let prev, release, underlying, resumeLiveScreen;
     let entered = false;
     try {
+        const liveScreen = state.nspireLiveScreen;
+        if (liveScreen && liveScreen.module === module) {
+            if (name === 'cleanup') {
+                await stopNspireLiveScreen();
+            } else if (/^(calc_|send_file_|finish_var_send$|is_ready$)/.test(name)
+                || (liveScreen.ownsSession && /^(open|close)_cable$/.test(name))) {
+                resumeLiveScreen = holdNspireLiveScreen(liveScreen);
+                // Finish the frame and close its NavNet session before
+                // taking the Asyncify slot for the foreground operation.
+                if (liveScreen.ownsSession) await liveScreen.done;
+            }
+        }
+        throwIfCancelled();
+        throwIfDead();
+        // Keep the Asyncify slot until the underlying WASM call settles, even
+        // when its JS-side timeout expires first.
+        prev = cs.tail;
+        cs.tail = new Promise(resolve => {
+            release = resolve;
+        });
         await Promise.race([prev, cs.deadSignal]);
         throwIfCancelled();
         throwIfDead();
@@ -1943,7 +1960,7 @@ async function ccallAsync(module, name, returnType, argTypes, args, options = {}
         entered = true;
         let settled = false;
         const native = Promise.resolve(result);
-        const underlying = native.then(value => recoverTiUsbOperation(module, name, returnType, value, args[0]));
+        underlying = native.then(value => recoverTiUsbOperation(module, name, returnType, value, args[0]));
         // DirectLink close/recovery can outlive the configured packet deadline
         // on macOS. Report the native failure promptly, retaining this FIFO slot
         // until cleanup finishes so subsequent native calls cannot overtake it.
@@ -1992,10 +2009,14 @@ async function ccallAsync(module, name, returnType, argTypes, args, options = {}
             stopProgress(progressLabel);
         }
     } finally {
-        if (!entered) {
+        if (!entered && prev) {
             // Never entered WASM: our slot must not unblock the chain ahead of
             // the previous call, so forward its completion instead.
             prev.then(release, release);
+        }
+        if (resumeLiveScreen) {
+            if (underlying) underlying.then(resumeLiveScreen, resumeLiveScreen);
+            else resumeLiveScreen();
         }
     }
 }
@@ -2099,7 +2120,7 @@ const EVO_PYTHON_CALC_MODELS = new Map([
     [49, '84Evo'],
     [50, '84Evo']
 ]);
-const NSPIRE_CXII_PYTHON_CALC_MODELS = new Set([32, 33, 34, 35]);
+const NSPIRE_CXII_CALC_MODELS = new Set([32, 33, 34, 35]);
 const NSPIRE_LUA_CALC_MODELS = new Set([15, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35]);
 const TIVARS_PREVIEW_CALC_MODELS = new Set([
     1, 2, 3, 4, 5, 13, 17, 18, 19, 20, 21, 22, 36, 48, 49, 50
@@ -3707,6 +3728,7 @@ const els = {
     btnRecvSelected: document.getElementById('btnRecvSelected'),
     btnDeleteSelected: document.getElementById('btnDeleteSelected'),
     btnScreenshot: document.getElementById('btnScreenshot'),
+    btnNspireLiveScreen: document.getElementById('btnNspireLiveScreen'),
     btnDownloadScreenshot: document.getElementById('btnDownloadScreenshot'),
     btnClearLog: document.getElementById('btnClearLog'),
     offlineBanner: document.getElementById('offlineBanner'),
@@ -4246,7 +4268,7 @@ function getPythonConversionKind(model) {
     if (EVO_PYTHON_CALC_MODELS.has(modelId)) {
         return PYTHON_CONVERSION_EVO;
     }
-    if (NSPIRE_CXII_PYTHON_CALC_MODELS.has(modelId)) {
+    if (NSPIRE_CXII_CALC_MODELS.has(modelId)) {
         return PYTHON_CONVERSION_NSPIRE_CXII;
     }
     return PYTHON_CONVERSION_NONE;
@@ -4538,6 +4560,7 @@ async function applyTranslations() {
 
     setTextContent(document.getElementById('panelScreenshotTitle'), t('screenshot'));
     setIconLabel(els.btnScreenshot, 'camera', t('take_screenshot'), '📸');
+    if (els.btnNspireLiveScreen) updateNspireLiveScreenControl();
     setIconLabel(els.btnDownloadScreenshot, 'download', t('download_png'), '⬇️');
     setTextContent(document.getElementById('panelLogTitle'), t('activity_log'));
     setIconLabel(els.btnClearLog, 'x-circle', t('clear_log'), '🧹');
@@ -4821,6 +4844,8 @@ function logError(err, context) {
 
 function clearActiveOperations(message) {
     state.operationEpoch += 1;
+    state.nspireLiveScreen = null;
+    if (els.btnNspireLiveScreen) updateNspireLiveScreenControl();
     // Note: the per-module Asyncify call chain (getModuleCallState) is left
     // untouched on purpose: a suspended WASM call must never be raced by new
     // calls, even after a disconnect/cancel. Cancelled operations bail out via
@@ -4991,6 +5016,7 @@ function setButtonLoading(button, loading) {
         return;
     }
     button.classList.remove('loading');
+    if (state.nspireLiveScreen) resumeNspireLiveScreen(state.nspireLiveScreen);
     if (button.classList.contains('disabled')) {
         button.disabled = true;
         return;
@@ -5026,6 +5052,7 @@ function setStatus(text, active) {
 
 function setConnected(connected) {
     state.connected = connected;
+    if (els.btnNspireLiveScreen) updateNspireLiveScreenControl();
     if (els.btnNuke) {
         els.btnNuke.classList.toggle('hidden', !connected || Boolean(state.casioFlashDrive));
     }
@@ -5475,6 +5502,7 @@ function updateDeviceInfoCapability(tiCapabilitiesKnown = false) {
 
 function applyActiveFamilyUiState(options = {}) {
     updateDeviceInfoCapability(Boolean(options.tiCapabilitiesKnown));
+    if (els.btnNspireLiveScreen) updateNspireLiveScreenControl();
     els.btnSharpRecoverOs?.classList.toggle('hidden', state.activeFamily !== DEVICE_FAMILY_SHARP);
     document.getElementById('screenshotPanel')?.classList.toggle('hidden', Boolean(state.casioFlashDrive));
     if (!options.tiCapabilitiesKnown) {
@@ -6939,6 +6967,7 @@ async function getDeviceInfo({ automatic = false } = {}) {
                 log('Calculator model updated based on device info.');
             }
         }
+        if (els.btnNspireLiveScreen) updateNspireLiveScreenControl();
         if ((state.features & FEATURE_FLAGS.OPS_CLOCK) !== 0) {
             const clockInfo = await getClockInfo(module, handle);
             const clockText = formatClockDisplay(clockInfo);
@@ -7241,6 +7270,8 @@ function updateClockInfoRow(clockInfo, settings, fallbackDate) {
 
 function clearDeviceData() {
     updateDeviceInfoCapability();
+    state.nspireLiveScreen = null;
+    if (els.btnNspireLiveScreen) updateNspireLiveScreenControl();
     state.sharpConnectionGeneration = (state.sharpConnectionGeneration || 0) + 1;
     state.sharpProgress = null;
     state.dirlist = [];
@@ -10427,6 +10458,8 @@ async function processIncomingTransfers(files, options = {}) {
         return;
     }
 
+    // Drops use this same batch without a loading button.
+    const resumeLiveScreen = state.nspireLiveScreen && holdNspireLiveScreen(state.nspireLiveScreen);
     try {
         await authorizeDevice();
         if (checkCableMismatch && promptCableMismatchResolution()) {
@@ -10504,6 +10537,8 @@ async function processIncomingTransfers(files, options = {}) {
         }
     } catch (err) {
         logError(err, errorContext);
+    } finally {
+        resumeLiveScreen?.();
     }
 }
 
@@ -12221,6 +12256,127 @@ async function drawHPPrimeScreenshot(canvas, png) {
     bitmap.close?.();
 }
 
+function updateNspireLiveScreenControl() {
+    const button = els.btnNspireLiveScreen;
+    const session = state.nspireLiveScreen;
+    const model = state.connected && isNspireActive() ? getActiveCalcModelId() : 0;
+    const supported = model === 28 || model === 29 || NSPIRE_CXII_CALC_MODELS.has(model)
+        || (state.connected && state.authorizedDevice?.productId === 0xe022);
+    button.classList.toggle('hidden', !supported && !session);
+    button.disabled = Boolean(session?.stopRequested);
+    setIconLabel(button, session ? 'square' : 'play',
+        t(session ? 'nspire_live_view_stop' : 'nspire_live_view_start'), session ? '⏹️' : '▶️');
+}
+
+async function stopNspireLiveScreen() {
+    const session = state.nspireLiveScreen;
+    if (!session) return;
+    session.stopRequested = true;
+    if (!session.done) state.nspireLiveScreen = null;
+    updateNspireLiveScreenControl();
+    await session.done;
+}
+
+function holdNspireLiveScreen(session) {
+    session.holds++;
+    return () => {
+        session.holds--;
+        resumeNspireLiveScreen(session);
+    };
+}
+
+function resumeNspireLiveScreen(session) {
+    // A batch's button stays loading across the gaps between native calls.
+    if (state.nspireLiveScreen !== session || state.module !== session.module || !state.connected
+        || session.stopRequested || session.holds || session.done || document.querySelector('.btn.loading')) {
+        return;
+    }
+    session.done = runNspireLiveScreen(session).finally(() => {
+        session.done = null;
+        session.ownsSession = false;
+        if (state.nspireLiveScreen !== session) return;
+        if (session.stopRequested) {
+            state.nspireLiveScreen = null;
+            updateNspireLiveScreenControl();
+        } else {
+            resumeNspireLiveScreen(session);
+        }
+    });
+}
+
+async function runNspireLiveScreen(session) {
+    let started = false;
+    let handle;
+    const { module } = session;
+    const active = () => state.nspireLiveScreen === session && !session.stopRequested && !session.holds;
+    const call = async name => {
+        const result = await ccallAsync(module, `nspire_live_screen_${name}`, 'number', ['number'], [handle],
+            { timeoutMs: NSPIRE_LIVE_FRAME_TIMEOUT_MS });
+        if (result !== 0) throw new Error(formatErrorResult(module, result));
+    };
+
+    try {
+        handle = await ensureCableOpen();
+        if (!active()) return;
+        session.ownsSession = true;
+        await call('start');
+        started = true;
+
+        const width = 320, height = 240;
+        const canvas = els.screenshotCanvas;
+        const ctx = canvas.getContext('2d');
+        const image = ctx.createImageData(width, height);
+        while (active()) {
+            await call('next');
+            if (!active()) break;
+            const address = module._nspire_live_screen_bitmap();
+            if (!address) continue;
+            const pixels = new DataView(module.HEAPU8.buffer, address, width * height * 2);
+            for (let i = 0, j = 0; i < pixels.byteLength; i += 2, j += 4) {
+                const pixel = pixels.getUint16(i, true);
+                const r = pixel >> 11, g = (pixel >> 5) & 63, b = pixel & 31;
+                image.data[j] = (r << 3) | (r >> 2);
+                image.data[j + 1] = (g << 2) | (g >> 4);
+                image.data[j + 2] = (b << 3) | (b >> 2);
+                image.data[j + 3] = 255;
+            }
+            if (canvas.width !== width || canvas.height !== height) {
+                canvas.width = width;
+                canvas.height = height;
+                canvas.classList.add('filled');
+                updateScreenshotCanvasScale();
+            }
+            ctx.putImageData(image, 0, 0);
+        }
+    } catch (error) {
+        if (active()) {
+            session.stopRequested = true;
+            log(tFormat('nspire_live_view_error', { error: error.message }));
+        }
+    } finally {
+        if (started && state.nspireLiveScreen === session) {
+            try {
+                await call('stop');
+            } catch (error) {
+                if (state.nspireLiveScreen === session) {
+                    session.stopRequested = true;
+                    log(tFormat('nspire_live_view_error', { error: error.message }));
+                }
+            }
+        }
+    }
+}
+
+function toggleNspireLiveScreen() {
+    if (state.nspireLiveScreen) return stopNspireLiveScreen();
+    if (!state.module || !state.connected || els.btnNspireLiveScreen.classList.contains('hidden')) return;
+    const session = { module: state.module, holds: 0, stopRequested: false };
+    state.nspireLiveScreen = session;
+    updateNspireLiveScreenControl();
+    resumeNspireLiveScreen(session);
+    return session.done;
+}
+
 async function takeScreenshot() {
     if (state?.activeFamily === 'sharp') {
         await runSharpOperation(t('sharp_screen'), async backend => {
@@ -12702,6 +12858,7 @@ function bindEvents() {
     els.btnRecvSelected.addEventListener('click', receiveSelected);
     els.btnDeleteSelected.addEventListener('click', deleteSelected);
     els.btnScreenshot.addEventListener('click', takeScreenshot);
+    els.btnNspireLiveScreen?.addEventListener('click', toggleNspireLiveScreen);
     els.btnDownloadScreenshot.addEventListener('click', downloadCanvas);
     els.btnClearLog.addEventListener('click', clearLog);
     if (els.btnSendKey) {

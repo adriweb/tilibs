@@ -60,7 +60,7 @@ CXXFLAGS = -O3 -std=gnu++17 -flto -pthread
 
 # Emscripten specific flags
 EMCCFLAGS = \
-	-s EXPORTED_RUNTIME_METHODS='["ccall","cwrap","FS"]' \
+	-s EXPORTED_RUNTIME_METHODS='["ccall","cwrap","FS","HEAPU8"]' \
 	-s MODULARIZE=1 \
 	-s EXPORT_NAME='TILibsModule' \
 	-s ASYNCIFY=1 \

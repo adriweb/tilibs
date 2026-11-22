@@ -72,6 +72,7 @@ const body = new Element();
 const storage = new Map();
 const themeButton = body.appendChild(new Element('btn'));
 const context = vm.createContext({
+    state: {},
     document: { body, querySelectorAll: selector => body.querySelectorAll(selector) },
     localStorage: { setItem: (key, value) => storage.set(key, value) },
     els: { btnThemeToggle: themeButton },

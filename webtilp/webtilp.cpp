@@ -157,6 +157,7 @@ enum {
     TICALCS_ERR_ABORT = 256,
     TICALCS_ERR_NOT_READY = 257,
     TICALCS_ERR_BUSY = 269,
+    TICALCS_ERR_UNSUPPORTED = 271,
     TICALCS_ERR_EVO = 510,
     TICABLES_ERR_READ_ERROR = 3,
     TICABLES_ERR_READ_TIMEOUT = 4,
@@ -204,6 +205,7 @@ static CableModel g_cable_model = CABLE_USB;
 static CalcModel g_calc_model;
 static CalcHandle* g_calc_handle = nullptr;
 static int g_calc_attached = 0;
+static NspPresenterFrame g_nspire_live_frame;
 static int g_calc_ready = 0;
 static unsigned int g_evo_python_type = 0;
 static CableHandle* g_cable_handle = nullptr;
@@ -1391,6 +1393,37 @@ int calc_screenshot(CableHandle* cable_handle) {
     }
 
     return result;
+}
+
+EMSCRIPTEN_KEEPALIVE
+int nspire_live_screen_start(CableHandle* cable_handle) {
+    int ret = ensure_calc_handle_attached(cable_handle);
+    if (ret == 0 && !ticonv_model_is_tinspire(g_calc_model)) {
+        return TICALCS_ERR_UNSUPPORTED;
+    }
+    if (ret == 0) ret = ensure_calc_ready(cable_handle, 0);
+    return ret ? ret : nsp_presenter_start(g_calc_handle, &g_nspire_live_frame);
+}
+
+EMSCRIPTEN_KEEPALIVE
+int nspire_live_screen_next(CableHandle* cable_handle) {
+    if (cable_handle != g_cable_handle || !g_calc_attached) {
+        return TICALCS_ERR_NOT_READY;
+    }
+    return nsp_presenter_next(g_calc_handle, &g_nspire_live_frame);
+}
+
+EMSCRIPTEN_KEEPALIVE
+const uint8_t* nspire_live_screen_bitmap() {
+    return g_nspire_live_frame.changed ? g_nspire_live_frame.bitmap : nullptr;
+}
+
+EMSCRIPTEN_KEEPALIVE
+int nspire_live_screen_stop(CableHandle* cable_handle) {
+    if (cable_handle == g_cable_handle && g_calc_attached) {
+        return nsp_presenter_stop(g_calc_handle);
+    }
+    return 0;
 }
 
 EMSCRIPTEN_KEEPALIVE
