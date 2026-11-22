@@ -434,7 +434,18 @@ static int enumerate_folder_entries(CalcHandle* handle, GNode** vars, const char
 				break;
 			}
 
+			if (!varname[0] || strchr(varname, '/') || !strcmp(varname, ".") || !strcmp(varname, ".."))
+			{
+				ret = ERR_INVALID_PACKET;
+				break;
+			}
+
 			VarEntry* fe = tifiles_ve_create();
+			if (!fe)
+			{
+				ret = ERR_MALLOC;
+				break;
+			}
 
 			ticalcs_strlcpy(fe->folder, folder_name + 1, sizeof(fe->folder)); // Skip leading /
 			fe->size = varsize;
@@ -568,7 +579,7 @@ static int enumerate_folder_children(CalcHandle* handle, GNode** vars, const cha
 	// Enumerate elements of current folder.
 	for (int i = 0; i < (int)g_node_n_children(*vars); i++)
 	{
-		char new_folder_name[FLDNAME_MAX + 4];
+		char new_folder_name[FLDNAME_MAX + 1];
 		const char * separator_if_any;
 		GNode * folder = g_node_nth_child(*vars, i);
 		const uint8_t vartype = ((VarEntry *)(folder->data))->type;
@@ -590,8 +601,12 @@ static int enumerate_folder_children(CalcHandle* handle, GNode** vars, const cha
 			separator_if_any = "";
 		}
 
-		ticalcs_slprintf(new_folder_name, sizeof(new_folder_name), "%s%s%s", folder_name, separator_if_any, ((VarEntry *)(folder->data))->name);
-		new_folder_name[FLDNAME_MAX] = 0;
+		const int length = g_snprintf(new_folder_name, sizeof(new_folder_name), "%s%s%s",
+		                              folder_name, separator_if_any, ((VarEntry *)(folder->data))->name);
+		if (length < 0 || (size_t)length >= sizeof(new_folder_name))
+		{
+			return ERR_INVALID_PACKET;
+		}
 
 		ticalcs_info(_("Directory listing in <%s>...\n"), new_folder_name);
 
@@ -609,6 +624,83 @@ static int enumerate_folder_children(CalcHandle* handle, GNode** vars, const cha
 		}
 	}
 
+	return ret;
+}
+
+static int enumerate_folder_tree(CalcHandle *handle, GNode **vars, const char *path)
+{
+	if (nsp_nnse_enabled(handle))
+	{
+		return enumerate_folder_nnse(handle, vars, path, 2);
+	}
+
+	int ret = nsp_session_open(handle, NSP_SID_FILE_MGMT);
+	if (!ret)
+	{
+		ret = enumerate_folder_legacy(handle, vars, path);
+		DO_CLOSE_SESSION(handle);
+	}
+	return ret;
+}
+
+int TICALL nsp_get_folder_dirlist(CalcHandle *handle, const char *folder, GNode **vars)
+{
+	VALIDATE_HANDLE(handle);
+	VALIDATE_NONNULL(folder);
+	VALIDATE_NONNULL(vars);
+	RETURN_IF_HANDLE_NOT_ATTACHED(handle);
+	RETURN_IF_HANDLE_NOT_OPEN(handle);
+	RETURN_IF_HANDLE_BUSY(handle);
+
+	*vars = nullptr;
+	if (!ticonv_model_is_tinspire(handle->model))
+	{
+		return ERR_UNSUPPORTED;
+	}
+	if (strlen(folder) >= FLDNAME_MAX)
+	{
+		return ERR_INVALID_PARAMETER;
+	}
+	for (const char *part = folder;;)
+	{
+		const size_t length = strcspn(part, "/");
+		if (!length || (length == 1 && part[0] == '.')
+		    || (length == 2 && part[0] == '.' && part[1] == '.'))
+		{
+			return ERR_INVALID_PARAMETER;
+		}
+		if (!part[length])
+		{
+			break;
+		}
+		part += length + 1;
+	}
+
+	int ret = dirlist_init_tree(handle, vars, VAR_NODE_NAME);
+	if (!ret)
+	{
+		TreeInfo *info = (TreeInfo *)(*vars)->data;
+		info->mem_mask = 0;
+		info->mem_free = 0;
+		info->mem_used = 0;
+
+		char path[FLDNAME_MAX + 1];
+		g_snprintf(path, sizeof(path), "/%s", folder);
+		handle->updat->cnt1 = 0;
+		handle->updat->max1 = 0;
+		handle->busy = 1;
+		ret = ticalcs_event_send_simple_generic(handle, CALC_EVENT_TYPE_BEFORE_GENERIC_OPERATION, 0, FNCT_GET_DIRLIST);
+		if (!ret)
+		{
+			ret = enumerate_folder_tree(handle, vars, path);
+		}
+		ret = ticalcs_event_send_simple_generic(handle, CALC_EVENT_TYPE_AFTER_GENERIC_OPERATION, ret, FNCT_GET_DIRLIST);
+		handle->busy = 0;
+	}
+	if (ret)
+	{
+		ticalcs_dirlist_destroy(vars);
+	}
 	return ret;
 }
 
@@ -650,21 +742,7 @@ static int get_dirlist (CalcHandle* handle, GNode** vars, GNode** apps)
 		return ret;
 	}
 
-	if (nsp_nnse_enabled(handle))
-	{
-		ret = enumerate_folder_nnse(handle, vars, "/", 2);
-	}
-	else
-	{
-		ret = nsp_session_open(handle, NSP_SID_FILE_MGMT);
-		if (!ret)
-		{
-			ret = enumerate_folder_legacy(handle, vars, "/");
-			DO_CLOSE_SESSION(handle);
-		}
-	}
-
-	return ret;
+	return enumerate_folder_tree(handle, vars, "/");
 }
 
 static int		get_memfree	(CalcHandle* handle, uint32_t* ram, uint32_t* flash)
