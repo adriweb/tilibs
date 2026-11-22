@@ -33,6 +33,17 @@ extern "C" {
 #define NSP_SID_ECHO                    0x4002
 #define NSP_SID_ADDR_REQUEST            0x4003
 #define NSP_SID_ADDR_ASSIGN             0x4003
+#define NSP_SID_TUNE                    0x4004
+#define NSP_SID_STAT                    0x4005
+#define NSP_SID_TEST                    0x4006
+#define NSP_SID_SVC_REGISTER            0x4010
+#define NSP_SID_SVC_UNREGISTER          0x4011
+#define NSP_SID_SVC_ENUM                0x4012
+#define NSP_SID_CONN_ENUM               0x4013
+#define NSP_SID_LWS_HUB_CONNECT         0x4014
+#define NSP_SID_SOCKET_MODE             0x4015
+#define NSP_SID_NETWORK_UTIL            0x4016
+#define NSP_SID_NODE_NOTIFY             0x4017
 #define NSP_SID_DEV_INFOS               0x4020
 #define NSP_SID_SCREENSHOT              0x4021
 #define NSP_SID_EVENT                   0x4022
@@ -43,6 +54,7 @@ extern "C" {
 #define NSP_SID_RPC                     0x4043
 #define NSP_SID_LOGIN                   0x4050
 #define NSP_SID_MESSAGES                0x4051
+#define NSP_SID_PRESENTATION            0x4052
 #define NSP_SID_HUB_CONNECTION          0x4054
 #define NSP_SID_FILE_MGMT               0x4060
 #define NSP_SID_TIROBOT                 0x4070
@@ -93,6 +105,22 @@ extern "C" {
 
 // Structures
 // ...
+
+// RGB565 little-endian frames from the color Live Presenter service.
+#define NSP_PRESENTER_WIDTH  320
+#define NSP_PRESENTER_HEIGHT 240
+#define NSP_PRESENTER_BITMAP_SIZE (NSP_PRESENTER_WIDTH * NSP_PRESENTER_HEIGHT * 2)
+
+typedef struct
+{
+	uint8_t bitmap[NSP_PRESENTER_BITMAP_SIZE];
+	uint8_t valid;
+	uint8_t changed;
+} NspPresenterFrame;
+
+TIEXPORT3 int TICALL nsp_presenter_start(CalcHandle *handle, NspPresenterFrame *frame);
+TIEXPORT3 int TICALL nsp_presenter_next(CalcHandle *handle, NspPresenterFrame *frame);
+TIEXPORT3 int TICALL nsp_presenter_stop(CalcHandle *handle);
 
 // Command wrappers
 
