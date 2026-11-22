@@ -695,6 +695,74 @@ static int		get_memfree	(CalcHandle* handle, uint32_t* ram, uint32_t* flash)
 	return ret;
 }
 
+int nsp_restore_standard_payloads(CalcHandle *handle, int ret)
+{
+	if (handle->priv.nsp_navnet_extended)
+	{
+		// Address assignment sets the limit for the whole link.
+		const int restore_ret = nsp_addr_assign_extended(handle, NSP_DATA_SIZE);
+		if (!restore_ret)
+		{
+			handle->priv.nsp_dst_port = NSP_PORT_ADDR_REQUEST;
+		}
+		if (!ret)
+		{
+			ret = restore_ret;
+		}
+	}
+	return ret;
+}
+
+int nsp_enable_extended_payloads(CalcHandle *handle)
+{
+	if (!nsp_is_legacy_handheld(handle->model))
+	{
+		return 0;
+	}
+	if (handle->updat->cancel)
+	{
+		return ERR_ABORT;
+	}
+
+	const uint16_t peer_limit = handle->priv.nsp_navnet_peer_limit;
+	const bool probe = peer_limit == NSP_NAVNET_PROBE_PENDING;
+	const uint16_t limit = probe ? NSP_CX_MAX_PAYLOAD : peer_limit;
+	if (limit <= NSP_DATA_SIZE)
+	{
+		return 0;
+	}
+
+	int ret = nsp_addr_assign_extended(handle, limit);
+	if (!ret && probe)
+	{
+		ret = nsp_probe_extended_echo(handle, limit);
+	}
+	if (!ret)
+	{
+		handle->priv.nsp_navnet_peer_limit = limit;
+		return 0;
+	}
+
+	// Recover before opening a file session so a failed probe never
+	// requires replaying an upload.
+	handle->priv.nsp_seq_pc = 1;
+	const int restore_ret = nsp_addr_assign(handle, NSP_DEV_ADDR);
+	if (ret == ERR_ABORT || restore_ret)
+	{
+		return ret == ERR_ABORT ? ret : restore_ret;
+	}
+	// Keep the verified fallback for the rest of this USB connection.
+	handle->priv.nsp_navnet_peer_limit = NSP_DATA_SIZE;
+	handle->priv.nsp_dst_port = NSP_PORT_ADDR_REQUEST;
+	return 0;
+}
+
+static int nsp_open_file_transfer(CalcHandle *handle)
+{
+	const int ret = nsp_enable_extended_payloads(handle);
+	return ret ? ret : nsp_session_open(handle, NSP_PORT_FILE_MGMT);
+}
+
 static int		send_var	(CalcHandle* handle, CalcMode mode, FileContent* content)
 {
 	uint8_t status;
@@ -733,7 +801,7 @@ static int		send_var	(CalcHandle* handle, CalcMode mode, FileContent* content)
 	//	return ERR_ABORT;
 	//}
 
-	int ret = nsp_session_open(handle, NSP_SID_FILE_MGMT);
+	int ret = nsp_open_file_transfer(handle);
 	if (ret)
 	{
 		return ret;
@@ -783,14 +851,14 @@ static int		send_var	(CalcHandle* handle, CalcMode mode, FileContent* content)
 		nsp_nnse_reassociate_next(handle);
 	}
 
-	return ret;
+	return nsp_restore_standard_payloads(handle, ret);
 }
 
 static int		recv_var	(CalcHandle* handle, CalcMode mode, FileContent* content, VarRequest* vr)
 {
 	int retries = 0;
 	int file_contents_started = 0;
-	int ret = nsp_session_open(handle, NSP_SID_FILE_MGMT);
+	int ret = nsp_open_file_transfer(handle);
 	if (ret)
 	{
 		return ret;
@@ -900,7 +968,7 @@ retry_recv_var:
 		nsp_nnse_reassociate_next(handle);
 	}
 
-	return ret;
+	return nsp_restore_standard_payloads(handle, ret);
 }
 
 static int		send_os    (CalcHandle* handle, FlashContent* content)
@@ -1408,6 +1476,14 @@ retry_get_version:
 			infos->model = CALC_NSPIRE;
 		}
 
+#ifdef __EMSCRIPTEN__
+		// The regular device-info request uses short packets. Leave an
+		// unknown or pre-2.0 calculator on standard framing.
+		if (nsp_is_legacy_handheld(handle->model) && !handle->priv.nsp_navnet_peer_limit)
+		{
+			handle->priv.nsp_navnet_peer_limit = data[36] >= 2 ? NSP_NAVNET_PROBE_PENDING : NSP_DATA_SIZE;
+		}
+#endif
 		infos->mask = infos_mask;
 
 		g_free(data);

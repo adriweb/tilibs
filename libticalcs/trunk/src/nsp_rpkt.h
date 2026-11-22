@@ -37,6 +37,11 @@ TIEXPORT3 int TICALL nsp_dissect(CalcModel model, FILE * f, const uint8_t * data
 // Initialize a raw reply by clearing it and reversing the request endpoints.
 TIEXPORT3 void TICALL nsp_init_reply(NSPRawPacket *reply, const NSPRawPacket *request);
 
+// For extended packets, return the size prefix and payload in extended_data.
+int nsp_send_extended(CalcHandle *handle, NSPRawPacket *pkt, uint8_t *data, uint32_t size);
+int nsp_recv_extended(CalcHandle *handle, NSPRawPacket *pkt,
+                      uint8_t *extended_data, uint32_t capacity, uint32_t *payload_size);
+
 #ifdef __cplusplus
 }
 #endif

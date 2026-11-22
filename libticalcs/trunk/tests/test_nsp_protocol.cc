@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <vector>
 
 #include "../src/error.h"
 #include "../src/ticalcs.h"
@@ -378,6 +379,206 @@ static void check_nnse_scoped_timeout(void)
 	ticalcs_handle_del(handle);
 }
 
+#ifndef __EMSCRIPTEN__
+static void check_legacy_navnet_payload_selection(void)
+{
+	struct Wire
+	{
+		std::vector<uint8_t> request;
+		std::vector<std::vector<uint8_t>> sent;
+		size_t offset = 0;
+		bool reject_extended = false;
+	} wire;
+	CableFncts functions = {};
+	functions.reset = [](CableHandle *cable) -> int {
+		static_cast<Wire *>(cable->priv)->offset = 0;
+		return 0;
+	};
+	functions.recv = [](CableHandle *cable, uint8_t *data, uint32_t size) -> int {
+		auto &state = *static_cast<Wire *>(cable->priv);
+		CHECK(size <= state.request.size() - state.offset);
+		memcpy(data, state.request.data() + state.offset, size);
+		state.offset += size;
+		return 0;
+	};
+	functions.check = [](CableHandle *, int *status) -> int {
+		*status = STATUS_NONE;
+		return 0;
+	};
+	functions.send = [](CableHandle *cable, uint8_t *data, uint32_t size) -> int {
+		auto &state = *static_cast<Wire *>(cable->priv);
+		state.sent.emplace_back(data, data + size);
+		CHECK(size >= NSP_HEADER_SIZE + 4);
+		if (data[8] == 0x40 && data[9] == 0x02)
+		{
+			CHECK(size == 4096 && data[12] == 0xff);
+			return 0;
+		}
+		CHECK(data[4] == 0x40 && data[5] == 0x03);
+		if (state.reject_extended && size == NSP_HEADER_SIZE + 8)
+		{
+			return ERROR_WRITE_TIMEOUT;
+		}
+		return 0;
+	};
+
+	CableHandle cable = {};
+	cable.cable = &functions;
+	cable.priv = &wire;
+	cable.open = 1;
+	CalcHandle *handle = ticalcs_handle_new(CALC_NSPIRE_CX_CAS);
+	CHECK(handle);
+	handle->cable = &cable;
+	wire.request = { 0x54, 0xfd, 0x00, 0x00, 0x40, 0x03, 0x00, 0x00,
+	                 0x40, 0x03, 0, 0, 0, 0, 1, 0 };
+	// A Clickpad on OS 1.x can be auto-detected as a CX CAS.
+	CHECK(nsp_addr_request(handle) == 0);
+	CHECK(nsp_enable_extended_payloads(handle) == 0);
+	CHECK(handle->priv.nsp_navnet_peer_limit == NSP_DATA_SIZE && wire.sent.empty());
+	ticalcs_handle_del(handle);
+
+	handle = ticalcs_handle_new(CALC_NSPIRE_TOUCHPAD_CAS);
+	CHECK(handle);
+	handle->cable = &cable;
+	wire.request[12] = 2;
+	wire.request.push_back(4);
+	wire.request.push_back(0);
+	CHECK(nsp_addr_request(handle) == 0);
+	CHECK(nsp_enable_extended_payloads(handle) == 0);
+	CHECK(handle->priv.nsp_navnet_extended && handle->priv.nsp_navnet_peer_limit == 1024);
+	CHECK(wire.sent.size() == 1 && wire.sent[0][22] == 4 && wire.sent[0][23] == 0);
+	CHECK(nsp_restore_standard_payloads(handle, 0) == 0);
+	CHECK(!handle->priv.nsp_navnet_extended && handle->priv.nsp_navnet_peer_limit == 1024);
+	CHECK(wire.sent.size() == 2 && wire.sent[1][22] == 0 && wire.sent[1][23] == NSP_DATA_SIZE);
+
+	wire.request[NSP_HEADER_SIZE] = 32;
+	CHECK(nsp_addr_request(handle) == 0);
+	CHECK(handle->priv.nsp_navnet_peer_limit == NSP_CX_MAX_PAYLOAD);
+	wire.reject_extended = true;
+	CHECK(nsp_enable_extended_payloads(handle) == 0);
+	CHECK(!handle->priv.nsp_navnet_extended && handle->priv.nsp_navnet_peer_limit == NSP_DATA_SIZE);
+	CHECK(wire.sent.size() == 4 && wire.sent.back().size() == NSP_HEADER_SIZE + 4);
+	CHECK(wire.sent.back()[14] == 1);
+	CHECK(nsp_enable_extended_payloads(handle) == 0 && wire.sent.size() == 4);
+
+	// A silent WebUSB peer must return to standard framing before a
+	// file request. Any blocking recv on this empty wire fails the test.
+	wire.request.clear();
+	wire.offset = 0;
+	wire.sent.clear();
+	wire.reject_extended = false;
+	cable.timeout = 30;
+	handle->priv.nsp_navnet_peer_limit = NSP_NAVNET_PROBE_PENDING;
+	CHECK(nsp_enable_extended_payloads(handle) == 0);
+	CHECK(!handle->priv.nsp_navnet_extended && handle->priv.nsp_navnet_peer_limit == NSP_DATA_SIZE);
+	CHECK(cable.timeout == 30 && wire.sent.size() == 3);
+	CHECK(wire.sent[0].size() == NSP_HEADER_SIZE + 8 && wire.sent[1].size() == 4096);
+	CHECK(wire.sent[2].size() == NSP_HEADER_SIZE + 4 && wire.sent[2][14] == 1);
+	ticalcs_handle_del(handle);
+}
+#endif
+
+static void check_cx_extended_file_contents(void)
+{
+	struct Wire
+	{
+		std::vector<std::vector<uint8_t>> sent;
+		std::vector<uint8_t> reply;
+		size_t offset = 0;
+	};
+	Wire wire;
+	CableFncts functions = {};
+	functions.send = [](CableHandle *cable, uint8_t *data, uint32_t size) -> int {
+		auto &state = *static_cast<Wire *>(cable->priv);
+		state.sent.emplace_back(data, data + size);
+		return 0;
+	};
+	functions.recv = [](CableHandle *cable, uint8_t *data, uint32_t size) -> int {
+		auto &state = *static_cast<Wire *>(cable->priv);
+		CHECK(size <= state.reply.size() - state.offset);
+		memcpy(data, state.reply.data() + state.offset, size);
+		state.offset += size;
+		return 0;
+	};
+
+	CableHandle cable = {};
+	cable.cable = &functions;
+	cable.priv = &wire;
+	cable.open = 1;
+	CalcHandle *handle = ticalcs_handle_new(CALC_NSPIRE_CX);
+	CHECK(handle);
+	handle->cable = &cable;
+	handle->priv.nsp_navnet_peer_limit = NSP_CX_MAX_PAYLOAD;
+	CHECK(nsp_enable_extended_payloads(handle) == 0);
+	CHECK(nsp_session_open(handle, NSP_PORT_FILE_MGMT) == 0);
+	const uint16_t client = handle->priv.nsp_src_port;
+	const uint8_t client_hi = client >> 8, client_lo = client & 0xff;
+	CHECK(wire.sent.size() == 1 && wire.sent[0].size() == NSP_HEADER_SIZE + 8);
+	CHECK(wire.sent[0][22] == 0x0f && wire.sent[0][23] == 0xec);
+
+	const uint8_t ack[] = {
+		0x54, 0xfd, 0x64, 0x01, 0x00, 0xff, 0x64, 0x00, client_hi, client_lo,
+		0, 0, 2, 0x0a, 1, 0, 0x40, 0x60
+	};
+	wire.reply.insert(wire.reply.end(), ack, ack + sizeof(ack));
+	wire.reply.insert(wire.reply.end(), ack, ack + sizeof(ack));
+
+	std::vector<uint8_t> data(NSP_CX_MAX_PAYLOAD + 12);
+	for (size_t i = 0; i < data.size(); ++i)
+	{
+		data[i] = uint8_t(i * 13);
+	}
+	CHECK(nsp_cmd_s_file_contents(handle, data.size(), data.data()) == 0);
+	CHECK(wire.offset == wire.reply.size());
+	CHECK(wire.sent.size() == 3);
+	const auto &first = wire.sent[1];
+	const auto &last = wire.sent[2];
+	CHECK(first.size() == 4096 && last.size() == NSP_HEADER_SIZE + 14);
+	const uint8_t extended_header[] = {0x97, 0x38, 0xff, 0, 1};
+	CHECK(memcmp(first.data() + 10, extended_header, sizeof(extended_header)) == 0);
+	const uint8_t extended_prefix[] = {0, 0, 0x0f, 0xec, NSP_CMD_FM_CONTENTS};
+	CHECK(memcmp(first.data() + NSP_HEADER_SIZE, extended_prefix, sizeof(extended_prefix)) == 0);
+	CHECK(memcmp(first.data() + NSP_HEADER_SIZE + sizeof(extended_prefix), data.data(), NSP_CX_MAX_PAYLOAD - 1) == 0);
+	CHECK(last[12] == 14 && last[NSP_HEADER_SIZE] == NSP_CMD_FM_CONTENTS);
+	CHECK(memcmp(last.data() + NSP_HEADER_SIZE + 1, data.data() + NSP_CX_MAX_PAYLOAD - 1, 13) == 0);
+
+	auto queue_reply = [&](std::vector<uint8_t> packet, uint16_t service, bool corrupt = false) {
+		packet[3] = 0x01;
+		packet[4] = uint8_t(service >> 8);
+		packet[5] = uint8_t(service);
+		packet[7] = 0x00;
+		packet[8] = client_hi;
+		packet[9] = client_lo;
+		if (corrupt)
+		{
+			packet[10] ^= 1;
+		}
+		packet[15] = 0;
+		for (unsigned int i = 0; i < NSP_HEADER_SIZE - 1; ++i)
+		{
+			packet[15] += packet[i];
+		}
+		wire.reply.insert(wire.reply.end(), packet.begin(), packet.end());
+	};
+
+	// A delayed disconnect must not be interpreted as the next reply.
+	queue_reply(last, NSP_PORT_DISCONNECT);
+	queue_reply(first, NSP_PORT_FILE_MGMT);
+	queue_reply(last, NSP_PORT_FILE_MGMT);
+	uint32_t size = data.size();
+	uint8_t *received = nullptr;
+	CHECK(nsp_cmd_r_file_contents(handle, &size, &received) == 0);
+	CHECK(size == data.size() && memcmp(received, data.data(), size) == 0);
+	CHECK(wire.offset == wire.reply.size() && wire.sent.size() == 6);
+	g_free(received);
+
+	queue_reply(wire.sent[1], NSP_PORT_FILE_MGMT, true);
+	received = nullptr;
+	CHECK(nsp_cmd_r_file_contents(handle, &size, &received) == ERR_CHECKSUM);
+	CHECK(!received && wire.offset == wire.reply.size());
+	ticalcs_handle_del(handle);
+}
+
 int main(void)
 {
 	check_oversized_legacy_packet_is_drained_and_rejected();
@@ -388,5 +589,9 @@ int main(void)
 	check_nspire_directory_filenames();
 	check_nspire_filenames_and_requests();
 	check_nnse_scoped_timeout();
+#ifndef __EMSCRIPTEN__
+	check_legacy_navnet_payload_selection();
+#endif
+	check_cx_extended_file_contents();
 	return 0;
 }
