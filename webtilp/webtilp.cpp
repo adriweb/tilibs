@@ -1991,6 +1991,36 @@ static bool copy_calc_name(char* dst, size_t capacity, const char* text,
     return valid;
 }
 
+EMSCRIPTEN_KEEPALIVE
+int calc_nspire_folder_dirlist_json(CableHandle* cable_handle, const char* folder,
+                                   const char* folder_hex) {
+    if (!cable_handle) return ERR_WEB_INVALID_ARGUMENT;
+    const int ready_result = ensure_calc_ready(cable_handle, 0);
+    if (ready_result) return ready_result;
+
+    char path[FLDNAME_MAX];
+    if (!copy_calc_name(path, sizeof(path), folder, folder_hex, 0, false)) {
+        return ERR_WEB_INVALID_ARGUMENT;
+    }
+
+    GNode* vars = nullptr;
+    const int result = nsp_get_folder_dirlist(g_calc_handle, path, &vars);
+    if (result) return result;
+
+    FILE* fp = fopen("/dirlist.json", "wb");
+    if (!fp) {
+        ticalcs_dirlist_destroy(&vars);
+        return -2;
+    }
+    int first = 1;
+    fputs("{\"vars\":[", fp);
+    write_dirlist_json(fp, vars, "var", &first);
+    fputs("]}", fp);
+    fclose(fp);
+    ticalcs_dirlist_destroy(&vars);
+    return 0;
+}
+
 static bool set_var_request(VarEntry& request, const char* folder, const char* name,
                             uint8_t type, const char* folder_hex, const char* name_hex) {
     request.type = type;
