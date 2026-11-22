@@ -165,7 +165,8 @@ test:
 	node tests/test_dirlist_capabilities.js
 	node tests/test_clock_timezone.js
 	node tests/test_backup_frontend.js
-	node tests/test_silverlink_recovery.js
+	node tests/test_ti_usb_recovery.js
+	node tests/test_nspire_live_view.js
 	node tests/test_var_send_frontend.js
 	node tests/test_flash_gc_frontend.js
 	node tests/test_var_names_frontend.js
@@ -213,8 +214,12 @@ test-receive-bounds-wasm:
 		-sSTACK_SIZE=5242880 -sEXIT_RUNTIME=1 -sPTHREAD_POOL_SIZE=2 -sPROXY_TO_PTHREAD=1; \
 	node "$$test_dir/receive_bounds.js"
 
-test-silverlink-wasm: $(TARGET)
-	node tests/test_silverlink_recovery.js $(TARGET)
+test-ti-link-wasm: $(TARGET)
+	node tests/test_ti_link_wasm.cjs $(TARGET)
+
+test-silverlink-wasm: test-ti-link-wasm
+
+.PHONY: test-ti-link-wasm test-silverlink-wasm
 
 clean:
 	rm -f $(TARGET) webtilp.wasm webtilp.worker.js sw.js version.json $(APP_JS_BUNDLE) $(NUMWORKS_JS_BUNDLE) $(BUILD_PROFILE_CSS) $(PYTHON_CONVERTER_ASSETS)

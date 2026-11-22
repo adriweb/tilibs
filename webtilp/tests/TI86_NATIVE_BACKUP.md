@@ -47,7 +47,7 @@ propagation, and TI-83 automatic/TI-82 and TI-85 manual controls.
 
 `make -C webtilp test` checks the instructions, cancellation of the backup
 dialog, receive ordering, and manual versus automatic frontend deadlines.
-`make -C webtilp test-silverlink-wasm` checks the actual compiled bridge:
+`make -C webtilp test-ti-link-wasm` checks the actual compiled bridge:
 the initial human wait exceeds 1.1 seconds without transmitting a request;
 once bytes arrive the normal packet deadline resumes; a stalled backup
 fails; subsequent reception and bomb cancellation recover with both
