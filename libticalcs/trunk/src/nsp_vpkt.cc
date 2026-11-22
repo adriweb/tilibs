@@ -848,6 +848,14 @@ static int nsp_wait_for_raw_packet(CalcHandle *handle, gint64 deadline)
 	return ERROR_READ_TIMEOUT;
 }
 
+static bool nsp_is_unassigned_address_request(const NSPRawPacket *packet)
+{
+	// WebUSB can initiate address assignment before reading the queued
+	// address request. The assignment itself answers it.
+	return !packet->ack && packet->src_addr == 0 && packet->dst_addr == 0
+	    && packet->src_port == NSP_PORT_ADDR_REQUEST && packet->dst_port == NSP_PORT_ADDR_ASSIGN;
+}
+
 // Receive and acknowledge a packet for the active legacy NavNet session.
 static int nsp_recv_session_packet(CalcHandle *handle, NSPRawPacket *packet,
                                    uint8_t *extended_data, uint32_t capacity, uint32_t *extended_size, gint64 deadline)
@@ -873,7 +881,7 @@ static int nsp_recv_session_packet(CalcHandle *handle, NSPRawPacket *packet,
 		{
 			return ret;
 		}
-		if (packet->ack || !packet->data_size)
+		if (packet->ack || !packet->data_size || nsp_is_unassigned_address_request(packet))
 		{
 			continue;
 		}
@@ -1084,6 +1092,11 @@ int TICALL nsp_recv_ack(CalcHandle *handle)
 		if (ret)
 		{
 			return ret;
+		}
+
+		if (nsp_is_unassigned_address_request(&pkt))
+		{
+			continue;
 		}
 
 		// A previous session can leave an extended data packet

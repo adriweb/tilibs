@@ -478,6 +478,63 @@ static void check_legacy_navnet_payload_selection(void)
 }
 #endif
 
+static void check_cx_address_request_during_echo(void)
+{
+	struct Wire
+	{
+		uint8_t reply[4 * NSP_HEADER_SIZE + 13] = {
+			// Pending address request from before the host-initiated assignment.
+			0x54, 0xfd, 0, 0, 0x40, 0x03, 0, 0, 0x40, 0x03,
+			0xec, 0x0f, 2, 0, 1, 0xd5, 0x0f, 0xec,
+			// The requested Echo ACK follows it.
+			0x54, 0xfd, 0x64, 0x01, 0, 0xff, 0x64, 0, 0x80, 0x02,
+			0x02, 0x40, 2, 0x0a, 1, 0xea, 0x40, 0x02,
+			// A request can also arrive while waiting for the Echo response.
+			0x54, 0xfd, 0, 0, 0x40, 0x03, 0, 0, 0x40, 0x03,
+			0xec, 0x0f, 2, 0, 1, 0xd5, 0x0f, 0xec,
+			0x54, 0xfd, 0x64, 0x01, 0x40, 0x02, 0x64, 0, 0x80, 0x02,
+			0x06, 0x15, 7, 0, 1, 0x01, 0, 'r', 'e', 'a', 'd', 'y', 0
+		};
+		size_t offset = 0;
+		unsigned int writes = 0;
+	} wire;
+	CableFncts functions = {};
+	functions.recv = [](CableHandle *cable, uint8_t *data, uint32_t size) -> int {
+		auto &state = *static_cast<Wire *>(cable->priv);
+		CHECK(size <= sizeof(state.reply) - state.offset);
+		memcpy(data, state.reply + state.offset, size);
+		state.offset += size;
+		return 0;
+	};
+	functions.send = [](CableHandle *cable, uint8_t *data, uint32_t size) -> int {
+		CHECK(size == NSP_HEADER_SIZE + 2);
+		CHECK(data[8] == 0x40 && data[9] == 0x02);
+		++static_cast<Wire *>(cable->priv)->writes;
+		return 0;
+	};
+	CableHandle cable = {};
+	cable.cable = &functions;
+	cable.priv = &wire;
+	cable.open = 1;
+	CalcHandle *handle = ticalcs_handle_new(CALC_NSPIRE_CX);
+	CHECK(handle);
+	handle->cable = &cable;
+	handle->priv.nsp_src_port = 0x8002;
+	handle->priv.nsp_dst_port = NSP_PORT_ECHO;
+	handle->priv.nsp_seq_pc = 1;
+
+	CHECK(nsp_recv_ack(handle) == 0);
+	CHECK(wire.offset == 2 * (NSP_HEADER_SIZE + 2) && wire.writes == 0);
+	CHECK(handle->priv.nsp_seq_pc == 2);
+	const uint8_t ready[] = {0, 'r', 'e', 'a', 'd', 'y', 0};
+	uint8_t data[sizeof(ready)];
+	uint32_t received = 0;
+	CHECK(nsp_session_read(handle, data, sizeof(data), &received) == 0);
+	CHECK(received == sizeof(ready) && memcmp(data, ready, sizeof(ready)) == 0);
+	CHECK(wire.offset == sizeof(wire.reply) && wire.writes == 1);
+	ticalcs_handle_del(handle);
+}
+
 static void check_cx_extended_file_contents(void)
 {
 	struct Wire
@@ -592,6 +649,7 @@ int main(void)
 #ifndef __EMSCRIPTEN__
 	check_legacy_navnet_payload_selection();
 #endif
+	check_cx_address_request_during_echo();
 	check_cx_extended_file_contents();
 	return 0;
 }
