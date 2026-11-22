@@ -42,6 +42,17 @@ extern "C" {
 #define NSP_PORT_ECHO           0x4002
 #define NSP_PORT_ADDR_REQUEST   0x4003
 #define NSP_PORT_ADDR_ASSIGN    0x4003
+#define NSP_PORT_TUNE           0x4004
+#define NSP_PORT_STAT           0x4005
+#define NSP_PORT_TEST           0x4006
+#define NSP_PORT_SVC_REGISTER   0x4010
+#define NSP_PORT_SVC_UNREGISTER 0x4011
+#define NSP_PORT_SVC_ENUM       0x4012
+#define NSP_PORT_CONN_ENUM      0x4013
+#define NSP_PORT_LWS_HUB_CONNECT 0x4014
+#define NSP_PORT_SOCKET_MODE    0x4015
+#define NSP_PORT_NETWORK_UTIL   0x4016
+#define NSP_PORT_NODE_NOTIFY    0x4017
 #define NSP_PORT_DEV_INFOS      0x4020
 #define NSP_PORT_SCREENSHOT     0x4021
 #define NSP_PORT_EVENT          0x4022
@@ -52,6 +63,7 @@ extern "C" {
 #define NSP_PORT_RPC            0x4043
 #define NSP_PORT_LOGIN          0x4050
 #define NSP_PORT_MESSAGES       0x4051
+#define NSP_PORT_PRESENTATION   0x4052
 #define NSP_PORT_HUB_CONNECTION 0x4054
 #define NSP_PORT_FILE_MGMT      0x4060
 #define NSP_PORT_TIROBOT        0x4070
