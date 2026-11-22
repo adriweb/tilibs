@@ -813,6 +813,7 @@ int TICALL ticalcs_cable_attach(CalcHandle* handle, CableHandle* cable)
 
 		nsp_nnse_reset(handle);
 		handle->priv.nsp_navnet_extended = 0;
+		handle->priv.nsp_screen_depth = 0;
 		handle->priv.nsp_navnet_peer_limit = 0;
 
 		ret = ticables_cable_open(cable);

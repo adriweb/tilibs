@@ -1410,6 +1410,7 @@ retry_get_version:
 		infos_mask |= INFOS_LCD_HEIGHT;
 
 		infos->bits_per_pixel = data[62];
+		handle->priv.nsp_screen_depth = data[62];
 		infos_mask |= INFOS_BPP;
 
 		infos->device_type = data[64];

@@ -1060,6 +1060,7 @@ struct _CalcHandle
 		uint16_t nsp_nnse_last_stream_seqno; // last delivered incoming NNSE stream sequence number
 		uint16_t nsp_nnse_passive_port; // extra calculator-initiated service port accepted by a passive operation
 		uint8_t nsp_nnse_has_last_stream_seqno; // whether nsp_nnse_last_stream_seqno is valid
+		uint8_t nsp_screen_depth; // LCD bits per pixel from Device Info, or 0 if unknown
 		uint16_t nsp_navnet_peer_limit; // 0 = unknown, 1 = Echo probe needed, 254 = standard only
 		unsigned int nsp_nnse_stream_timeout; // temporary receive timeout override in tenths of seconds; 0 = normal ceiling
 		void * nsp_nnse_rx_buffer; // raw NNSE bytes already consumed from USB while resynchronizing
