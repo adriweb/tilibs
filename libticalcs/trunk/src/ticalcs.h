@@ -1055,10 +1055,12 @@ struct _CalcHandle
 		uint8_t gdx_rolling_counter;
 		uint8_t nsp_nnse_mode; // 0 = not determined yet, 1 = legacy NavNet framing, 2 = NNSE framing (Nspire CX II)
 		uint8_t nsp_nnse_handshake_done; // NNSE handshake (address + time requests) performed
+		uint8_t nsp_navnet_extended; // a larger limit is active on the legacy link
 		uint16_t nsp_nnse_seqno; // NNSE-level sequence number
 		uint16_t nsp_nnse_last_stream_seqno; // last delivered incoming NNSE stream sequence number
 		uint16_t nsp_nnse_passive_port; // extra calculator-initiated service port accepted by a passive operation
 		uint8_t nsp_nnse_has_last_stream_seqno; // whether nsp_nnse_last_stream_seqno is valid
+		uint16_t nsp_navnet_peer_limit; // 0 = unknown, 1 = Echo probe needed, 254 = standard only
 		unsigned int nsp_nnse_stream_timeout; // temporary receive timeout override in tenths of seconds; 0 = normal ceiling
 		void * nsp_nnse_rx_buffer; // raw NNSE bytes already consumed from USB while resynchronizing
 		void * nsp_nnse_pending; // NNSE stream payloads received while waiting for NNSE-level acks

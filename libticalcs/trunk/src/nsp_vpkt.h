@@ -33,6 +33,9 @@ extern "C" {
 
 #define NSP_SRC_ADDR            0x6400
 #define NSP_DEV_ADDR            0x6401
+// TI NavNet permits a 4 KiB USB packet, including the extended header.
+#define NSP_CX_MAX_PAYLOAD (4096 - NSP_HEADER_SIZE - 4)
+#define NSP_NAVNET_PROBE_PENDING 1 // WebUSB OS version permits an extended Echo probe
 
 #define NSP_PORT_PKT_NACK       0x00D3
 #define NSP_PORT_PKT_ACK1       0x00FE
@@ -89,6 +92,21 @@ TIEXPORT3 int TICALL nsp_session_read(CalcHandle *handle, uint8_t *data, uint32_
 
 TIEXPORT3 int TICALL nsp_addr_request(CalcHandle *handle);
 TIEXPORT3 int TICALL nsp_addr_assign(CalcHandle *handle, uint16_t dev_addr);
+int nsp_addr_assign_extended(CalcHandle *handle, uint16_t max_payload);
+
+int nsp_probe_extended_echo(CalcHandle *handle, uint16_t limit);
+int nsp_enable_extended_payloads(CalcHandle *handle);
+int nsp_restore_standard_payloads(CalcHandle *handle, int ret);
+
+static inline int nsp_is_original_cx(CalcModel model)
+{
+	return model == CALC_NSPIRE_CX || model == CALC_NSPIRE_CX_CAS;
+}
+
+static inline int nsp_is_legacy_handheld(CalcModel model)
+{
+	return model == CALC_NSPIRE || (model >= CALC_NSPIRE_CLICKPAD && model <= CALC_NSPIRE_CX_CAS);
+}
 
 TIEXPORT3 int TICALL nsp_send_ack(CalcHandle *handle);
 TIEXPORT3 int TICALL nsp_recv_ack(CalcHandle *handle);

@@ -37,6 +37,10 @@
 #include <stdlib.h>
 #include <string.h>
 
+#ifdef __EMSCRIPTEN__
+#include <emscripten.h>
+#endif
+
 #include "ticalcs.h"
 #include "internal.h"
 #include "logging.h"
@@ -45,6 +49,7 @@
 #include "nsp_cmd.h"
 
 #include "nsp_vpkt.h"
+#include "nsp_rpkt.h"
 #include "nsp_limits.h"
 #include "nsp_nnse.h"
 
@@ -671,15 +676,18 @@ int TICALL nsp_addr_request(CalcHandle *handle)
 		return nsp_nnse_ensure_ready(handle);
 	}
 
+	handle->priv.nsp_dst_port = NSP_PORT_ADDR_REQUEST;
+
 #ifdef __EMSCRIPTEN__
-	// The CX accepts a host-initiated address assignment. WebUSB does not
-	// perform the bus reset that would otherwise prompt the CX to request one.
-	if (handle->model == CALC_NSPIRE_CX || handle->model == CALC_NSPIRE_CX_CAS)
+	// WebUSB cannot reset the device to prompt a legacy address request.
+	if (nsp_is_legacy_handheld(handle->model))
 	{
 		handle->priv.nsp_seq_pc = 1;
 		return 0;
 	}
 #endif
+
+	handle->priv.nsp_navnet_peer_limit = NSP_DATA_SIZE;
 
 	// Reset connection so that device send an address request packet
 	int ret = handle->cable->cable->reset(handle->cable);
@@ -697,13 +705,18 @@ int TICALL nsp_addr_request(CalcHandle *handle)
 			{
 				ret = ERR_INVALID_PACKET;
 			}
+			else if (nsp_is_legacy_handheld(handle->model) && pkt.data_size >= 2)
+			{
+				const uint16_t advertised = ((uint16_t)pkt.data[0] << 8) | pkt.data[1];
+				handle->priv.nsp_navnet_peer_limit = CLAMP(advertised, NSP_DATA_SIZE, NSP_CX_MAX_PAYLOAD);
+			}
 		}
 	}
 
 	return ret;
 }
 
-int TICALL nsp_addr_assign(CalcHandle *handle, uint16_t addr)
+static int nsp_send_address_assignment(CalcHandle *handle, uint16_t addr, uint16_t max_payload)
 {
 	NSPRawPacket pkt;
 
@@ -721,10 +734,46 @@ int TICALL nsp_addr_assign(CalcHandle *handle, uint16_t addr)
 	pkt.dst_port = NSP_PORT_ADDR_ASSIGN;
 	pkt.data[0] = MSB(addr);
 	pkt.data[1] = LSB(addr);
-	pkt.data[2] = 0xFF;
-	pkt.data[3] = 0x00;
-
+	if (max_payload)
+	{
+		// Extended assignment includes the host address and a payload limit.
+		pkt.data_size = 8;
+		pkt.data[2] = MSB(NSP_SRC_ADDR);
+		pkt.data[3] = LSB(NSP_SRC_ADDR);
+		pkt.data[6] = MSB(max_payload);
+		pkt.data[7] = LSB(max_payload);
+	}
+	else
+	{
+		pkt.data[2] = 0xFF;
+	}
 	return nsp_send(handle, &pkt);
+}
+
+int TICALL nsp_addr_assign(CalcHandle *handle, uint16_t addr)
+{
+	const int ret = nsp_send_address_assignment(handle, addr, 0);
+	if (!ret)
+	{
+		handle->priv.nsp_navnet_extended = 0;
+	}
+	return ret;
+}
+
+int nsp_addr_assign_extended(CalcHandle *handle, uint16_t max_payload)
+{
+	VALIDATE_HANDLE(handle);
+	if (max_payload < NSP_DATA_SIZE || max_payload > NSP_CX_MAX_PAYLOAD)
+	{
+		return ERR_INVALID_PARAMETER;
+	}
+	handle->priv.nsp_seq_pc = 1;
+	const int ret = nsp_send_address_assignment(handle, NSP_DEV_ADDR, max_payload);
+	if (!ret)
+	{
+		handle->priv.nsp_navnet_extended = max_payload > NSP_DATA_SIZE;
+	}
+	return ret;
 }
 
 // Acknowledgement
@@ -767,6 +816,86 @@ static int nsp_send_ack_for_raw(CalcHandle* handle, const NSPRawPacket* packet)
 	return nsp_send(handle, &ack);
 }
 
+
+static bool nsp_uses_session_packets(const CalcHandle *handle)
+{
+	return nsp_is_original_cx(handle->model) || handle->priv.nsp_navnet_extended
+	    || handle->priv.nsp_navnet_peer_limit > NSP_DATA_SIZE;
+}
+
+static int nsp_wait_for_raw_packet(CalcHandle *handle, gint64 deadline)
+{
+	// WebUSB cannot cancel a blocking transferIn if the calculator
+	// ignores the Echo. Poll before reading each reply packet.
+	while (g_get_monotonic_time() < deadline)
+	{
+		if (handle->updat->cancel)
+		{
+			return ERR_ABORT;
+		}
+		CableStatus status = STATUS_NONE;
+		const int ret = ticables_cable_check(handle->cable, &status);
+		if (ret || (status & STATUS_RX))
+		{
+			return ret;
+		}
+#ifdef __EMSCRIPTEN__
+		emscripten_sleep(1);
+#else
+		g_usleep(1000);
+#endif
+	}
+	return ERROR_READ_TIMEOUT;
+}
+
+// Receive and acknowledge a packet for the active legacy NavNet session.
+static int nsp_recv_session_packet(CalcHandle *handle, NSPRawPacket *packet,
+                                   uint8_t *extended_data, uint32_t capacity, uint32_t *extended_size, gint64 deadline)
+{
+	for (;;)
+	{
+		if (deadline)
+		{
+			const int ready_ret = nsp_wait_for_raw_packet(handle, deadline);
+			if (ready_ret)
+			{
+				return ready_ret;
+			}
+		}
+		memset(packet, 0, sizeof(*packet));
+		if (extended_size)
+		{
+			*extended_size = 0;
+		}
+		int ret = extended_data ? nsp_recv_extended(handle, packet, extended_data, capacity, extended_size)
+		                        : nsp_recv(handle, packet);
+		if (ret)
+		{
+			return ret;
+		}
+		if (packet->ack || !packet->data_size)
+		{
+			continue;
+		}
+		const uint16_t checksum = extended_size && *extended_size
+		                        ? nsp_compute_crc(extended_data, *extended_size + 4)
+		                        : nsp_compute_crc(packet->data, packet->data_size);
+		if (packet->data_sum != checksum)
+		{
+			return ERR_CHECKSUM;
+		}
+		ret = nsp_send_ack_for_raw(handle, packet);
+		if (ret)
+		{
+			return ret;
+		}
+		// The calculator can send a delayed disconnect from the previous session.
+		if (packet->src_port == handle->priv.nsp_dst_port && packet->dst_port == handle->priv.nsp_src_port)
+		{
+			return 0;
+		}
+	}
+}
 
 // Live Presenter uses NavNet payloads verbatim, including continuation packets.
 int TICALL nsp_session_write(CalcHandle *handle, const uint8_t *data, uint32_t size)
@@ -824,37 +953,74 @@ int TICALL nsp_session_read(CalcHandle *handle, uint8_t *data, uint32_t capacity
 		}
 
 		NSPRawPacket packet;
-		memset(&packet, 0, sizeof(packet));
-		int ret = nsp_recv(handle, &packet);
+		uint8_t extended_data[4 + NSP_CX_MAX_PAYLOAD];
+		uint32_t extended_size;
+		const bool extended = nsp_uses_session_packets(handle);
+		const int ret = nsp_recv_session_packet(handle, &packet, extended ? extended_data : nullptr,
+		                                        sizeof(extended_data), &extended_size, 0);
 		if (ret)
 		{
 			return ret;
 		}
-		if (packet.ack || !packet.data_size)
-		{
-			continue;
-		}
-		if (packet.data_sum != nsp_compute_crc(packet.data, packet.data_size))
-		{
-			return ERR_CHECKSUM;
-		}
-		ret = nsp_send_ack_for_raw(handle, &packet);
-		if (ret)
-		{
-			return ret;
-		}
-		if (packet.src_port != handle->priv.nsp_dst_port || packet.dst_port != handle->priv.nsp_src_port)
-		{
-			continue;
-		}
-		if (packet.data_size > capacity)
+		const uint32_t payload_size = extended_size ? extended_size : packet.data_size;
+		if (payload_size > capacity)
 		{
 			return ERR_INVALID_PACKET;
 		}
-		*size = packet.data_size;
-		memcpy(data, packet.data, *size);
+		*size = payload_size;
+		memcpy(data, extended_size ? extended_data + 4 : packet.data, *size);
 		return 0;
 	}
+}
+
+int nsp_probe_extended_echo(CalcHandle *handle, uint16_t limit)
+{
+	if (limit <= NSP_DATA_SIZE || limit > NSP_CX_MAX_PAYLOAD)
+	{
+		return ERR_INVALID_PARAMETER;
+	}
+
+	int ret = nsp_session_open(handle, NSP_PORT_ECHO);
+	if (ret)
+	{
+		return ret;
+	}
+
+	uint8_t sent[NSP_CX_MAX_PAYLOAD];
+	uint8_t received[4 + NSP_CX_MAX_PAYLOAD];
+	for (uint32_t i = 0; i < limit; ++i)
+	{
+		sent[i] = (uint8_t)(13 * i + 42);
+	}
+
+	NSPRawPacket packet;
+	memset(&packet, 0, sizeof(packet));
+	packet.src_addr = NSP_SRC_ADDR;
+	packet.src_port = handle->priv.nsp_src_port;
+	packet.dst_addr = NSP_DEV_ADDR;
+	packet.dst_port = NSP_PORT_ECHO;
+
+	ret = nsp_send_extended(handle, &packet, sent, limit);
+	if (!ret)
+	{
+		// Let a USB read already queued by the probe receive the next
+		// standard packet if the one-second Echo deadline expires.
+		const unsigned int timeout = handle->cable->timeout;
+		ticables_options_set_timeout(handle->cable, MAX(timeout, 50U));
+		const gint64 deadline = g_get_monotonic_time() + G_TIME_SPAN_SECOND;
+		uint32_t size;
+		ret = nsp_recv_session_packet(handle, &packet, received, sizeof(received), &size, deadline);
+		ticables_options_set_timeout(handle->cable, timeout);
+		if (!ret)
+		{
+			const bool matches = size == limit && !memcmp(sent, received + 4, limit);
+			const int close_ret = nsp_session_close(handle);
+			ret = matches ? close_ret : ERR_INVALID_PACKET;
+		}
+	}
+
+	// A silent peer cannot acknowledge a session close either.
+	return ret;
 }
 
 int TICALL nsp_send_nack(CalcHandle* handle)
@@ -906,17 +1072,35 @@ int TICALL nsp_recv_ack(CalcHandle *handle)
 
 	ticalcs_info("  receiving ack:");
 
+	uint8_t extended_data[4 + NSP_CX_MAX_PAYLOAD];
 	for (;;)
 	{
 		memset(&pkt, 0, sizeof(pkt));
 
-		ret = nsp_recv(handle, &pkt);
+		uint32_t extended_size = 0;
+		ret = nsp_uses_session_packets(handle)
+		    ? nsp_recv_extended(handle, &pkt, extended_data, sizeof(extended_data), &extended_size)
+		    : nsp_recv(handle, &pkt);
 		if (ret)
 		{
 			return ret;
 		}
 
-		if (pkt.data_size >= 1 && (pkt.data[0] == NSP_CMD_OS_OK || pkt.data[0] == NSP_CMD_STATUS))
+		// A previous session can leave an extended data packet
+		// in flight. Consume it before interpreting the short ACK payload.
+		if (extended_size)
+		{
+			if (pkt.ack)
+			{
+				continue;
+			}
+			if (pkt.data_sum != nsp_compute_crc(extended_data, extended_size + 4))
+			{
+				return ERR_CHECKSUM;
+			}
+		}
+
+		if (!extended_size && pkt.data_size >= 1 && (pkt.data[0] == NSP_CMD_OS_OK || pkt.data[0] == NSP_CMD_STATUS))
 		{
 			handle->priv.nsp_pending_cmd = pkt.data[0];
 			handle->priv.nsp_has_pending_status = 0;
@@ -1093,7 +1277,7 @@ int TICALL nsp_recv_disconnect(CalcHandle *handle)
 int TICALL nsp_send_data(CalcHandle *handle, NSPVirtualPacket *vtl)
 {
 	NSPRawPacket raw;
-	long offset = 0;
+	uint32_t offset = 0;
 	int ret = 0;
 	CalcEventData event;
 
@@ -1118,10 +1302,13 @@ int TICALL nsp_send_data(CalcHandle *handle, NSPVirtualPacket *vtl)
 		raw.dst_addr = vtl->dst_addr;
 		raw.dst_port = vtl->dst_port;
 
-		if (nsp_nnse_enabled(handle))
+		const int nnse = nsp_nnse_enabled(handle);
+		const bool extended = handle->priv.nsp_navnet_extended && handle->priv.nsp_navnet_peer_limit > NSP_DATA_SIZE
+		                   && vtl->dst_port == NSP_PORT_FILE_MGMT && vtl->cmd == NSP_CMD_FM_CONTENTS;
+		if (nnse || extended)
 		{
-			uint8_t data[NSP_NNSE_DATA_SIZE];
-			const uint32_t chunk_payload_size = NSP_NNSE_DATA_SIZE - 1;
+			uint8_t data[NSP_CX_MAX_PAYLOAD];
+			const uint32_t chunk_payload_size = (nnse ? NSP_NNSE_DATA_SIZE : handle->priv.nsp_navnet_peer_limit) - 1;
 
 			do
 			{
@@ -1134,7 +1321,18 @@ int TICALL nsp_send_data(CalcHandle *handle, NSPVirtualPacket *vtl)
 				}
 				offset += copy_size;
 
-				ret = nsp_nnse_send_raw_data(handle, &raw, data, copy_size + 1);
+				if (nnse)
+				{
+					ret = nsp_nnse_send_raw_data(handle, &raw, data, copy_size + 1);
+				}
+				else
+				{
+					ret = nsp_send_extended(handle, &raw, data, copy_size + 1);
+					if (!ret)
+					{
+						ret = nsp_recv_ack(handle);
+					}
+				}
 				if (ret)
 				{
 					break;
@@ -1143,7 +1341,7 @@ int TICALL nsp_send_data(CalcHandle *handle, NSPVirtualPacket *vtl)
 				handle->updat->max1 = vtl->size;
 				handle->updat->cnt1 = offset;
 				handle->updat->pbar();
-			} while ((uint32_t)offset < vtl->size);
+			} while (offset < vtl->size);
 		}
 		else
 		{
@@ -1290,17 +1488,29 @@ int TICALL nsp_recv_data(CalcHandle* handle, NSPVirtualPacket* vtl)
 			}
 			else
 			{
+				const bool filter_session = nsp_uses_session_packets(handle) && handle->priv.nsp_src_port >= NSP_CLIENT_PORT_FIRST
+				                          && handle->priv.nsp_dst_port >= NSP_PORT_ECHO && handle->priv.nsp_dst_port != NSP_PORT_ADDR_REQUEST;
+				uint8_t extended_data[4 + NSP_CX_MAX_PAYLOAD];
 				for (;;)
 				{
-					ret = nsp_recv(handle, &raw);
+					uint32_t extended_size = 0;
+					ret = filter_session ? nsp_recv_session_packet(handle, &raw, extended_data, sizeof(extended_data), &extended_size, 0)
+					                 : nsp_recv(handle, &raw);
 					if (ret)
 					{
 						break;
 					}
-					if (raw.data_size > 0)
+					const uint8_t *payload = extended_size ? extended_data + 4 : raw.data;
+					const uint32_t payload_size = extended_size ? extended_size : raw.data_size;
+					if (payload_size)
 					{
-						vtl->cmd = raw.data[0];
-						ret = nsp_vtl_pkt_append_data(vtl, size, raw.data + 1, raw.data_size - 1U);
+						if (filter_session && vtl->size && vtl->cmd != payload[0])
+						{
+							ret = ERR_INVALID_PACKET;
+							break;
+						}
+						vtl->cmd = payload[0];
+						ret = nsp_vtl_pkt_append_data(vtl, size, payload + 1, payload_size - 1);
 						if (ret)
 						{
 							break;
@@ -1311,7 +1521,7 @@ int TICALL nsp_recv_data(CalcHandle* handle, NSPVirtualPacket* vtl)
 						handle->updat->pbar();
 					}
 
-					if (raw.dst_port == NSP_PORT_LOGIN)
+					if (!filter_session && raw.dst_port == NSP_PORT_LOGIN)
 					{
 						ret = nsp_send_nack_ex(handle, raw.src_port);
 						if (ret)
@@ -1319,7 +1529,7 @@ int TICALL nsp_recv_data(CalcHandle* handle, NSPVirtualPacket* vtl)
 							break;
 						}
 					}
-					else if (raw.src_port != NSP_PORT_ADDR_ASSIGN && raw.dst_port != NSP_PORT_ADDR_REQUEST)
+					else if (!filter_session && raw.src_port != NSP_PORT_ADDR_ASSIGN && raw.dst_port != NSP_PORT_ADDR_REQUEST)
 					{
 						ret = nsp_send_ack(handle);
 						if (ret)
@@ -1328,11 +1538,17 @@ int TICALL nsp_recv_data(CalcHandle* handle, NSPVirtualPacket* vtl)
 						}
 					}
 
-					if (raw.data_size < NSP_DATA_SIZE)
+					if (size && vtl->size == size)
 					{
 						break;
 					}
-					if (size && vtl->size == size)
+					// File contents are delimited by the advertised file size.
+					// A peer can still use shorter fragments than the requested limit.
+					const bool file_contents = filter_session && size && handle->priv.nsp_dst_port == NSP_PORT_FILE_MGMT
+					                           && vtl->cmd == NSP_CMD_FM_CONTENTS;
+					const uint32_t limit = handle->priv.nsp_navnet_extended
+					                     ? MAX(NSP_DATA_SIZE, handle->priv.nsp_navnet_peer_limit) : NSP_DATA_SIZE;
+					if (file_contents ? payload_size <= 1 : payload_size < limit)
 					{
 						break;
 					}
