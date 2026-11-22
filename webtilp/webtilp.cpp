@@ -774,6 +774,32 @@ static void write_var_entry_json(FILE* fp, const VarEntry* ve, const char* kind)
             (unsigned int)ve->size, ve->attr, kind, is_folder ? 1 : 0);
 }
 
+EM_JS(void, nspire_dirlist_update_js, (const char* entry, const char* reset_folder), {
+    if (Module.__nspireDirlistUpdate) {
+        Module.__nspireDirlistUpdate(entry ? UTF8ToString(entry) : null,
+            reset_folder ? UTF8ToString(reset_folder) : null);
+    }
+});
+
+static void publish_nspire_dirlist_event(const CalcEventData* event)
+{
+    if (event->type == CALC_EVENT_TYPE_DIRLIST_FOLDER_RESET) {
+        nspire_dirlist_update_js(nullptr, event->data.dirlist_folder);
+    } else if (event->type == CALC_EVENT_TYPE_DIRLIST_ENTRY && event->data.dirlist_entry->name[0]) {
+        char* json = nullptr;
+        size_t size = 0;
+        FILE* fp = open_memstream(&json, &size);
+        if (fp) {
+            write_var_entry_json(fp, event->data.dirlist_entry, "var");
+            const bool written = !ferror(fp);
+            if (fclose(fp) == 0 && written) {
+                nspire_dirlist_update_js(json, nullptr);
+            }
+            free(json);
+        }
+    }
+}
+
 static void write_dirlist_json(FILE* fp, const GNode* node, const char* kind, int* first)
 {
     if (!node) {
@@ -1589,7 +1615,7 @@ int calc_sync_clock(CableHandle* cable_handle, int offset_minutes)
 }
 
 EMSCRIPTEN_KEEPALIVE
-int calc_dirlist_json(CableHandle* cable_handle, const char* path) {
+int calc_dirlist_json(CableHandle* cable_handle, const char* path, int stream_entries) {
     if (!cable_handle) {
         printf("ERROR: NULL cable handle provided\n");
         return -1;
@@ -1601,10 +1627,32 @@ int calc_dirlist_json(CableHandle* cable_handle, const char* path) {
         return ready_result;
     }
 
+    struct DirlistEventState {
+        ticalcs_event_hook_type previous_hook;
+        void* previous_user;
+    } event_state{ticalcs_calc_get_event_hook(g_calc_handle),
+        ticalcs_calc_get_event_user_pointer(g_calc_handle)};
+    const bool stream_nspire = stream_entries && ticonv_model_is_tinspire(g_calc_model);
+    if (stream_nspire) {
+        ticalcs_calc_set_event_user_pointer(g_calc_handle, &event_state);
+        ticalcs_calc_set_event_hook(g_calc_handle,
+            [](CalcHandle* handle, uint32_t count, const CalcEventData* event, void* user) {
+                publish_nspire_dirlist_event(event);
+                auto* state = static_cast<DirlistEventState*>(user);
+                return state->previous_hook
+                    ? state->previous_hook(handle, count, event, state->previous_user) : event->retval;
+            });
+    }
     GNode* vars = nullptr;
     GNode* apps = nullptr;
     const int result = ticalcs_calc_get_dirlist(g_calc_handle, &vars, &apps);
+    if (stream_nspire) {
+        ticalcs_calc_set_event_hook(g_calc_handle, event_state.previous_hook);
+        ticalcs_calc_set_event_user_pointer(g_calc_handle, event_state.previous_user);
+    }
     if (result != 0) {
+        ticalcs_dirlist_destroy(&vars);
+        ticalcs_dirlist_destroy(&apps);
         return result;
     }
 

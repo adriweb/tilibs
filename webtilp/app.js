@@ -529,6 +529,7 @@ const state = {
     deviceInfoEntries: [],
     features: 0,
     dirlist: [],
+    nspireDirlistPreview: null,
     backupDirlistLoaded: false,
     backupDirlistGeneration: 0,
     backupDirlistInProgress: false,
@@ -4846,6 +4847,7 @@ function logError(err, context) {
 
 function clearActiveOperations(message) {
     state.operationEpoch += 1;
+    state.nspireDirlistPreview = null;
     state.nspireLiveScreen = null;
     if (els.btnNspireLiveScreen) updateNspireLiveScreenControl();
     // Note: the per-module Asyncify call chain (getModuleCallState) is left
@@ -4980,7 +4982,9 @@ function refreshProgressDetails() {
     const cnt = Number(info.cnt);
     const max = Number(info.max);
     const rate = Number(info.rate);
-    if (Number.isFinite(max) && max > 0 && Number.isFinite(cnt)) {
+    // NavNet reports packet bytes, but the directory's entry count is unknown.
+    const listingNspire = state.nspireDirlistPreview && state.progressLabel === t('loading_dirlist');
+    if (!listingNspire && Number.isFinite(max) && max > 0 && Number.isFinite(cnt)) {
         const percent = Math.max(0, Math.min(100, Math.round((cnt / max) * 100)));
         els.progressBarFill.classList.add('determinate');
         els.progressBarFill.style.width = `${percent}%`;
@@ -6579,8 +6583,11 @@ async function updateCapabilities() {
     els.btnBackupDirlist?.classList.toggle('hidden', !canListBackup);
     els.backupDirlistNote?.classList.toggle('hidden', !(canListBackup && state.backupDirlistLoaded));
     if (els.btnRefreshDirlist) {
-        els.btnRefreshDirlist.classList.toggle('disabled', !hasDirlist && !canListBackup);
-        els.btnRefreshDirlist.disabled = !hasDirlist && !canListBackup;
+        const unavailable = !hasDirlist && !canListBackup;
+        const loading = els.btnRefreshDirlist.classList.contains('loading');
+        els.btnRefreshDirlist.classList.toggle('disabled', unavailable);
+        els.btnRefreshDirlist.disabled = unavailable || loading;
+        if (loading) els.btnRefreshDirlist.dataset.prevDisabled = unavailable ? '1' : '0';
         els.btnRefreshDirlist.title = '';
     }
     if (els.btnScreenshot) {
@@ -7414,6 +7421,51 @@ async function refreshBackupDirlist(module, handle) {
     }
 }
 
+function beginNspireDirlistPreview(module) {
+    const epoch = state.operationEpoch;
+    const selectionKeys = getSelectedVarKeys();
+    const preview = { entries: [], finish };
+    let renderTimer;
+    const isCurrent = () => state.nspireDirlistPreview === preview
+        && state.module === module && state.operationEpoch === epoch;
+    const onUpdate = (json, resetFolder) => {
+        if (!isCurrent()) return;
+        try {
+            if (json !== null) {
+                preview.entries.push(JSON.parse(json));
+            } else {
+                // NNSE retries the current folder before enumerating its children.
+                preview.entries = preview.entries.filter(entry => entry.folder !== resetFolder);
+            }
+        } catch (error) {
+            console.warn('[WebTILP] Ignoring invalid Nspire directory entry.', error);
+            return;
+        }
+        // The table rebuilds its sorted tree. Batch adjacent USB replies.
+        if (renderTimer === undefined) {
+            renderTimer = setTimeout(() => {
+                renderTimer = undefined;
+                if (isCurrent()) renderDirlist(state.dirlist);
+            }, 80);
+        }
+    };
+
+    function finish() {
+        clearTimeout(renderTimer);
+        if (module.__nspireDirlistUpdate === onUpdate) module.__nspireDirlistUpdate = null;
+        if (state.nspireDirlistPreview === preview) {
+            const current = isCurrent();
+            state.nspireDirlistPreview = null;
+            if (current) renderDirlist(state.dirlist, selectionKeys);
+        }
+    }
+
+    state.nspireDirlistPreview = preview;
+    module.__nspireDirlistUpdate = onUpdate;
+    renderDirlist(state.dirlist);
+    return preview;
+}
+
 async function refreshDirlist({ manual = false } = {}) {
     if (state?.activeFamily === 'sharp') {
         await runSharpOperation(t('sharp_list'), async backend => {
@@ -7424,6 +7476,7 @@ async function refreshDirlist({ manual = false } = {}) {
         return;
     }
 
+    if (isNspireActive() && els.btnRefreshDirlist?.classList.contains('loading')) return;
     setButtonLoading(els.btnRefreshDirlist, true);
     try {
         if (isHPPrimeActive()) {
@@ -7470,22 +7523,29 @@ async function refreshDirlist({ manual = false } = {}) {
             if (manual) await refreshBackupDirlist(module, handle);
             return;
         }
-        const result = await ccallAsync(module, 'calc_dirlist_json', 'number', ['number', 'string'], [handle, '/dirlist.json'], { timeoutMs: null, useProgress: true, progressLabel: 'Loading directory listing' });
-        if (result !== 0) {
-            log(`Dirlist failed (${formatErrorResult(module, result)}).`);
-            return;
+        const preview = isNspireActive() ? beginNspireDirlistPreview(module) : null;
+        try {
+            const result = await ccallAsync(module, 'calc_dirlist_json', 'number', ['number', 'string', 'number'],
+                [handle, '/dirlist.json', Number(Boolean(preview))],
+                { timeoutMs: null, useProgress: true, progressLabel: t('loading_dirlist') });
+            if (result !== 0) {
+                log(`Dirlist failed (${formatErrorResult(module, result)}).`);
+                return;
+            }
+            const data = module.FS.readFile('/dirlist.json', { encoding: 'utf8' });
+            const parsed = JSON.parse(data);
+            state.dirlist = [...parsed.vars, ...parsed.apps];
+            if (!preview) renderDirlist(state.dirlist);
+            if (parsed.memory && parsed.memory.ok) {
+                const ramInfo = formatMemoryValue(parsed.memory.ram_free);
+                const flashInfo = formatMemoryValue(parsed.memory.flash_free);
+                els.memoryInfo.textContent = `RAM ${ramInfo.display} | Flash ${flashInfo.display}`;
+                els.memoryInfo.title = `RAM ${ramInfo.raw} | Flash ${flashInfo.raw}`;
+            }
+            log(`Dirlist loaded: ${state.dirlist.length} entries.`);
+        } finally {
+            preview?.finish();
         }
-        const data = module.FS.readFile('/dirlist.json', { encoding: 'utf8' });
-        const parsed = JSON.parse(data);
-        state.dirlist = [...parsed.vars, ...parsed.apps];
-        renderDirlist(state.dirlist);
-        if (parsed.memory && parsed.memory.ok) {
-            const ramInfo = formatMemoryValue(parsed.memory.ram_free);
-            const flashInfo = formatMemoryValue(parsed.memory.flash_free);
-            els.memoryInfo.textContent = `RAM ${ramInfo.display} | Flash ${flashInfo.display}`;
-            els.memoryInfo.title = `RAM ${ramInfo.raw} | Flash ${flashInfo.raw}`;
-        }
-        log(`Dirlist loaded: ${state.dirlist.length} entries.`);
     } catch (err) {
         logError(err, 'Dirlist failed');
     } finally {
@@ -7493,7 +7553,8 @@ async function refreshDirlist({ manual = false } = {}) {
     }
 }
 
-function renderDirlist(entries) {
+function renderDirlist(entries, selectionKeys) {
+    const preview = state.nspireDirlistPreview;
     const filter = (els.filterInput.value || '').toLowerCase();
     const showLocation = !isNspireActive() && !isHPPrimeActive() && !isNumWorksActive() && !isCasioActive();
     const showKind = !isNspireActive() && !isHPPrimeActive() && !isNumWorksActive() && !isCasioActive();
@@ -7506,7 +7567,7 @@ function renderDirlist(entries) {
         els.folderSticky.classList.toggle('hide-kind', !showKind);
         els.folderSticky.classList.toggle('hide-location', !showLocation);
     }
-    renderTableView(entries, filter);
+    renderTableView(preview?.entries ?? entries, filter, selectionKeys, Boolean(preview));
     updateStickyFolderHeader();
     updateSelectionActionButtons();
 }
@@ -7596,8 +7657,7 @@ function formatVariableDisplayName(entry) {
     return name;
 }
 
-function renderTableView(entries, filter) {
-    const selectionKeys = getSelectedVarKeys();
+function renderTableView(entries, filter, selectionKeys = getSelectedVarKeys(), preview = false) {
     const previewModelId = getActiveCalcModelId();
     els.varTableBody.innerHTML = '';
     const tree = buildTree(entries);
@@ -7701,7 +7761,7 @@ function renderTableView(entries, filter) {
             && ((entry.hpAppChildEditable && state.hpFileSnapshotLoaded)
                 || (state.features & FEATURE_FLAGS.OPS_DELVAR) !== 0);
         const canPreview = canPreviewVariable(entry, previewModelId);
-        const rowActions = `
+        const rowActions = preview ? '' : `
             <div class="row-actions">
                 ${canPreview ? `<button class="btn ghost btn-inline action-preview" title="${escapeHtml(t('preview'))}" aria-label="${escapeHtml(t('preview'))}">${themeIconMarkup('eye', '👁️')}</button>` : ''}
                 ${entry.kind === 'backup-var' ? '' : `<button class="btn ghost btn-inline action-download" title="Download">${themeIconMarkup('download', '⬇️')}</button>`}
@@ -7716,7 +7776,7 @@ function renderTableView(entries, filter) {
             : `${safeName}${integrityWarning}`;
         const summaryText = options.summary ? `<em class="folder-summary">(${options.summary})</em>` : '';
         row.innerHTML = `
-            <td><input type="checkbox" ${entry.kind === 'backup-var' ? 'disabled' : ''} data-name="" data-folder="" data-folder-path="" data-is-folder="${isFolder ? '1' : '0'}" data-type="${entry.type}" data-kind=""></td>
+            <td><input type="checkbox" ${preview || entry.kind === 'backup-var' ? 'disabled' : ''} data-name="" data-folder="" data-folder-path="" data-is-folder="${isFolder ? '1' : '0'}" data-type="${entry.type}" data-kind=""></td>
             <td>
                 <div class="name-cell">
                     <div class="name-left">${indentBars}${toggleButton}<span class="name-label">${displayName}${summaryText}</span></div>
@@ -7818,9 +7878,9 @@ function renderTableView(entries, filter) {
             if (childStats.files) {
                 summaryParts.push(`${childStats.files} file${childStats.files === 1 ? '' : 's'}`);
             }
-            const summary = summaryParts.length ? `contains ${summaryParts.join(' and ')}` : 'empty';
+            const summary = summaryParts.length ? `contains ${summaryParts.join(' and ')}` : (preview ? '' : 'empty');
             const totalSize = state.folderSizeMap.get(folderPath) ?? 0;
-            const sizeLabel = `<em class="folder-size">(${formatBytes(totalSize)} total)</em>`;
+            const sizeLabel = preview && !children.length ? '' : `<em class="folder-size">(${formatBytes(totalSize)} total)</em>`;
             renderTableRow(folderEntry, depth, { expanded, summary, sizeLabel });
             if (expanded) {
                 const sortedChildren = sortNodes(children);
@@ -8096,6 +8156,7 @@ function updateSelectionActionButtons() {
         els.btnDeleteSelected.classList.toggle('disabled', disabled);
     }
     if (els.selectAllVars) {
+        els.selectAllVars.disabled = Boolean(state.nspireDirlistPreview);
         const allInputs = Array.from(els.varTableBody.querySelectorAll('input[type="checkbox"]:not(:disabled)'));
         if (!allInputs.length) {
             els.selectAllVars.checked = false;
@@ -11088,8 +11149,8 @@ function isSameDeleteFolder(entry, folder) {
 }
 
 async function readTiDeletionDirlist(module, handle) {
-    const result = await ccallAsync(module, 'calc_dirlist_json', 'number', ['number', 'string'],
-        [handle, '/dirlist.json'], { timeoutMs: null, useProgress: true, progressLabel: 'Loading directory listing' });
+    const result = await ccallAsync(module, 'calc_dirlist_json', 'number', ['number', 'string', 'number'],
+        [handle, '/dirlist.json', 0], { timeoutMs: null, useProgress: true, progressLabel: 'Loading directory listing' });
     if (result !== 0) {
         throw new Error(`Cannot read folder contents (${formatErrorResult(module, result)}).`);
     }
