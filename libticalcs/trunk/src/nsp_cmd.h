@@ -106,7 +106,7 @@ extern "C" {
 // Structures
 // ...
 
-// RGB565 little-endian frames from the color Live Presenter service.
+// Live Presenter frames are returned as RGB565 little-endian pixels.
 #define NSP_PRESENTER_WIDTH  320
 #define NSP_PRESENTER_HEIGHT 240
 #define NSP_PRESENTER_BITMAP_SIZE (NSP_PRESENTER_WIDTH * NSP_PRESENTER_HEIGHT * 2)

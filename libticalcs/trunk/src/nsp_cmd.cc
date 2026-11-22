@@ -34,6 +34,7 @@
 
 #include "nsp_vpkt.h"
 #include "nsp_cmd.h"
+#include "nsp_nnse.h"
 
 /////////////----------------
 
@@ -305,6 +306,468 @@ int TICALL nsp_cmd_r_screen_rle(CalcHandle *handle, uint8_t *cmd, uint32_t *size
 	nsp_vtl_pkt_del(handle, pkt);
 
 	return retval;
+}
+
+/////////////----------------
+
+// Live Presenter streams keyframes and deltas on the same NavNet session.
+#define NSP_PRESENTER_HEADER_SIZE 12
+#define NSP_PRESENTER_MAX_IMAGE_SIZE (NSP_PRESENTER_BITMAP_SIZE * 3 / 2)
+#define NSP_PRESENTER_MAX_KEY_DATA_SIZE 4096
+#define NSP_PRESENTER_GRAY_SIZE (NSP_PRESENTER_WIDTH * NSP_PRESENTER_HEIGHT / 2)
+
+enum {
+	NSP_PRESENTER_KEYS = 0x32,
+	NSP_PRESENTER_GRAY_KEYFRAME = 0x33,
+	NSP_PRESENTER_GRAY_DELTA = 0x34,
+	NSP_PRESENTER_KEYFRAME = 0x41,
+	NSP_PRESENTER_DELTA = 0x42,
+};
+
+static uint32_t presenter_be32(const uint8_t *data)
+{
+	return ((uint32_t)data[0] << 24) | ((uint32_t)data[1] << 16)
+	     | ((uint32_t)data[2] << 8) | data[3];
+}
+
+static uint32_t presenter_le32(const uint8_t *data)
+{
+	return ((uint32_t)data[3] << 24) | ((uint32_t)data[2] << 16)
+	     | ((uint32_t)data[1] << 8) | data[0];
+}
+
+static int presenter_decode_color(const uint8_t *data, uint32_t size, uint8_t *bitmap)
+{
+	if (size % 4)
+	{
+		return ERR_INVALID_PACKET;
+	}
+
+	uint32_t out = 0;
+	for (uint32_t pos = 0; pos < size; )
+	{
+		const uint8_t *word = data + pos;
+		pos += 4;
+		uint32_t count = 1;
+		if (size - pos >= 4 && memcmp(word, data + pos, 4) == 0)
+		{
+			if (size - pos < 8)
+			{
+				return ERR_INVALID_PACKET;
+			}
+			count = presenter_le32(data + pos + 4);
+			pos += 8;
+			if (count > NSP_PRESENTER_BITMAP_SIZE / 4 - 2)
+			{
+				return ERR_INVALID_PACKET;
+			}
+			count += 2;
+		}
+		if (count > (NSP_PRESENTER_BITMAP_SIZE - out) / 4)
+		{
+			return ERR_INVALID_PACKET;
+		}
+		for (uint32_t i = 0; i < count; i++, out += 4)
+		{
+			memcpy(bitmap + out, word, 4);
+		}
+	}
+	return out == NSP_PRESENTER_BITMAP_SIZE ? 0 : ERR_INVALID_PACKET;
+}
+
+static int presenter_decode_gray_rle4(const uint8_t *data, uint32_t size, uint8_t *bitmap)
+{
+	uint32_t out = 0;
+	for (uint32_t pos = 0; size - pos >= 2; )
+	{
+		const uint8_t run = data[pos++];
+		const uint8_t value = data[pos++];
+		if (!run && value <= 1)
+		{
+			if (value == 1)
+			{
+				// The encoder can pad the stream after the end-of-image marker.
+				return out == NSP_PRESENTER_GRAY_SIZE ? 0 : ERR_INVALID_PACKET;
+			}
+			// The firmware can group multiple display rows between markers.
+			continue;
+		}
+
+		// Counts are in pixels. Literal runs are padded to an even byte count.
+		const uint32_t count = ((run ? run : value) + 1) / 2;
+		if (count > NSP_PRESENTER_GRAY_SIZE - out)
+		{
+			return ERR_INVALID_PACKET;
+		}
+		if (run)
+		{
+			memset(bitmap + out, value, count);
+		}
+		else
+		{
+			const uint32_t padded = (count + 1) & ~1u;
+			if (padded > size - pos)
+			{
+				return ERR_INVALID_PACKET;
+			}
+			memcpy(bitmap + out, data + pos, count);
+			pos += padded;
+		}
+		out += count;
+	}
+	return ERR_INVALID_PACKET;
+}
+
+static int presenter_decode_gray_rle2(const uint8_t *data, uint32_t size, uint8_t *bitmap)
+{
+	uint32_t out = 0;
+	for (uint32_t pos = 0; pos < size; )
+	{
+		const uint8_t value = data[pos++];
+		uint32_t count = 1;
+		if (pos < size && data[pos] == value)
+		{
+			if (size - pos < 2)
+			{
+				return ERR_INVALID_PACKET;
+			}
+			count = data[pos + 1];
+			pos += 2;
+			if (count == 0xff)
+			{
+				if (size - pos < 2)
+				{
+					return ERR_INVALID_PACKET;
+				}
+				count = data[pos] | ((uint32_t)data[pos + 1] << 8);
+				pos += 2;
+			}
+			count += 2;
+		}
+		if (count > NSP_PRESENTER_GRAY_SIZE - out)
+		{
+			return ERR_INVALID_PACKET;
+		}
+		memset(bitmap + out, value, count);
+		out += count;
+	}
+	return out == NSP_PRESENTER_GRAY_SIZE ? 0 : ERR_INVALID_PACKET;
+}
+
+static uint16_t presenter_gray_pixel(uint8_t shade)
+{
+	// Match the grayscale screenshot palette: each nibble is an intensity in steps of 16.
+	return (shade << 12) | (shade << 7) | (shade << 1);
+}
+
+static void presenter_store_gray(uint8_t *dst, uint8_t packed)
+{
+	const uint16_t left = presenter_gray_pixel(packed >> 4);
+	const uint16_t right = presenter_gray_pixel(packed & 0x0f);
+	dst[0] = (uint8_t)left;
+	dst[1] = (uint8_t)(left >> 8);
+	dst[2] = (uint8_t)right;
+	dst[3] = (uint8_t)(right >> 8);
+}
+
+static int presenter_apply_gray_delta(const uint8_t *image, uint32_t size, NspPresenterFrame *frame)
+{
+	const uint32_t record_size = 5;
+	if (size % record_size)
+	{
+		return ERR_INVALID_PACKET;
+	}
+	for (uint32_t pos = 0; pos < size; pos += record_size)
+	{
+		if (presenter_le32(image + pos) >= NSP_PRESENTER_GRAY_SIZE)
+		{
+			return ERR_INVALID_PACKET;
+		}
+	}
+	for (uint32_t pos = 0; pos < size; pos += record_size)
+	{
+		uint8_t *dst = frame->bitmap + presenter_le32(image + pos) * 4;
+		uint8_t pixels[4];
+		presenter_store_gray(pixels, image[pos + 4]);
+		frame->changed |= memcmp(dst, pixels, sizeof(pixels)) != 0;
+		memcpy(dst, pixels, sizeof(pixels));
+	}
+	return 0;
+}
+
+static int presenter_apply_gray_rle(uint32_t type, bool delta, const uint8_t *image, uint32_t size, NspPresenterFrame *frame)
+{
+	uint8_t packed[NSP_PRESENTER_GRAY_SIZE];
+	const int ret = type == NSP_PRESENTER_GRAY_KEYFRAME
+		? presenter_decode_gray_rle4(image, size, packed)
+		: presenter_decode_gray_rle2(image, size, packed);
+	if (ret)
+	{
+		return ret;
+	}
+
+	// Expanding the nibble preserves XOR, so apply deltas in RGB565.
+	for (uint32_t i = 0; i < sizeof(packed); ++i)
+	{
+		uint8_t *dst = frame->bitmap + i * 4;
+		if (!delta)
+		{
+			presenter_store_gray(dst, packed[i]);
+		}
+		else if (packed[i])
+		{
+			uint8_t pixels[4];
+			presenter_store_gray(pixels, packed[i]);
+			for (uint32_t j = 0; j < sizeof(pixels); ++j)
+			{
+				dst[j] ^= pixels[j];
+			}
+			frame->changed = 1;
+		}
+	}
+	return 0;
+}
+
+static int presenter_apply_color(bool delta, const uint8_t *image, uint32_t size, NspPresenterFrame *frame)
+{
+	uint8_t bitmap[NSP_PRESENTER_BITMAP_SIZE];
+	const int ret = presenter_decode_color(image, size, bitmap);
+	if (ret)
+	{
+		return ret;
+	}
+	if (delta)
+	{
+		uint8_t changed = 0;
+		for (uint32_t i = 0; i < sizeof(bitmap); i++)
+		{
+			frame->bitmap[i] ^= bitmap[i];
+			changed |= bitmap[i];
+		}
+		frame->changed = changed != 0;
+	}
+	else
+	{
+		memcpy(frame->bitmap, bitmap, sizeof(bitmap));
+	}
+	return 0;
+}
+
+static int presenter_apply_image(CalcHandle *handle, uint32_t type, const uint8_t *image, uint32_t size, NspPresenterFrame *frame)
+{
+	const bool delta = type == NSP_PRESENTER_DELTA || type == NSP_PRESENTER_GRAY_DELTA;
+	const bool keyframe = type == NSP_PRESENTER_KEYFRAME || type == NSP_PRESENTER_GRAY_KEYFRAME;
+	if (!size)
+	{
+		// A reply without an image can carry key history alone.
+		return keyframe ? ERR_INVALID_PACKET : 0;
+	}
+	if ((!keyframe && !delta) || (delta && !frame->valid))
+	{
+		return ERR_INVALID_PACKET;
+	}
+	if (type == NSP_PRESENTER_GRAY_DELTA)
+	{
+		return presenter_apply_gray_delta(image, size, frame);
+	}
+
+	const bool gray = type == NSP_PRESENTER_GRAY_KEYFRAME
+		|| (handle->priv.nsp_screen_depth ? handle->priv.nsp_screen_depth == 4
+		    : nsp_is_legacy_handheld(handle->model) && !nsp_is_original_cx(handle->model));
+	const int ret = gray ? presenter_apply_gray_rle(type, delta, image, size, frame)
+	                     : presenter_apply_color(delta, image, size, frame);
+	if (!ret && keyframe)
+	{
+		frame->valid = frame->changed = 1;
+	}
+	return ret;
+}
+
+// Early firmware sends the image size, a one-byte frame type, the image,
+// and a separate length-prefixed key history record (0x32).
+static int presenter_read_legacy_frame(CalcHandle *handle, uint32_t image_size, NspPresenterFrame *frame)
+{
+	if (image_size > NSP_PRESENTER_MAX_IMAGE_SIZE)
+	{
+		return ERR_INVALID_PACKET;
+	}
+	uint8_t packet[MAX(NSP_CX_MAX_PAYLOAD, NSP_NNSE_MAX_PAYLOAD)];
+	uint32_t received;
+	int ret = nsp_session_read(handle, packet, sizeof(packet), &received);
+	if (ret || received != 1)
+	{
+		return ret ? ret : ERR_INVALID_PACKET;
+	}
+	const uint8_t type = packet[0];
+	uint8_t *image = (uint8_t *)g_try_malloc(image_size);
+	if (image_size && !image)
+	{
+		return ERR_MALLOC;
+	}
+	for (uint32_t offset = 0; !ret && offset < image_size; offset += received)
+	{
+		ret = nsp_session_read(handle, packet, sizeof(packet), &received);
+		if (!ret && (!received || received > image_size - offset))
+		{
+			ret = ERR_INVALID_PACKET;
+		}
+		if (!ret)
+		{
+			memcpy(image + offset, packet, received);
+		}
+	}
+
+	if (!ret)
+	{
+		ret = nsp_session_read(handle, packet, sizeof(packet), &received);
+		if (!ret)
+		{
+			ret = received == 4 ? 0 : ERR_INVALID_PACKET;
+		}
+	}
+	if (!ret)
+	{
+		const uint32_t keys_size = presenter_be32(packet);
+		if (keys_size > NSP_PRESENTER_MAX_KEY_DATA_SIZE)
+		{
+			ret = ERR_INVALID_PACKET;
+		}
+		else if (keys_size)
+		{
+			ret = nsp_session_read(handle, packet, sizeof(packet), &received);
+			if (!ret && (received != keys_size || packet[0] != NSP_PRESENTER_KEYS))
+			{
+				ret = ERR_INVALID_PACKET;
+			}
+		}
+	}
+	if (!ret)
+	{
+		ret = presenter_apply_image(handle, type, image, image_size, frame);
+	}
+	g_free(image);
+	return ret;
+}
+
+int TICALL nsp_presenter_start(CalcHandle *handle, NspPresenterFrame *frame)
+{
+	VALIDATE_HANDLE(handle);
+	VALIDATE_NONNULL(frame);
+
+	frame->valid = 0;
+	frame->changed = 0;
+	const int ret = nsp_enable_extended_payloads(handle);
+	return ret ? ret : nsp_session_open(handle, NSP_PORT_PRESENTATION);
+}
+
+int TICALL nsp_presenter_next(CalcHandle *handle, NspPresenterFrame *frame)
+{
+	VALIDATE_HANDLE(handle);
+	VALIDATE_NONNULL(frame);
+	frame->changed = 0;
+	if (handle->priv.nsp_dst_port != NSP_PORT_PRESENTATION)
+	{
+		return ERR_NOT_READY;
+	}
+
+	const uint8_t request[] = {0x04, 0x00, 0x32, 0x0a};
+	int ret = nsp_session_write(handle, request, sizeof(request));
+	if (ret)
+	{
+		return ret;
+	}
+
+	uint8_t packet[MAX(NSP_CX_MAX_PAYLOAD, NSP_NNSE_MAX_PAYLOAD)];
+	uint32_t received;
+	ret = nsp_session_read(handle, packet, sizeof(packet), &received);
+	if (ret)
+	{
+		return ret;
+	}
+	if (received == 4 && !nsp_nnse_enabled(handle))
+	{
+		return presenter_read_legacy_frame(handle, presenter_be32(packet), frame);
+	}
+	if (received < NSP_PRESENTER_HEADER_SIZE)
+	{
+		return ERR_INVALID_PACKET;
+	}
+
+	const uint32_t type = presenter_be32(packet);
+	const uint32_t image_size = presenter_be32(packet + 4);
+	const uint32_t keys_size = presenter_be32(packet + 8);
+	if (image_size > NSP_PRESENTER_MAX_IMAGE_SIZE || keys_size > NSP_PRESENTER_MAX_KEY_DATA_SIZE)
+	{
+		return ERR_INVALID_PACKET;
+	}
+
+	// The image and optional key history can share packets. Drain the latter
+	// so the next request starts on a frame header.
+	const uint32_t payload_size = image_size + keys_size;
+	uint8_t *image = (uint8_t *)g_try_malloc(image_size);
+	if (image_size && !image)
+	{
+		return ERR_MALLOC;
+	}
+
+	uint32_t offset = 0;
+	uint32_t header_size = NSP_PRESENTER_HEADER_SIZE;
+
+	for (;;)
+	{
+		const uint32_t chunk_size = received - header_size;
+		if (chunk_size > payload_size - offset)
+		{
+			ret = ERR_INVALID_PACKET;
+			goto cleanup;
+		}
+		if (offset < image_size)
+		{
+			memcpy(image + offset, packet + header_size, MIN(chunk_size, image_size - offset));
+		}
+		offset += chunk_size;
+		if (offset == payload_size)
+		{
+			break;
+		}
+		ret = nsp_session_read(handle, packet, sizeof(packet), &received);
+		if (ret || !received)
+		{
+			ret = ret ? ret : ERR_INVALID_PACKET;
+			goto cleanup;
+		}
+		header_size = 0;
+	}
+
+	ret = presenter_apply_image(handle, type, image, image_size, frame);
+
+cleanup:
+	g_free(image);
+	return ret;
+}
+
+int TICALL nsp_presenter_stop(CalcHandle *handle)
+{
+	VALIDATE_HANDLE(handle);
+	if (handle->priv.nsp_dst_port != NSP_PORT_PRESENTATION)
+	{
+		return 0;
+	}
+
+	int ret = nsp_session_close(handle);
+	if (!ret)
+	{
+		// The desktop software sends cleanup on a fresh presentation session.
+		nsp_session_open(handle, NSP_PORT_PRESENTATION);
+		const uint8_t request[] = {0x36, 0x00, 0x32, 0x0a};
+		ret = nsp_session_write(handle, request, sizeof(request));
+		const int close_ret = nsp_session_close(handle);
+		if (!ret)
+		{
+			ret = close_ret;
+		}
+	}
+	return nsp_restore_standard_payloads(handle, ret);
 }
 
 /////////////----------------

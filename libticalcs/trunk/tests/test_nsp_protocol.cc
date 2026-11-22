@@ -379,6 +379,250 @@ static void check_nnse_scoped_timeout(void)
 	ticalcs_handle_del(handle);
 }
 
+static void check_presenter_keyframe_and_delta(void)
+{
+	struct Wire
+	{
+		std::vector<uint8_t> reply;
+		size_t offset = 0;
+		unsigned int requests = 0;
+		std::vector<uint16_t> payload_limits;
+	};
+	Wire wire;
+	CableFncts functions = {};
+	functions.send = [](CableHandle *cable, uint8_t *data, uint32_t size) -> int {
+		auto &state = *static_cast<Wire *>(cable->priv);
+		CHECK(size >= NSP_HEADER_SIZE);
+		const uint16_t src_port = (uint16_t(data[4]) << 8) | data[5];
+		const uint16_t dst_port = (uint16_t(data[8]) << 8) | data[9];
+		if (src_port == NSP_PORT_DISCONNECT)
+		{
+			return 1234;
+		}
+		if (dst_port == NSP_PORT_ADDR_ASSIGN)
+		{
+			const uint8_t addresses[] = {0x64, 0x01, 0x64, 0x00, 0, 0};
+			CHECK(src_port == NSP_PORT_ADDR_ASSIGN && data[14] == 1);
+			CHECK(size == NSP_HEADER_SIZE + 8);
+			CHECK(memcmp(data + NSP_HEADER_SIZE, addresses, sizeof(addresses)) == 0);
+			state.payload_limits.push_back((uint16_t(data[22]) << 8) | data[23]);
+		}
+		if (dst_port == NSP_PORT_PRESENTATION && data[13] == 0)
+		{
+			const uint8_t request[] = {0x04, 0x00, 0x32, 0x0a};
+			CHECK(size == NSP_HEADER_SIZE + sizeof(request));
+			CHECK(memcmp(data + NSP_HEADER_SIZE, request, sizeof(request)) == 0);
+			++state.requests;
+		}
+		return 0;
+	};
+	functions.recv = [](CableHandle *cable, uint8_t *data, uint32_t size) -> int {
+		auto &state = *static_cast<Wire *>(cable->priv);
+		CHECK(size <= state.reply.size() - state.offset);
+		memcpy(data, state.reply.data() + state.offset, size);
+		state.offset += size;
+		return 0;
+	};
+
+	CableHandle cable = {};
+	cable.cable = &functions;
+	cable.priv = &wire;
+	cable.open = 1;
+	CalcHandle *handle = ticalcs_handle_new(CALC_NSPIRE_CX);
+	CHECK(handle);
+	handle->cable = &cable;
+
+	handle->priv.nsp_navnet_peer_limit = NSP_CX_MAX_PAYLOAD;
+	NspPresenterFrame frame = {};
+	CHECK(nsp_presenter_start(handle, &frame) == 0);
+	CHECK(wire.payload_limits == std::vector<uint16_t>{NSP_CX_MAX_PAYLOAD});
+	auto packet = [&](const uint8_t *payload, size_t size, bool ack, bool bad_crc) {
+		std::vector<uint8_t> wire_data;
+		if (size > NSP_DATA_SIZE)
+		{
+			wire_data = {0, 0, uint8_t(size >> 8), uint8_t(size)};
+		}
+		wire_data.insert(wire_data.end(), payload, payload + size);
+		uint8_t raw[NSP_HEADER_SIZE] = {
+			0x54, 0xfd, 0x64, 0x01, uint8_t(ack ? 0 : 0x40), uint8_t(ack ? 0xff : 0x52),
+			0x64, 0x00, uint8_t(handle->priv.nsp_src_port >> 8), uint8_t(handle->priv.nsp_src_port),
+			0, 0, uint8_t(MIN(size, 0xff)), uint8_t(ack ? 0x0a : 0), 1, 0
+		};
+		uint16_t crc = 0;
+		for (uint8_t byte : wire_data)
+		{
+			const uint16_t first = ((uint16_t)byte << 8) | (crc >> 8);
+			const uint16_t second = ((((crc & 0xff) & 0x0f) << 4) ^ (crc & 0xff)) << 8;
+			const uint16_t third = second >> 5;
+			crc = first ^ second ^ third ^ (third >> 7);
+		}
+		raw[10] = crc >> 8;
+		raw[11] = (crc & 0xff) ^ bad_crc;
+		for (unsigned int i = 0; i < NSP_HEADER_SIZE - 1; ++i)
+		{
+			raw[15] += raw[i];
+		}
+		wire.reply.insert(wire.reply.end(), raw, raw + sizeof(raw));
+		wire.reply.insert(wire.reply.end(), wire_data.begin(), wire_data.end());
+	};
+	auto receive_frame = [&](uint8_t type, const std::vector<uint8_t> &encoded, uint8_t key_bytes,
+	                         size_t fragment_size, bool bad_crc, bool legacy = false) {
+		const uint8_t ack[] = {0x40, 0x52};
+		const uint32_t len = encoded.size();
+		std::vector<uint8_t> payload;
+		packet(ack, sizeof(ack), true, false);
+		if (legacy)
+		{
+			const uint8_t length[] = {0, 0, uint8_t(len >> 8), uint8_t(len)};
+			packet(length, sizeof(length), false, false);
+			packet(&type, sizeof(type), false, false);
+			payload = encoded;
+		}
+		else
+		{
+			payload = {0, 0, 0, type, 0, 0, uint8_t(len >> 8), uint8_t(len), 0, 0, 0, key_bytes};
+			payload.insert(payload.end(), encoded.begin(), encoded.end());
+			payload.insert(payload.end(), key_bytes, 0x50);
+		}
+		for (size_t offset = 0; offset < payload.size(); )
+		{
+			const size_t size = MIN(fragment_size, payload.size() - offset);
+			packet(payload.data() + offset, size, false, bad_crc);
+			offset += size;
+		}
+		if (legacy)
+		{
+			const uint8_t length[] = {0, 0, 0, key_bytes};
+			packet(length, sizeof(length), false, false);
+			if (key_bytes)
+			{
+				std::vector<uint8_t> keys(key_bytes, 0x50);
+				keys[0] = 0x32;
+				packet(keys.data(), keys.size(), false, false);
+			}
+		}
+		const int ret = nsp_presenter_next(handle, &frame);
+		CHECK(wire.reply.size() == wire.offset);
+		return ret;
+	};
+	auto append_run = [](std::vector<uint8_t> &bytes, uint8_t value, uint32_t count) {
+		bytes.insert(bytes.end(), 8, value);
+		const uint32_t extra = count - 2;
+		for (unsigned int i = 0; i < 32; i += 8)
+		{
+			bytes.push_back(extra >> i);
+		}
+	};
+
+	constexpr uint32_t words = NSP_PRESENTER_BITMAP_SIZE / 4;
+	std::vector<uint8_t> keyframe;
+	for (unsigned int i = 0; i < 65; ++i)
+	{
+		keyframe.insert(keyframe.end(), 4, i);
+	}
+	append_run(keyframe, 0x80, words - 65);
+	CHECK(receive_frame(0x41, keyframe, 16, NSP_DATA_SIZE, false) == 0);
+	CHECK(frame.valid && frame.changed);
+	CHECK(frame.bitmap[0] == 0 && frame.bitmap[256] == 64 && frame.bitmap[sizeof(frame.bitmap) - 1] == 0x80);
+	CHECK(receive_frame(0x41, keyframe, 16, NSP_CX_MAX_PAYLOAD, true) == ERR_CHECKSUM);
+	CHECK(!frame.changed && frame.bitmap[256] == 64);
+	keyframe.clear();
+	for (unsigned int i = 0; i < 1024; ++i)
+	{
+		keyframe.insert(keyframe.end(), 4, uint8_t(i));
+	}
+	append_run(keyframe, 0x80, words - 1024);
+	// Drain a queued extended packet before accepting the next request ACK.
+	packet(keyframe.data(), 512, false, false);
+	CHECK(receive_frame(0x41, keyframe, 16, NSP_CX_MAX_PAYLOAD, false) == 0);
+	CHECK(frame.valid && frame.changed);
+	CHECK(frame.bitmap[0] == 0 && frame.bitmap[256] == 64 && frame.bitmap[sizeof(frame.bitmap) - 1] == 0x80);
+
+	std::vector<uint8_t> delta = {0xff, 0xff, 0, 0};
+	append_run(delta, 0, words - 1);
+	CHECK(receive_frame(0x42, delta, 0, NSP_CX_MAX_PAYLOAD, false) == 0);
+	CHECK(frame.changed && frame.bitmap[0] == 0xff && frame.bitmap[2] == 0 && frame.bitmap[256] == 64);
+	CHECK(receive_frame(0x42, {}, 0, NSP_CX_MAX_PAYLOAD, false) == 0);
+	CHECK(!frame.changed);
+	delta.back() = 0xff;
+	CHECK(receive_frame(0x42, delta, 0, NSP_CX_MAX_PAYLOAD, false) == ERR_INVALID_PACKET);
+	CHECK(!frame.changed && frame.bitmap[0] == 0xff);
+	CHECK(wire.requests == 6);
+	CHECK(nsp_presenter_stop(handle) == 1234);
+	CHECK(wire.payload_limits.size() == 2 && wire.payload_limits.back() == NSP_DATA_SIZE);
+	CHECK(handle->priv.nsp_dst_port == NSP_PORT_ADDR_REQUEST);
+	handle->priv.nsp_navnet_peer_limit = NSP_DATA_SIZE;
+	// Auto-detection initially guesses CX for the shared USB PID. Device Info supplies the LCD depth.
+	handle->priv.nsp_screen_depth = 4;
+	CHECK(nsp_presenter_start(handle, &frame) == 0);
+	constexpr uint32_t gray_size = NSP_PRESENTER_WIDTH * NSP_PRESENTER_HEIGHT / 2;
+	constexpr size_t short_packet = NSP_DATA_SIZE;
+	auto check_gray_pair = [&](uint32_t offset, uint16_t left, uint16_t right) {
+		const uint8_t *pixels = frame.bitmap + offset * 4;
+		CHECK(((pixels[1] << 8) | pixels[0]) == left);
+		CHECK(((pixels[3] << 8) | pixels[2]) == right);
+	};
+
+	// OS 1.4 puts line markers every 320 packed bytes, spanning two LCD rows.
+	std::vector<uint8_t> rle4 = {0, 6, 0x0f, 0x19, 0x33, 0, 252, 0x22, 62, 0x22};
+	for (unsigned int row = 1; row < NSP_PRESENTER_HEIGHT; ++row)
+	{
+		rle4.insert(rle4.end(), {252, 0x44, 68, 0x44});
+		if (row % 2)
+		{
+			rle4.insert(rle4.end(), {0, 0});
+		}
+	}
+	rle4.back() = 1;
+	rle4.insert(rle4.end(), {0, 0});
+	CHECK(receive_frame(0x34, {0, 0, 0, 0, 0xf0}, 0, short_packet, false, true) == ERR_INVALID_PACKET);
+	CHECK(!frame.valid && !frame.changed);
+	CHECK(receive_frame(0x33, rle4, 16, short_packet, false, true) == 0);
+	CHECK(frame.valid && frame.changed);
+	check_gray_pair(0, 0x0000, 0xf79e);
+	check_gray_pair(1, 0x1082, 0x9492);
+	check_gray_pair(gray_size - 1, 0x4208, 0x4208);
+	const std::vector<uint8_t> sparse = {0x01, 0x02, 0, 0, 0xf0};
+	CHECK(receive_frame(0x34, sparse, 0, short_packet, false, true) == 0);
+	CHECK(frame.changed);
+	check_gray_pair(0x0201, 0xf79e, 0x0000);
+	CHECK(receive_frame(0x34, sparse, 16, short_packet, false, true) == 0);
+	CHECK(!frame.changed);
+	CHECK(receive_frame(0x34, {0, 0, 0, 0, 0x33, 0, 0x96, 0, 0, 0x77}, 0,
+	                    short_packet, false, true) == ERR_INVALID_PACKET);
+	CHECK(!frame.changed);
+	check_gray_pair(0, 0x0000, 0xf79e);
+	CHECK(receive_frame(0x33, {0, 1}, 0, short_packet, false, true) == ERR_INVALID_PACKET);
+	CHECK(frame.valid && !frame.changed);
+
+	// Later grayscale firmware uses byte RLE and XOR deltas.
+	const uint32_t extra = gray_size - 6 - 2;
+	const std::vector<uint8_t> gray_keyframe = {
+		0x0f, 0x12, 0x12, 0, 0x34, 0x34, 0, 0x56,
+		0x78, 0x78, 0xff, uint8_t(extra), uint8_t(extra >> 8)
+	};
+	CHECK(receive_frame(0x41, gray_keyframe, 12, short_packet, false, true) == 0);
+	CHECK(frame.changed);
+	check_gray_pair(0, 0x0000, 0xf79e);
+	check_gray_pair(1, 0x1082, 0x2104);
+	check_gray_pair(gray_size - 1, 0x738e, 0x8410);
+	const uint32_t delta_extra = gray_size - 1 - 2;
+	const std::vector<uint8_t> gray_delta = {0xff, 0, 0, 0xff, uint8_t(delta_extra), uint8_t(delta_extra >> 8)};
+	CHECK(receive_frame(0x42, gray_delta, 0, short_packet, false, true) == 0);
+	CHECK(frame.changed);
+	check_gray_pair(0, 0xf79e, 0x0000);
+	check_gray_pair(gray_size - 1, 0x738e, 0x8410);
+	CHECK(receive_frame(0x42, {0, 0, 0xff, 0xff, 0xff}, 0, short_packet, false, true) == ERR_INVALID_PACKET);
+	CHECK(receive_frame(0x42, {0, 0, 0xff, 0xff}, 0, short_packet, false, true) == ERR_INVALID_PACKET);
+	CHECK(receive_frame(0x42, {}, 16, short_packet, false, true) == 0);
+	CHECK(!frame.changed);
+	check_gray_pair(0, 0xf79e, 0x0000);
+	CHECK(receive_frame(0x41, gray_keyframe, 6, short_packet, false) == 0);
+	check_gray_pair(0, 0x0000, 0xf79e);
+	CHECK(nsp_presenter_stop(handle) == 1234);
+	ticalcs_handle_del(handle);
+}
+
 #ifndef __EMSCRIPTEN__
 static void check_legacy_navnet_payload_selection(void)
 {
@@ -651,5 +895,6 @@ int main(void)
 #endif
 	check_cx_address_request_during_echo();
 	check_cx_extended_file_contents();
+	check_presenter_keyframe_and_delta();
 	return 0;
 }
