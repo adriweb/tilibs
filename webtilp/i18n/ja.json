@@ -230,6 +230,8 @@
   "take_screenshot": "スクリーンショット取得",
   "nspire_live_view_start": "ライブ表示を開始",
   "nspire_live_view_stop": "ライブ表示を停止",
+  "nspire_live_view_requires_os": "ライブ表示には OS {version} 以降が必要です。",
+  "nspire_live_view_unknown_os": "デバイス情報を更新して、電卓の OS バージョンを確認してください。",
   "nspire_live_view_error": "ライブ表示に失敗しました（{error}）。",
   "download_png": "PNG をダウンロード",
   "activity_log": "アクティビティログ",

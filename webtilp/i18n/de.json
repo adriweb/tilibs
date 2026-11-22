@@ -230,6 +230,8 @@
   "take_screenshot": "Screenshot aufnehmen",
   "nspire_live_view_start": "Live-Ansicht starten",
   "nspire_live_view_stop": "Live-Ansicht beenden",
+  "nspire_live_view_requires_os": "Die Live-Ansicht erfordert OS {version} oder neuer.",
+  "nspire_live_view_unknown_os": "Aktualisieren Sie die Geräteinformationen, um die OS-Version des Rechners zu prüfen.",
   "nspire_live_view_error": "Live-Ansicht fehlgeschlagen ({error}).",
   "download_png": "PNG herunterladen",
   "activity_log": "Aktivitätsprotokoll",

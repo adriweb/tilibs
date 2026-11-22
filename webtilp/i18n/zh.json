@@ -231,6 +231,8 @@
   "take_screenshot": "截取屏幕",
   "nspire_live_view_start": "开始实时显示",
   "nspire_live_view_stop": "停止实时显示",
+  "nspire_live_view_requires_os": "实时显示需要操作系统 {version} 或更高版本。",
+  "nspire_live_view_unknown_os": "请刷新设备信息以检查计算器的操作系统版本。",
   "nspire_live_view_error": "实时显示失败（{error}）。",
   "download_png": "下载 PNG",
   "clear_log": "清空日志",

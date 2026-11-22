@@ -230,6 +230,8 @@
   "take_screenshot": "گرفتن تصویر صفحه",
   "nspire_live_view_start": "شروع نمایش زنده",
   "nspire_live_view_stop": "توقف نمایش زنده",
+  "nspire_live_view_requires_os": "نمایش زنده به نسخهٔ {version} یا جدیدتر سیستم‌عامل نیاز دارد.",
+  "nspire_live_view_unknown_os": "اطلاعات دستگاه را تازه‌سازی کنید تا نسخهٔ سیستم‌عامل ماشین‌حساب مشخص شود.",
   "nspire_live_view_error": "نمایش زنده ناموفق بود ({error}).",
   "download_png": "دانلود PNG",
   "activity_log": "گزارش فعالیت",

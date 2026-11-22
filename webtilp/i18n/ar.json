@@ -230,6 +230,8 @@
   "take_screenshot": "التقاط لقطة",
   "nspire_live_view_start": "بدء العرض المباشر",
   "nspire_live_view_stop": "إيقاف العرض المباشر",
+  "nspire_live_view_requires_os": "يتطلب العرض المباشر الإصدار {version} من نظام التشغيل أو أحدث.",
+  "nspire_live_view_unknown_os": "حدّث معلومات الجهاز للتحقق من إصدار نظام تشغيل الآلة الحاسبة.",
   "nspire_live_view_error": "تعذّر العرض المباشر ({error}).",
   "download_png": "تنزيل PNG",
   "activity_log": "سجل النشاط",

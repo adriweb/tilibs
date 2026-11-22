@@ -230,6 +230,8 @@
   "take_screenshot": "Ta skärmbild",
   "nspire_live_view_start": "Starta livevisning",
   "nspire_live_view_stop": "Stoppa livevisning",
+  "nspire_live_view_requires_os": "Livevisning kräver OS {version} eller senare.",
+  "nspire_live_view_unknown_os": "Uppdatera enhetsinformationen för att kontrollera räknarens OS-version.",
   "nspire_live_view_error": "Livevisningen misslyckades ({error}).",
   "download_png": "Ladda ner PNG",
   "activity_log": "Aktivitetslogg",

@@ -230,6 +230,8 @@
   "take_screenshot": "Schermafbeelding maken",
   "nspire_live_view_start": "Liveweergave starten",
   "nspire_live_view_stop": "Liveweergave stoppen",
+  "nspire_live_view_requires_os": "Voor liveweergave is OS {version} of nieuwer vereist.",
+  "nspire_live_view_unknown_os": "Vernieuw de apparaatinformatie om de OS-versie van de rekenmachine te controleren.",
   "nspire_live_view_error": "Liveweergave mislukt ({error}).",
   "download_png": "PNG downloaden",
   "activity_log": "Activiteitenlog",
