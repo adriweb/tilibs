@@ -230,6 +230,8 @@
   "take_screenshot": "Prendre une capture",
   "nspire_live_view_start": "Démarrer le direct",
   "nspire_live_view_stop": "Arrêter le direct",
+  "nspire_live_view_requires_os": "L’affichage en direct nécessite l’OS {version} ou une version ultérieure.",
+  "nspire_live_view_unknown_os": "Actualisez les informations de l’appareil pour vérifier la version de l’OS de la calculatrice.",
   "nspire_live_view_error": "Impossible d’afficher l’écran en direct ({error}).",
   "download_png": "Télécharger PNG",
   "activity_log": "Journal d'activité",

@@ -230,6 +230,8 @@
   "take_screenshot": "Imaginem cape",
   "nspire_live_view_start": "Incipe visum vivum",
   "nspire_live_view_stop": "Siste visum vivum",
+  "nspire_live_view_requires_os": "Visus vivus systema operativum {version} vel recentius requirit.",
+  "nspire_live_view_unknown_os": "Renova informationes instrumenti ut versionem systematis operativi cognoscas.",
   "nspire_live_view_error": "Visus vivus defecit ({error}).",
   "download_png": "PNG depone",
   "activity_log": "Actorum index",

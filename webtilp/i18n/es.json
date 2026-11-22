@@ -230,6 +230,8 @@
   "take_screenshot": "Tomar captura",
   "nspire_live_view_start": "Iniciar vista en directo",
   "nspire_live_view_stop": "Detener vista en directo",
+  "nspire_live_view_requires_os": "La vista en directo requiere la versión {version} del SO o una posterior.",
+  "nspire_live_view_unknown_os": "Actualiza la información del dispositivo para comprobar la versión del SO de la calculadora.",
   "nspire_live_view_error": "Error en la vista en directo ({error}).",
   "download_png": "Descargar PNG",
   "activity_log": "Registro de actividad",

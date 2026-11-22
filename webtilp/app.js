@@ -905,6 +905,8 @@ const I18N_EN = {
     "take_screenshot": "Take Screenshot",
     "nspire_live_view_start": "Start Live View",
     "nspire_live_view_stop": "Stop Live View",
+    "nspire_live_view_requires_os": "Live View requires OS {version} or later.",
+    "nspire_live_view_unknown_os": "Refresh Device Info to check the handheld OS version.",
     "nspire_live_view_error": "Live view failed ({error}).",
     "download_png": "Download PNG",
     "activity_log": "Activity Log",
@@ -7271,7 +7273,6 @@ function updateClockInfoRow(clockInfo, settings, fallbackDate) {
 function clearDeviceData() {
     updateDeviceInfoCapability();
     state.nspireLiveScreen = null;
-    if (els.btnNspireLiveScreen) updateNspireLiveScreenControl();
     state.sharpConnectionGeneration = (state.sharpConnectionGeneration || 0) + 1;
     state.sharpProgress = null;
     state.dirlist = [];
@@ -7293,6 +7294,7 @@ function clearDeviceData() {
     state.deviceModelName = '';
     state.deviceInfoProductName = '';
     state.deviceInfoEntries = [];
+    if (els.btnNspireLiveScreen) updateNspireLiveScreenControl();
     els.memoryInfo.textContent = '—';
     els.memoryInfo.title = '';
     const canvas = els.screenshotCanvas;
@@ -12260,10 +12262,27 @@ function updateNspireLiveScreenControl() {
     const button = els.btnNspireLiveScreen;
     const session = state.nspireLiveScreen;
     const model = state.connected && isNspireActive() ? getActiveCalcModelId() : 0;
-    const supported = model === 28 || model === 29 || NSPIRE_CXII_CALC_MODELS.has(model)
+    const cxII = NSPIRE_CXII_CALC_MODELS.has(model)
         || (state.connected && state.authorizedDevice?.productId === 0xe022);
-    button.classList.toggle('hidden', !supported && !session);
-    button.disabled = Boolean(session?.stopRequested);
+    const grayscale = model === 15 || (model >= 24 && model <= 27);
+    const minimumMajor = cxII ? 5 : grayscale ? 1 : (model === 28 || model === 29 ? 3 : 0);
+    const minimumMinor = grayscale && !cxII ? 4 : 0;
+    let title = '';
+    if (minimumMajor && !session) {
+        const version = getDeviceInfoValue('OS Version').match(/^(\d+)\.(\d+)(?:\.\d+)*$/);
+        if (!version) {
+            title = t('nspire_live_view_unknown_os');
+        } else {
+            const major = Number(version[1]);
+            const minor = Number(version[2]);
+            if (major < minimumMajor || (major === minimumMajor && minor < minimumMinor)) {
+                title = tFormat('nspire_live_view_requires_os', { version: `${minimumMajor}.${minimumMinor}` });
+            }
+        }
+    }
+    button.classList.toggle('hidden', !minimumMajor && !session);
+    button.disabled = Boolean(session?.stopRequested || title);
+    button.title = title;
     setIconLabel(button, session ? 'square' : 'play',
         t(session ? 'nspire_live_view_stop' : 'nspire_live_view_start'), session ? '⏹️' : '▶️');
 }
@@ -12369,7 +12388,8 @@ async function runNspireLiveScreen(session) {
 
 function toggleNspireLiveScreen() {
     if (state.nspireLiveScreen) return stopNspireLiveScreen();
-    if (!state.module || !state.connected || els.btnNspireLiveScreen.classList.contains('hidden')) return;
+    const button = els.btnNspireLiveScreen;
+    if (!state.module || !state.connected || button.disabled || button.classList.contains('hidden')) return;
     const session = { module: state.module, holds: 0, stopRequested: false };
     state.nspireLiveScreen = session;
     updateNspireLiveScreenControl();

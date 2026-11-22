@@ -25,6 +25,7 @@ async function testNspireLiveScreenResume() {
     const liveButton = button();
     const calls = [];
     const pending = new Map();
+    let model = 34;
     const module = state.module = {
         ccall(name) {
             calls.push(name);
@@ -57,17 +58,46 @@ async function testNspireLiveScreenResume() {
         NSPIRE_CXII_CALC_MODELS: new Set([34]),
         NSPIRE_LIVE_FRAME_TIMEOUT_MS: 30000,
         ensureCableOpen: async () => state.handle,
-        getActiveCalcModelId: () => 34,
+        getActiveCalcModelId: () => model,
         isNspireActive: () => true,
         t: key => key,
-        tFormat: key => key,
+        tFormat: (key, vars) => vars?.version ? `${key} ${vars.version}` : key,
         setIconLabel: (element, _icon, text) => { element.text = text; },
         updateProgressIndicator() {}
     });
-    for (const name of ['clearActiveOperations', 'setButtonLoading', 'updateNspireLiveScreenControl', 'stopNspireLiveScreen',
+    for (const name of ['clearActiveOperations', 'setButtonLoading', 'getDeviceInfoValue',
+        'updateNspireLiveScreenControl', 'stopNspireLiveScreen',
         'holdNspireLiveScreen', 'resumeNspireLiveScreen', 'runNspireLiveScreen', 'toggleNspireLiveScreen']) {
         vm.runInContext(extract(name), context);
     }
+
+    const cases = [
+        [25, 0xe012, '1.1.9170', 'nspire_live_view_requires_os 1.4'],
+        [27, 0xe012, '1.2.2394', 'nspire_live_view_requires_os 1.4'],
+        [25, 0xe012, '1.3.2406', 'nspire_live_view_requires_os 1.4'],
+        [25, 0xe012, '1.4.11643', ''],
+        [15, 0xe012, '1.6.10110', ''],
+        [26, 0xe012, '2.0.1188', ''],
+        [24, 0xe012, '', 'nspire_live_view_unknown_os'],
+        [28, 0xe012, '2.1.0038', 'nspire_live_view_requires_os 3.0'],
+        [29, 0xe012, '3.0.1753', ''],
+        [34, 0xe022, '4.55.0079', 'nspire_live_view_requires_os 5.0'],
+        [0, 0xe022, '5.0.1683', ''],
+        [34, 0xe022, '', 'nspire_live_view_unknown_os'],
+        [34, 0xe022, 'Unknown', 'nspire_live_view_unknown_os'],
+        [34, 0xe022, '6.40.0074', '']
+    ];
+    for (const [calcModel, productId, version, title] of cases) {
+        model = calcModel;
+        device.productId = productId;
+        state.deviceInfoEntries = version ? [{key: 'OS Version', value: version}] : [];
+        context.updateNspireLiveScreenControl();
+        assert.equal(liveButton.classList.contains('hidden'), false);
+        assert.equal(liveButton.title, title, version);
+        assert.equal(liveButton.disabled, Boolean(title), version);
+        if (title) context.toggleNspireLiveScreen();
+    }
+    assert.deepEqual(calls, [], 'a disabled Live View button never starts a session');
 
     context.toggleNspireLiveScreen();
     await tick();
@@ -113,7 +143,7 @@ async function testNspireLiveScreenResume() {
     await cancelled;
     await tick();
     assert.equal(calls.at(-1), 'calc_recv_var', 'disconnect cancels pending resume');
-    console.log('Nspire Live View pauses across batches, resumes after completion, and honors Stop and disconnect');
+    console.log('Nspire Live View checks firmware, pauses across batches, resumes, and honors Stop and disconnect');
 }
 
 testNspireLiveScreenResume().catch(error => { console.error(error); process.exitCode = 1; });
