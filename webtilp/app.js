@@ -11148,9 +11148,13 @@ function isSameDeleteFolder(entry, folder) {
     return normalizeFolderPath(path) === normalizeFolderPath(folder.folderPath || folder.name);
 }
 
-async function readTiDeletionDirlist(module, handle) {
-    const result = await ccallAsync(module, 'calc_dirlist_json', 'number', ['number', 'string', 'number'],
-        [handle, '/dirlist.json', 0], { timeoutMs: null, useProgress: true, progressLabel: 'Loading directory listing' });
+async function readTiDeletionDirlist(module, handle, folder) {
+    const progress = { timeoutMs: null, useProgress: true, progressLabel: 'Loading directory listing' };
+    const result = folder
+        ? await ccallAsync(module, 'calc_nspire_folder_dirlist_json', 'number', ['number', 'string', 'string'],
+            [handle, folder.folderPath || folder.name, getTiFolderRequestHex(folder)], progress)
+        : await ccallAsync(module, 'calc_dirlist_json', 'number', ['number', 'string', 'number'],
+            [handle, '/dirlist.json', 0], progress);
     if (result !== 0) {
         throw new Error(`Cannot read folder contents (${formatErrorResult(module, result)}).`);
     }
@@ -11158,14 +11162,41 @@ async function readTiDeletionDirlist(module, handle) {
     return parsed.vars;
 }
 
+function isInsideNspireDeleteFolder(entry, folder) {
+    const path = folder.folder ? `${folder.folder}/${folder.name}` : folder.name;
+    const wirePath = getTiFolderRequestHex(folder)?.toLowerCase();
+    const parent = entry.folder_hex?.toLowerCase();
+    return wirePath != null && parent != null
+        ? parent === wirePath || parent.startsWith(`${wirePath}2f`)
+        : entry.folder === path || entry.folder?.startsWith(`${path}/`);
+}
+
+function getNspireFolderDeletionEntries(vars, folder) {
+    const files = [];
+    const folders = [];
+    for (const entry of vars) {
+        if (entry.kind !== 'var' || !isInsideNspireDeleteFolder(entry, folder)) continue;
+        if (entry.is_folder === 1) {
+            folders.push({...entry, kind: 'folder', isFolder: true, folderPath: getEntryFolderPath(entry)});
+        } else {
+            files.push(entry);
+        }
+    }
+    // Delete every document before its folder, and every subfolder before its parent.
+    folders.sort((a, b) => b.folderPath.length - a.folderPath.length);
+    return [...files, ...folders];
+}
+
 async function deleteEntriesWithSession(module, handle, selections) {
     const model = getActiveCalcModelId();
     const ti68k = [8, 9, 10, 11, 12, 14].includes(model);
+    const nspire = isNspireActive();
     const verifyDeletes = ti68k && model !== 14;
     try {
         // Use a fresh, unfiltered listing. Flash apps are global, including
         // those returned alongside each folder's variables by AMS.
-        const vars = ti68k && selections.some(entry => entry.isFolder)
+        const selectedFolders = selections.filter(entry => entry.isFolder);
+        const vars = ti68k && selectedFolders.length
             ? await readTiDeletionDirlist(module, handle) : [];
         const plan = [];
         const seen = new Set();
@@ -11178,12 +11209,19 @@ async function deleteEntriesWithSession(module, handle, selections) {
             }
         };
         for (const entry of selections) {
-            if (ti68k && entry.isFolder) {
+            if ((ti68k || nspire) && entry.isFolder) {
                 if (!normalizeFolderPath(entry.folderPath || entry.name)) {
                     throw new Error('No folder name provided.');
                 }
-                vars.filter(child => child.kind === 'var' && child.is_folder !== 1
-                    && isSameDeleteFolder(child, entry)).forEach(append);
+                // A selected ancestor already covers this subtree.
+                if (nspire && selectedFolders.some(folder => isInsideNspireDeleteFolder(entry, folder))) {
+                    continue;
+                }
+                const contents = nspire
+                    ? getNspireFolderDeletionEntries(await readTiDeletionDirlist(module, handle, entry), entry)
+                    : vars.filter(child => child.kind === 'var' && child.is_folder !== 1
+                        && isSameDeleteFolder(child, entry));
+                contents.forEach(append);
             }
             append(entry);
         }
