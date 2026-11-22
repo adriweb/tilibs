@@ -949,6 +949,8 @@ typedef enum
 
 	CALC_EVENT_TYPE_BEFORE_GENERIC_OPERATION = 32768,
 	CALC_EVENT_TYPE_AFTER_GENERIC_OPERATION,
+	CALC_EVENT_TYPE_DIRLIST_ENTRY,
+	CALC_EVENT_TYPE_DIRLIST_FOLDER_RESET,
 	CALC_EVENT_TYPE_USER = 49152
 } CalcEventType;
 
@@ -962,6 +964,9 @@ typedef enum
  * @data: packet data to be sent / received, if any - or user-specified data.
  *
  * Information returned for every event fired by the libticalcs library; only a subset of the fields is valid for some event types.
+ * Nspire directory listings emit DIRLIST_ENTRY for each decoded entry and
+ * DIRLIST_FOLDER_RESET before retrying a folder. The entry and root-relative
+ * folder path are borrowed for the duration of the event hook.
  */
 typedef struct
 {
@@ -985,6 +990,8 @@ typedef struct
 		NSPVirtualPacket nsp_vpkt;
 		ROMDumpPacket romdump_pkt;
 		CalcLabEquipmentData labeq_data;
+		const VarEntry *dirlist_entry;
+		const char *dirlist_folder;
 		struct
 		{
 			void * data;

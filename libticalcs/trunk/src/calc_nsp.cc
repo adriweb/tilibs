@@ -461,6 +461,14 @@ static int enumerate_folder_entries(CalcHandle* handle, GNode** vars, const char
 				break;
 			}
 
+			if (handle->event_hook)
+			{
+				CalcEventData event = {};
+				ticalcs_event_fill_header(handle, &event, CALC_EVENT_TYPE_DIRLIST_ENTRY, 0, FNCT_GET_DIRLIST);
+				event.data.dirlist_entry = fe;
+				ticalcs_event_send(handle, &event);
+			}
+
 			handle->updat->cnt1 += 1;
 			handle->updat->pbar();
 
@@ -522,6 +530,13 @@ retry:
 	if (retries > 0)
 	{
 		clear_dirlist_children(*vars);
+		if (handle->event_hook)
+		{
+			CalcEventData event = {};
+			ticalcs_event_fill_header(handle, &event, CALC_EVENT_TYPE_DIRLIST_FOLDER_RESET, 0, FNCT_GET_DIRLIST);
+			event.data.dirlist_folder = folder_name + 1; // Skip leading /
+			ticalcs_event_send(handle, &event);
+		}
 	}
 
 	ret = nsp_session_open(handle, NSP_SID_FILE_MGMT);
