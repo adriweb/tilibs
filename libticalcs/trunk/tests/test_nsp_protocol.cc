@@ -120,6 +120,8 @@ static const char *directory_names[] = {
 };
 static size_t directory_index;
 static bool directory_root;
+static bool scoped_directory;
+static unsigned scoped_enumerations;
 static void queue_directory_reply(CalcHandle *handle, uint8_t cmd, const uint8_t *data, size_t size)
 {
 	uint8_t raw[NSP_HEADER_SIZE + NSP_DATA_SIZE] = {};
@@ -149,19 +151,32 @@ static int directory_event(CalcHandle *handle, uint32_t, const CalcEventData *ev
 	{
 		uint8_t data[128] = {};
 		const uint8_t cmd = event->data.nsp_vpkt.cmd;
-		if (cmd == NSP_CMD_FM_ATTRIBUTES) queue_directory_reply(handle, cmd, data, 9);
+		if (cmd == NSP_CMD_FM_ATTRIBUTES)
+		{
+			CHECK(!scoped_directory);
+			queue_directory_reply(handle, cmd, data, 9);
+		}
 		else if (cmd == NSP_CMD_FM_DIRLIST_INIT)
 		{
+			const char *path = (const char *)event->data.nsp_vpkt.data;
 			directory_index = 0;
-			directory_root = !strcmp((const char *)event->data.nsp_vpkt.data, "/");
+			directory_root = !strcmp(path, "/");
+			if (scoped_directory)
+			{
+				CHECK(scoped_enumerations < 2);
+				CHECK(!strcmp(path, scoped_enumerations == 0 ? "/App/nested" : "/App/nested/Sub"));
+				++scoped_enumerations;
+			}
 			queue_directory_reply(handle, NSP_CMD_STATUS, data, 1);
 		}
 		else if (cmd == NSP_CMD_FM_DIRLIST_NEXT)
 		{
 			const size_t count = sizeof(directory_names) / sizeof(*directory_names);
-			if (directory_index < count || (directory_root && directory_index == count))
+			const bool list_folder = directory_root || (scoped_directory && scoped_enumerations == 1);
+			if (directory_index < count || (list_folder && directory_index == count))
 			{
-				const char *name = directory_index < count ? directory_names[directory_index] : "App";
+				const char *subdirectory = scoped_directory ? "Sub" : "App";
+				const char *name = directory_index < count ? directory_names[directory_index] : subdirectory;
 				const size_t len = strlen(name);
 				data[1] = len + 10;
 				memcpy(data + 2, name, len);
@@ -222,6 +237,24 @@ static void check_nspire_directory_filenames(void)
 	}
 	ticalcs_dirlist_destroy(&vars);
 	ticalcs_dirlist_destroy(&apps);
+
+	scoped_directory = true;
+	CHECK(nsp_get_folder_dirlist(handle, "", &vars) == ERR_INVALID_PARAMETER);
+	CHECK(nsp_get_folder_dirlist(handle, "/App", &vars) == ERR_INVALID_PARAMETER);
+	CHECK(nsp_get_folder_dirlist(handle, "App/../Other", &vars) == ERR_INVALID_PARAMETER);
+	CHECK(!vars && !scoped_enumerations);
+	CHECK(!nsp_get_folder_dirlist(handle, "App/nested", &vars));
+	CHECK(scoped_enumerations == 2);
+	const size_t count = sizeof(directory_names) / sizeof(*directory_names);
+	CHECK(g_node_n_children(vars) == count + 1);
+	const GNode *subdirectory = g_node_nth_child(vars, count);
+	CHECK(g_node_n_children((GNode *)subdirectory) == count);
+	const VarEntry *entry = (const VarEntry *)subdirectory->children->data;
+	CHECK(!strcmp(entry->folder, "App/nested/Sub"));
+	CHECK(!strcmp(entry->filename, directory_names[0]));
+	ticalcs_dirlist_destroy(&vars);
+	scoped_directory = false;
+
 	handle->attached = 0;
 	ticalcs_handle_del(handle);
 }

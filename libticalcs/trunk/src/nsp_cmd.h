@@ -122,6 +122,10 @@ TIEXPORT3 int TICALL nsp_presenter_start(CalcHandle *handle, NspPresenterFrame *
 TIEXPORT3 int TICALL nsp_presenter_next(CalcHandle *handle, NspPresenterFrame *frame);
 TIEXPORT3 int TICALL nsp_presenter_stop(CalcHandle *handle);
 
+// List the descendants of a folder using its relative path in calculator encoding.
+// Free the returned tree with ticalcs_dirlist_destroy.
+TIEXPORT3 int TICALL nsp_get_folder_dirlist(CalcHandle *handle, const char *folder, GNode **vars);
+
 // Command wrappers
 
 TIEXPORT3 int TICALL nsp_cmd_r_login(CalcHandle *handle);
