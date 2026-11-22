@@ -1366,9 +1366,19 @@ static int slv_check(CableHandle *h, int *status)
 			return ERR_READ_ERROR;
 		}
 
+		unsigned int read_timeout = to;
+#ifdef __EMSCRIPTEN__
+		// NNSE applies its own deadlines when polling. WebUSB cannot
+		// cancel a pending read, so a libusb timeout would only discard
+		// the bytes that arrive on it during the next protocol step.
+		if (tigl_devices[h->address].pid == PID_NSPIRE_CXII)
+		{
+			read_timeout = 0;
+		}
+#endif
 		libusb_fill_bulk_transfer(transfer, uHdl, uInEnd, rBuf,
 					  max_ps_in, bulk_transfer_cb,
-					  &completed, to);
+					  &completed, read_timeout);
 		transfer->type = LIBUSB_TRANSFER_TYPE_BULK;
 
 		r = libusb_submit_transfer(transfer);
