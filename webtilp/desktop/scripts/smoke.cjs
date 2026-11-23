@@ -35,6 +35,15 @@ const { smokeTransports } = require('./smoke-transports.cjs');
     assert.equal(await page.title(), "Web'nTILP");
     await page.locator('#btnSettings').click();
     await page.locator('#settingsModal:not(.hidden)').waitFor();
+    const slopDialogs = await page.locator('#slopCountdown, #slopVictory').all();
+    assert.equal(slopDialogs.length, 2);
+    for (const theme of ['light-modern', 'retro', 'professional-light', 'professional-dark', 'minimal', 'ai-slop', 'dark-modern']) {
+        await page.locator('#btnThemeToggle').click();
+        assert.equal(await page.locator('body').getAttribute('data-theme'), theme);
+        for (const dialog of slopDialogs) {
+            assert.equal(await dialog.isVisible(), false, `Closed Slop dialogs must stay hidden in ${theme}`);
+        }
+    }
     await page.locator('#btnCloseSettings').click();
     await page.locator('#settingsModal.hidden').waitFor({ state: 'attached' });
     const result = await page.evaluate(async () => {
