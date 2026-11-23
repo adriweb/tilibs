@@ -3717,7 +3717,8 @@ const THEMES = [
     { id: 'retro', labelKey: 'theme_retro' },
     { id: 'professional-light', labelKey: 'theme_professional_light' },
     { id: 'professional-dark', labelKey: 'theme_professional_dark' },
-    { id: 'minimal', labelKey: 'theme_minimal' }
+    { id: 'minimal', labelKey: 'theme_minimal' },
+    { id: 'ai-slop', label: '✨ AI Slop Ultra' }
 ];
 
 function getCalcModelLabel(value) {
@@ -3890,6 +3891,84 @@ function cycleTheme() {
     const index = THEMES.findIndex(entry => entry.id === current);
     const next = THEMES[(index + 1) % THEMES.length].id;
     applyTheme(next);
+}
+
+let slopCountdownPromise = null;
+
+function runSlopCountdown() {
+    if (slopCountdownPromise) return slopCountdownPromise;
+    const dialog = document.getElementById('slopCountdown');
+    const number = document.getElementById('slopCountdownNumber');
+    let seconds = 3;
+    number.textContent = seconds;
+    dialog.returnValue = '';
+    dialog.showModal();
+    slopCountdownPromise = new Promise(resolve => {
+        const timer = setInterval(() => {
+            if (!dialog.open) return;
+            seconds--;
+            if (seconds === 0) dialog.close('launch');
+            else number.textContent = seconds;
+        }, 1000);
+        dialog.addEventListener('close', () => {
+            clearInterval(timer);
+            slopCountdownPromise = null;
+            resolve(dialog.returnValue === 'launch');
+        }, { once: true });
+    });
+    return slopCountdownPromise;
+}
+
+async function withTransferCelebration(direction, transfer) {
+    if (document.body.dataset.theme !== 'ai-slop') return transfer();
+
+    let launch;
+    let started;
+    let count = 0;
+    let bytes = 0;
+    let elapsed = 0;
+    const receipt = {
+        launch() {
+            if (!launch) {
+                const epoch = state.operationEpoch;
+                const countdown = document.body.dataset.theme === 'ai-slop' ? runSlopCountdown() : Promise.resolve(true);
+                launch = countdown.then(confirmed => {
+                    started = performance.now();
+                    return confirmed && state.operationEpoch === epoch;
+                });
+            }
+            return launch;
+        },
+        record(size, items = 1) {
+            if (!items) return;
+            count += items;
+            bytes += size;
+            elapsed = performance.now() - started;
+        }
+    };
+    const result = await transfer(receipt);
+    if (!count || document.body.dataset.theme !== 'ai-slop') return result;
+
+    const dialog = document.getElementById('slopVictory');
+    document.getElementById('slopVictoryDirection').textContent = direction === 'send' ? 'Items sent' : 'Items received';
+    document.getElementById('slopVictoryCount').textContent = count.toLocaleString();
+    document.getElementById('slopVictoryBytes').textContent = formatBytes(bytes);
+    document.getElementById('slopVictoryElapsed').textContent = elapsed < 1000
+        ? `${Math.round(elapsed)} ms` : `${(elapsed / 1000).toFixed(2)} s`;
+
+    if (!matchMedia('(prefers-reduced-motion: reduce)').matches) {
+        const confetti = document.createDocumentFragment();
+        for (let i = 0; i < 44; i++) {
+            const piece = document.createElement('span');
+            piece.style.setProperty('--x', `${Math.random() * 100}%`);
+            piece.style.setProperty('--delay', `${Math.random() * 0.8}s`);
+            piece.style.setProperty('--hue', String(i * 49 % 360));
+            confetti.appendChild(piece);
+        }
+        dialog.querySelector('.slop-confetti').replaceChildren(confetti);
+    }
+    if (!dialog.open) dialog.showModal();
+    return result;
 }
 
 function showOfflineBanner() {
@@ -6463,7 +6542,7 @@ async function runZeroOperation(label, action) {
     }
 }
 
-async function sendZeroFiles(files) {
+async function sendZeroFiles(files, receipt) {
     if (!files.length) return;
     await runZeroOperation(t('send_selected_files'), async (backend, onProgress) => {
         const { uploadName, MAX_FILE_SIZE } = globalThis.WebTILPZero;
@@ -6479,20 +6558,23 @@ async function sendZeroFiles(files) {
         const existing = new Set((await backend.listFiles()).map(file => file.name.toUpperCase()));
         for (const [name, file] of pending) {
             if (existing.has(name) && !confirm(tFormat('zero_overwrite', { name }))) continue;
+            if (receipt && !(await receipt.launch())) return;
             const data = new Uint8Array(await file.arrayBuffer());
             await backend.upload(name, data, onProgress);
+            receipt?.record(data.byteLength);
         }
         if (state.zeroBackend === backend) setSelectedFiles([]);
         await refreshZeroFiles(backend);
     });
 }
 
-async function downloadZeroFiles(files) {
+async function downloadZeroFiles(files, receipt) {
     await runZeroOperation(t('receive_selected'), async (backend, onProgress) => {
         for (const file of files) {
+            if (receipt && !(await receipt.launch())) return;
             const data = await backend.download(file, onProgress);
             if (state.zeroBackend !== backend) return;
-            triggerDownload(file.name, data);
+            triggerDownload(file.name, data, receipt);
         }
     });
 }
@@ -8426,7 +8508,7 @@ function setSelectedFiles(files, sourceLabel) {
     }
     updateSendFilesButtonState();
     if (state.selectedFiles.length && (sourceLabel === 'drop' || sourceLabel === 'file picker')) {
-        sendSelectedFiles();
+        withTransferCelebration('send', sendSelectedFiles);
     }
 }
 
@@ -9000,7 +9082,7 @@ function findHPPrimeAppRoot(folderPath) {
         && normalizeFolderPath(getEntryFolderPath(entry)) === normalized) || null;
 }
 
-async function sendHPPrimeAppResources(files, appRoot) {
+async function sendHPPrimeAppResources(files, appRoot, receipt) {
     if (!state.hpFileSnapshotLoaded) {
         log(t('hp_prime_app_snapshot_required'));
         return;
@@ -9044,6 +9126,7 @@ async function sendHPPrimeAppResources(files, appRoot) {
     if (!pending.length) {
         return;
     }
+    if (receipt && !(await receipt.launch())) return;
     const manifestPath = `/hp-prime-app-resources-${appRoot.hpIndex}.bin`;
     try {
         module.FS.writeFile(manifestPath,
@@ -9064,6 +9147,7 @@ async function sendHPPrimeAppResources(files, appRoot) {
             }));
             return;
         }
+        receipt?.record(pending.reduce((bytes, item) => bytes + item.data.byteLength, 0), pending.length);
         state.expandedFolders.add(getEntryFolderPath(appRoot));
         applyHPPrimeFileSnapshot(module);
         log(tFormat('hp_prime_app_resources_sent', {
@@ -9098,9 +9182,9 @@ function chooseHPPrimeAppForFile(file) {
     return app || null;
 }
 
-async function sendDroppedFiles(files, dropFolder) {
-    if (state?.activeFamily === 'sharp') { await sendSharpFiles(files); return; }
-    if (state.zeroBackend) { await sendZeroFiles(files); return; }
+async function sendDroppedFiles(files, dropFolder, receipt) {
+    if (state?.activeFamily === 'sharp') { await sendSharpFiles(files, { receipt }); return; }
+    if (state.zeroBackend) { await sendZeroFiles(files, receipt); return; }
 
     if (!files.length) {
         return;
@@ -9108,7 +9192,7 @@ async function sendDroppedFiles(files, dropFolder) {
     log(`Dropped ${files.length} file(s) for transfer.`);
     if (state.casioFlashDrive) {
         try {
-            await sendCasioFlashFiles(state.casioFlashDrive, files, dropFolder);
+            await sendCasioFlashFiles(state.casioFlashDrive, files, dropFolder, receipt);
         } catch (error) {
             logError(error, t('casio_upload_failed'));
         }
@@ -9118,7 +9202,7 @@ async function sendDroppedFiles(files, dropFolder) {
         const appRoot = findHPPrimeAppRoot(dropFolder);
         if (appRoot && !files.some(file => file.hpAppDirectory)) {
             try {
-                await sendHPPrimeAppResources(files, appRoot);
+                await sendHPPrimeAppResources(files, appRoot, receipt);
             } catch (error) {
                 logError(error, t('hp_prime_app_upload_failed_short'));
             }
@@ -9126,7 +9210,7 @@ async function sendDroppedFiles(files, dropFolder) {
         }
         setSelectedFiles(files, 'table drop');
         try {
-            await sendSelectedFiles();
+            await sendSelectedFiles(receipt);
         } catch (error) {
             logError(error, 'Dropped transfer failed');
         }
@@ -9134,13 +9218,14 @@ async function sendDroppedFiles(files, dropFolder) {
     }
     if (isNumWorksActive()) {
         try {
-            await sendNumWorksFiles(files);
+            await sendNumWorksFiles(files, receipt);
         } catch (error) {
             logError(error, t('numworks_dropped_upload_failed'));
         }
         return;
     }
     await processIncomingTransfers(files, {
+        receipt,
         dropFolder,
         checkCableMismatch: true,
         useModal: false,
@@ -9892,7 +9977,8 @@ async function handleCeBundleTransfer(bundleFile, module, options) {
         const { successCount } = await performTransfers(orderedSelections, module, {
             hasFolder: options.hasFolder,
             hasArchive: options.hasArchive,
-            overwriteAll
+            overwriteAll,
+            receipt: options.receipt
         });
 
         orderedSelections.forEach(item => {
@@ -10136,12 +10222,15 @@ function hasManualVariableLink(model) {
     return (model === 2 || model === 6) && (state.features & FEATURE_FLAGS.FTS_NONSILENT) !== 0;
 }
 
-async function runGuidedLinkTransfer(direction, filename, operation) {
+async function runGuidedLinkTransfer(direction, filename, operation, receipt) {
     const model = getActiveCalcModelId();
     const variables = direction === 'receive-vars';
     const steps = variables ? [model === 2 ? 'receive_variables_82' : 'receive_variables_85']
         : getNativeBackupSteps(model, direction);
-    if (!els.backupGuideModal || !steps.length) return operation();
+    if (!els.backupGuideModal || !steps.length) {
+        if (receipt && !(await receipt.launch())) return null;
+        return operation();
+    }
     const restore = direction === 'restore';
     const epoch = state.operationEpoch;
     const previousFocus = document.activeElement;
@@ -10183,6 +10272,7 @@ async function runGuidedLinkTransfer(direction, filename, operation) {
             els.btnStartBackupRestore.focus();
             const confirmed = await new Promise(resolve => { decide = resolve; });
             if (!confirmed || state.operationEpoch !== epoch) return null;
+            if (receipt && !(await receipt.launch())) return null;
         }
         started = true;
         decide = null;
@@ -10342,6 +10432,7 @@ function findDirlistMatch(name, type, folder, location) {
 }
 
 async function performTransfers(plan, module, options) {
+    const { receipt } = options;
     const handle = await ensureCableOpen();
     const model = getActiveCalcModelId();
     const needsEot = model === 2 || model === 6; // TI-82 / TI-85
@@ -10362,6 +10453,7 @@ async function performTransfers(plan, module, options) {
         }
     };
     let successCount = 0;
+    let sentBytes = 0;
     const configuredCableTimeout = Number(state.settings?.cableTimeout);
     const originalCableTimeout = Number.isFinite(configuredCableTimeout) && configuredCableTimeout > 0
         ? configuredCableTimeout
@@ -10418,6 +10510,7 @@ async function performTransfers(plan, module, options) {
                         continue;
                     }
                     if (isTI89TActive()) {
+                        if (receipt && !(await receipt.launch())) return { successCount };
                         if (existing.attr !== 0) {
                             const clearAttrResult = await ccallAsync(
                                 module,
@@ -10466,6 +10559,8 @@ async function performTransfers(plan, module, options) {
                 }
             }
 
+            const guidedRestore = item.fileClass === 'backup' && [2, 3, 6, 7].includes(model);
+            if (!guidedRestore && receipt && !(await receipt.launch())) return { successCount };
             let locationCode = -1;
             if (isVar && locationMask === 1) {
                 locationCode = 0;
@@ -10531,8 +10626,8 @@ async function performTransfers(plan, module, options) {
                 };
                 const restore = needsEot && item.fileClass === 'backup'
                     ? () => transferBackupWithDirlist(module, item.path, send) : send;
-                result = item.fileClass === 'backup' && [2, 3, 6, 7].includes(model)
-                    ? await runGuidedLinkTransfer('restore', displayName, restore) : await send();
+                result = guidedRestore
+                    ? await runGuidedLinkTransfer('restore', displayName, restore, receipt) : await send();
                 if (result === null) break;
                 pendingEot = deferEot && result === 0;
             } finally {
@@ -10548,6 +10643,7 @@ async function performTransfers(plan, module, options) {
             if (result === 0) {
                 log(`Sent ${displayName} successfully.`);
                 successCount += 1;
+                if (receipt) sentBytes += item.sendByEntry ? (item.entrySize ?? 0) : item.file.size;
                 if (isVar && !needsEot && targetName && item.entryType != null) {
                     state.dirlist.push({
                         name: targetName,
@@ -10583,10 +10679,11 @@ async function performTransfers(plan, module, options) {
     // Close even when trailing entries were skipped.
     // Do not report a successful batch until the calculator acknowledges EOT.
     await finishVarSend();
+    receipt?.record(sentBytes, successCount);
     return { successCount };
 }
 
-async function sendNumWorksFiles(files) {
+async function sendNumWorksFiles(files, receipt) {
     const normalizeName = globalThis.WebTILPNumWorks?.normalizeScriptName;
     if (!normalizeName || !state.numWorksBackend) {
         throw new Error(t('numworks_backend_not_connected'));
@@ -10633,14 +10730,19 @@ async function sendNumWorksFiles(files) {
         log(t('numworks_no_supported_scripts'));
         return;
     }
+    if (receipt && !(await receipt.launch())) return;
     await state.numWorksBackend.upsertScripts(pending);
+    if (receipt) {
+        const encoder = new TextEncoder();
+        receipt.record(pending.reduce((bytes, script) => bytes + encoder.encode(script.code).length, 0), pending.length);
+    }
     setSelectedFiles([]);
     readNumWorksInfo();
     applyNumWorksStorageSnapshot();
     log(tFormat('numworks_scripts_sent', { count: pending.length }));
 }
 
-async function sendCasioFlashFiles(drive, files, directory) {
+async function sendCasioFlashFiles(drive, files, directory, receipt) {
     if (state.casioFlashWriting) return;
     state.casioFlashWriting = true;
     els.btnConnect.disabled = true;
@@ -10678,11 +10780,13 @@ async function sendCasioFlashFiles(drive, files, directory) {
                 log(tFormat('casio_overwrite_skipped', { file: name }));
                 continue;
             }
+            if (receipt && !(await receipt.launch())) return;
             const progress = tFormat('casio_progress_sending_file', { file: name });
             startProgress(progress);
             try {
                 await writeCasioFlashFile(folder, previous?.name ?? name, file, Boolean(previous));
                 copied++;
+                receipt?.record(file.size);
                 log(tFormat('casio_file_sent', { file: name }));
             } catch (error) {
                 log(tFormat('casio_file_send_failed', { file: name, error: error.message }));
@@ -10700,7 +10804,7 @@ async function sendCasioFlashFiles(drive, files, directory) {
     }
 }
 
-async function sendSelectedFiles() {
+async function sendSelectedFiles(receipt) {
     const files = state.selectedFiles.length
         ? state.selectedFiles
         : Array.from(els.fileInput.files || []);
@@ -10712,14 +10816,14 @@ async function sendSelectedFiles() {
     try {
         if (state.casioFlashDrive) {
             try {
-                await sendCasioFlashFiles(state.casioFlashDrive, files);
+                await sendCasioFlashFiles(state.casioFlashDrive, files, undefined, receipt);
             } catch (error) {
                 logError(error, t('casio_upload_failed'));
             }
             return;
         }
-        if (state?.activeFamily === 'sharp') { await sendSharpFiles(files); return; }
-        if (state.zeroBackend) { await sendZeroFiles(files); return; }
+        if (state?.activeFamily === 'sharp') { await sendSharpFiles(files, { receipt }); return; }
+        if (state.zeroBackend) { await sendZeroFiles(files, receipt); return; }
         if (isHPPrimeActive()) {
             const module = await initModule();
             let successCount = 0;
@@ -10728,7 +10832,7 @@ async function sendSelectedFiles() {
             // below invalidate it. Never send these as independent variables.
             for (const file of files.filter(file => /\.(hpappprgm|hpappnote)$/i.test(file.name))) {
                 const app = chooseHPPrimeAppForFile(file);
-                if (app && await sendHPPrimeAppResources([file], app)) appPartsSent = true;
+                if (app && await sendHPPrimeAppResources([file], app, receipt)) appPartsSent = true;
             }
             const topLevelFiles = files.filter(file => !/\.(hpappprgm|hpappnote)$/i.test(file.name));
             if (!topLevelFiles.length) {
@@ -10763,6 +10867,7 @@ async function sendSelectedFiles() {
                     log(tFormat('hp_prime_overwrite_skipped', { file: file.name }));
                     continue;
                 }
+                if (receipt && !(await receipt.launch())) return;
                 const path = `/hp-prime-upload-${index}.bin`;
                 try {
                     module.FS.writeFile(path, new Uint8Array(await file.arrayBuffer()));
@@ -10774,6 +10879,7 @@ async function sendSelectedFiles() {
                         });
                     if (result === 0) {
                         successCount += 1;
+                        receipt?.record(file.size);
                         state.hpFileSnapshotLoaded = false;
                         log(tFormat('hp_prime_file_sent', { file: file.name }));
                     } else {
@@ -10798,13 +10904,14 @@ async function sendSelectedFiles() {
         }
         if (isNumWorksActive()) {
             try {
-                await sendNumWorksFiles(files);
+                await sendNumWorksFiles(files, receipt);
             } catch (error) {
                 logError(error, t('numworks_upload_failed'));
             }
             return;
         }
         await processIncomingTransfers(files, {
+            receipt,
             checkCableMismatch: false,
             useModal: true,
             errorContext: 'Send files failed'
@@ -10821,6 +10928,7 @@ async function sendSelectedFiles() {
 
 async function processIncomingTransfers(files, options = {}) {
     const {
+        receipt,
         dropFolder = '',
         useModal = true,
         checkCableMismatch = false,
@@ -10865,7 +10973,7 @@ async function processIncomingTransfers(files, options = {}) {
                 alert(t('alert_bundle_one_at_a_time'));
                 return;
             }
-            const bundleResult = await handleCeBundleTransfer(bundleCandidates[0], module, { hasFolder, hasArchive, folders });
+            const bundleResult = await handleCeBundleTransfer(bundleCandidates[0], module, { hasFolder, hasArchive, folders, receipt });
             if (bundleResult?.successCount > 0) {
                 setSelectedFiles([]);
             }
@@ -10891,7 +10999,7 @@ async function processIncomingTransfers(files, options = {}) {
                 }));
             }
 
-            const { successCount } = await performTransfers(selections, module, { hasFolder, hasArchive, overwriteAll });
+            const { successCount } = await performTransfers(selections, module, { hasFolder, hasArchive, overwriteAll, receipt });
             const hasOsTransfer = selections.some(item => item.fileClass === 'os');
             if (successCount > 0) {
                 setSelectedFiles([]);
@@ -10915,7 +11023,7 @@ async function processIncomingTransfers(files, options = {}) {
     }
 }
 
-async function receiveVariables() {
+async function receiveVariables(receipt) {
     if (!hasManualVariableLink(getActiveCalcModelId())) return;
     setButtonLoading(els.btnReceiveVars, true);
     try {
@@ -10923,12 +11031,13 @@ async function receiveVariables() {
         const module = state.module;
         const dir = '/downloads';
         if (!module.FS.analyzePath(dir).exists) module.FS.mkdir(dir);
+        if (receipt && !(await receipt.launch())) return;
         const result = await runGuidedLinkTransfer('receive-vars', '', () =>
             ccallAsync(module, 'calc_recv_var_ns', 'number', ['number', 'string'], [handle, dir], {
                 timeoutMs: null, useProgress: true, progressLabel: t('receive_variables_waiting')
             }));
         if (result !== 0) throw new Error(formatErrorResult(module, result));
-        await downloadLastReceived(module);
+        await downloadLastReceived(module, undefined, receipt);
     } catch (error) {
         logError(error, t('receive_variables'));
     } finally {
@@ -10936,9 +11045,12 @@ async function receiveVariables() {
     }
 }
 
-async function receiveBackup() {
+async function receiveBackup(receipt) {
     if (state?.activeFamily === 'sharp') {
-        await runSharpOperation(t('sharp_backup'), async backend => saveSharpDownload(await backend.receiveBackup(), backend));
+        await runSharpOperation(t('sharp_backup'), async backend => {
+            if (receipt && !(await receipt.launch())) return;
+            saveSharpDownload(await backend.receiveBackup(), backend, receipt);
+        });
         return;
     }
 
@@ -10949,6 +11061,7 @@ async function receiveBackup() {
             if (!module.FS.analyzePath('/downloads').exists) {
                 module.FS.mkdir('/downloads');
             }
+            if (receipt && !(await receipt.launch())) return;
             const target = '/downloads/hp-prime-backup.zip';
             const refresh = beginHPPrimeFileSnapshot(module);
             let result;
@@ -10971,15 +11084,16 @@ async function receiveBackup() {
             }
             const snapshotCount = finishHPPrimeFileSnapshot(module, refresh, true);
             const data = module.FS.readFile(target);
-            triggerDownload('hp-prime-backup.zip', data);
+            triggerDownload('hp-prime-backup.zip', data, receipt);
             module.FS.unlink(target);
             log(tFormat('hp_prime_backup_received', { count: snapshotCount }));
             return;
         }
         if (isNumWorksActive()) {
+            if (receipt && !(await receipt.launch())) return;
             const data = await state.numWorksBackend.readRawStorageImage();
             const stamp = new Date().toISOString().replace(/[-:]/g, '').replace(/\.\d{3}Z$/, 'Z');
-            triggerDownload(`numworks-storage-${stamp}.bin`, data);
+            triggerDownload(`numworks-storage-${stamp}.bin`, data, receipt);
             log(tFormat('numworks_backup_received', { size: data.byteLength }));
             return;
         }
@@ -11040,6 +11154,7 @@ async function receiveBackup() {
         if (manualBackup) log(progressLabel);
         const receive = () => ccallAsync(module, 'calc_recv_backup', 'number', ['number', 'string'],
             [handle, target], { timeoutMs: manualBackup ? null : PROGRESS_IDLE_TIMEOUT_MS, useProgress: true, progressLabel });
+        if (receipt && !(await receipt.launch())) return;
         const epoch = state.operationEpoch;
         const result = isTigroup
             ? await ccallAsync(module, 'calc_recv_tigroup', 'number', ['number', 'string', 'number'], [handle, target, backupChoice.mode], { timeoutMs: PROGRESS_IDLE_TIMEOUT_MS, useProgress: true, progressLabel: 'Receiving backup (tigroup)' })
@@ -11050,7 +11165,7 @@ async function receiveBackup() {
             log(`Backup failed (${formatErrorResult(module, result)}).`);
             return;
         }
-        await downloadLastReceived(module, filename);
+        await downloadLastReceived(module, filename, receipt);
         log(isTigroup ? 'TIGroup backup received.' : 'Backup received.');
     } catch (err) {
         logError(err, 'Receive backup failed');
@@ -11059,8 +11174,8 @@ async function receiveBackup() {
     }
 }
 
-async function receiveOs() {
-    if (state?.activeFamily === 'sharp') { await receiveSharpDump(false); return; }
+async function receiveOs(receipt) {
+    if (state?.activeFamily === 'sharp') { await receiveSharpDump(false, receipt); return; }
 
     setButtonLoading(els.btnReceiveOs, true);
     try {
@@ -11078,6 +11193,7 @@ async function receiveOs() {
         if (!confirm(notice)) {
             return;
         }
+        if (receipt && !(await receipt.launch())) return;
         state.nspireOsReceiveStarted = true;
         updateNspireOsButtons(true, (state.features & FEATURE_FLAGS.OPS_ROMDUMP) !== 0);
         const extension = getFlashOsExtensionFromModule(module);
@@ -11090,7 +11206,7 @@ async function receiveOs() {
             log(`OS receive failed (${formatErrorResult(module, result)}).`);
             return;
         }
-        await downloadLastReceived(module, 'ti-nspire-os.tnc');
+        await downloadLastReceived(module, 'ti-nspire-os.tnc', receipt);
         log('OS received as .tnc.');
     } catch (err) {
         logError(err, 'Receive OS failed');
@@ -11119,8 +11235,8 @@ async function downloadPartialOs() {
     }
 }
 
-async function dumpRom() {
-    if (state?.activeFamily === 'sharp') { await receiveSharpDump(true); return; }
+async function dumpRom(receipt) {
+    if (state?.activeFamily === 'sharp') { await receiveSharpDump(true, receipt); return; }
 
     setButtonLoading(els.btnDumpRom, true);
     const notice = t('confirm_dump_rom_notice');
@@ -11137,6 +11253,7 @@ async function dumpRom() {
             module.FS.mkdir('/downloads');
         }
 
+        if (receipt && !(await receipt.launch())) return;
         log('Sending ROM dumper...');
         let result = await ccallAsync(module, 'calc_dump_rom_1', 'number', ['number'], [handle], { timeoutMs: 30000, useProgress: true, progressLabel: 'Starting ROM dump' });
         if (result !== 0) {
@@ -11151,7 +11268,7 @@ async function dumpRom() {
             log(`ROM dump step 2 failed (${formatErrorResult(module, result)}).`);
             return;
         }
-        await downloadLastReceived(module, (state.authorizedDevice?.productName ?? 'ti-calculator') + '_dump.rom');
+        await downloadLastReceived(module, (state.authorizedDevice?.productName ?? 'ti-calculator') + '_dump.rom', receipt);
         log('ROM dump completed.');
     } catch (err) {
         logError(err, 'ROM dump failed');
@@ -11211,7 +11328,7 @@ async function leaveExamMode() {
     }
 }
 
-async function downloadHPPrimeEntry(entry) {
+async function downloadHPPrimeEntry(entry, receipt) {
     if (!Number.isInteger(entry.hpIndex) || entry.hpIndex < 0) {
         throw new Error(tFormat('hp_prime_missing_cache_index', { name: entry.name }));
     }
@@ -11232,6 +11349,7 @@ async function downloadHPPrimeEntry(entry) {
     const target = isAppChild
         ? `/downloads/hp-prime-${entry.hpIndex}-child-${entry.hpAppChildIndex}.bin`
         : `/downloads/hp-prime-${entry.hpIndex}.bin`;
+    if (receipt && !(await receipt.launch())) return false;
     const result = isAppChild
         ? await ccallAsync(module, 'hp_prime_download_cached_app_child', 'number',
             ['number', 'number', 'string'],
@@ -11244,13 +11362,13 @@ async function downloadHPPrimeEntry(entry) {
         }));
     }
     const data = module.FS.readFile(target);
-    triggerDownload(filename, data);
+    triggerDownload(filename, data, receipt);
     module.FS.unlink(target);
     log(tFormat('hp_prime_file_received', { file: filename }));
     return true;
 }
 
-async function downloadHPPrimeEntries(entries) {
+async function downloadHPPrimeEntries(entries, receipt) {
     const selectedAppRoots = new Set(entries
         .filter(entry => entry.hpAppRoot && Number.isInteger(entry.hpIndex))
         .map(entry => entry.hpIndex));
@@ -11258,7 +11376,7 @@ async function downloadHPPrimeEntries(entries) {
         || !selectedAppRoots.has(entry.hpIndex));
     for (const entry of downloads) {
         try {
-            await downloadHPPrimeEntry(entry);
+            await downloadHPPrimeEntry(entry, receipt);
         } catch (err) {
             logError(err, tFormat('hp_prime_file_download_failed_context', {
                 name: entry.name
@@ -11267,29 +11385,30 @@ async function downloadHPPrimeEntries(entries) {
     }
 }
 
-function downloadNumWorksEntry(entry) {
+function downloadNumWorksEntry(entry, receipt) {
     if (!state.numWorksBackend) {
         throw new Error(t('numworks_backend_not_connected'));
     }
     const script = state.numWorksBackend.getScript(entry.numWorksName || entry.name);
-    triggerDownload(script.name, new TextEncoder().encode(script.code));
+    triggerDownload(script.name, new TextEncoder().encode(script.code), receipt);
     log(tFormat('numworks_file_received', { file: script.name }));
     return true;
 }
 
-async function downloadCasioEntry(entry) {
+async function downloadCasioEntry(entry, receipt) {
     const drive = state.casioFlashDrive;
     if (!drive || entry.isFolder || entry.is_folder === 1) return false;
+    if (receipt && !(await receipt.launch())) return false;
     const folder = await getCasioFlashFolder(drive, entry.folder);
     const handle = await folder.getFileHandle(entry.name);
     const file = await handle.getFile();
     if (drive !== state.casioFlashDrive) return false;
-    triggerDownload(entry.name, file);
+    triggerDownload(entry.name, file, receipt);
     log(tFormat('casio_file_received', { file: entry.name }));
     return true;
 }
 
-async function downloadCasioEntries(selections) {
+async function downloadCasioEntries(selections, receipt) {
     const drive = state.casioFlashDrive;
     const selectedFolders = selections
         .filter(entry => entry.isFolder || entry.is_folder === 1)
@@ -11314,7 +11433,7 @@ async function downloadCasioEntries(selections) {
     for (let index = 0; index < files.length; index++) {
         if (drive && drive !== state.casioFlashDrive) return;
         try {
-            await downloadCasioEntry(files[index], index);
+            await downloadCasioEntry(files[index], receipt);
         } catch (error) {
             log(tFormat('casio_file_receive_failed', {
                 file: files[index].name,
@@ -11324,11 +11443,13 @@ async function downloadCasioEntries(selections) {
     }
 }
 
-async function receiveSelected() {
+async function receiveSelected(receipt) {
     if (state?.activeFamily === 'sharp') {
         const entries = getSelectedVarInputs().map(buildEntryFromCheckbox);
+        if (!entries.length) return;
         await runSharpOperation(t('sharp_receive'), async backend => {
-            for (const entry of entries) saveSharpDownload(await backend.receiveVariable(entry), backend);
+            if (receipt && !(await receipt.launch())) return;
+            for (const entry of entries) saveSharpDownload(await backend.receiveVariable(entry), backend, receipt);
         });
         return;
     }
@@ -11339,13 +11460,13 @@ async function receiveSelected() {
         return;
     }
     if (state.zeroBackend) {
-        await downloadZeroFiles(selections);
+        await downloadZeroFiles(selections, receipt);
         return;
     }
     if (isHPPrimeActive()) {
         setButtonLoading(els.btnRecvSelected, true);
         try {
-            await downloadHPPrimeEntries(selections);
+            await downloadHPPrimeEntries(selections, receipt);
         } finally {
             setButtonLoading(els.btnRecvSelected, false);
         }
@@ -11354,7 +11475,7 @@ async function receiveSelected() {
     if (state.casioFlashDrive) {
         setButtonLoading(els.btnRecvSelected, true);
         try {
-            await downloadCasioEntries(selections);
+            await downloadCasioEntries(selections, receipt);
         } catch (err) {
             logError(err, t('casio_download_failed'));
         } finally {
@@ -11365,8 +11486,9 @@ async function receiveSelected() {
     if (isNumWorksActive()) {
         setButtonLoading(els.btnRecvSelected, true);
         try {
+            if (receipt && !(await receipt.launch())) return;
             for (const entry of selections) {
-                downloadNumWorksEntry(entry);
+                downloadNumWorksEntry(entry, receipt);
             }
         } catch (err) {
             logError(err, t('numworks_receive_selected_failed'));
@@ -11406,7 +11528,6 @@ async function receiveSelected() {
         await authorizeDevice();
         const module = await initModule();
         const handle = await ensureHandle();
-        let receivedAny = false;
         if (!module.FS.analyzePath('/downloads').exists) {
             module.FS.mkdir('/downloads');
         }
@@ -11425,10 +11546,10 @@ async function receiveSelected() {
                 return;
             }
         }
+        if (receipt && !(await receipt.launch())) return;
         for (const entry of uniqueSelections) {
             if (entry.isFolder) {
-                const ok = await downloadFolderEntriesWithSession(module, handle, entry.folderPath || entry.name, false);
-                receivedAny = receivedAny || ok;
+                await downloadFolderEntriesWithSession(module, handle, entry.folderPath || entry.name, false, receipt);
                 continue;
             }
             const progressLabel = `Receiving ${entry.name}`;
@@ -11436,9 +11557,8 @@ async function receiveSelected() {
                 ? await ccallAsync(module, 'calc_recv_app', 'number', ['number', 'string', 'number', 'string', 'string'], [handle, entry.name, entry.type, '/downloads', entry.name_hex], { timeoutMs: PROGRESS_IDLE_TIMEOUT_MS, useProgress: true, progressLabel })
                 : await ccallAsync(module, 'calc_recv_var', 'number', ['number', 'string', 'string', 'number', 'string', 'string', 'string'], [handle, entry.folder, entry.name, entry.type, '/downloads', entry.folder_hex, entry.name_hex], { timeoutMs: getVariableReceiveTimeout(entry), useProgress: true, progressLabel });
             if (result === 0) {
-                await downloadLastReceived(module);
+                await downloadLastReceived(module, undefined, receipt);
                 log(`Received ${entry.name}.`);
-                receivedAny = true;
             } else {
                 log(`Failed to receive ${entry.name} (${formatErrorResult(module, result)}).`);
             }
@@ -11790,17 +11910,20 @@ async function deleteEntry(entry) {
     }
 }
 
-async function downloadEntry(entry) {
+async function downloadEntry(entry, receipt) {
     if (entry?.kind === 'zero-var') return;
-    if (state.zeroBackend) { await downloadZeroFiles([entry]); return; }
+    if (state.zeroBackend) { await downloadZeroFiles([entry], receipt); return; }
     if (state?.activeFamily === 'sharp') {
-        await runSharpOperation(t('sharp_receive'), async backend => saveSharpDownload(await backend.receiveVariable(entry), backend));
+        await runSharpOperation(t('sharp_receive'), async backend => {
+            if (receipt && !(await receipt.launch())) return;
+            saveSharpDownload(await backend.receiveVariable(entry), backend, receipt);
+        });
         return;
     }
     if (isHPPrimeActive()) {
         setButtonLoading(els.btnRecvSelected, true);
         try {
-            await downloadHPPrimeEntry(entry);
+            await downloadHPPrimeEntry(entry, receipt);
         } catch (err) {
             logError(err, t('hp_prime_download_failed'));
         } finally {
@@ -11812,9 +11935,9 @@ async function downloadEntry(entry) {
         setButtonLoading(els.btnRecvSelected, true);
         try {
             if (entry.isFolder || entry.is_folder === 1) {
-                await downloadCasioEntries([entry]);
+                await downloadCasioEntries([entry], receipt);
             } else {
-                await downloadCasioEntry(entry);
+                await downloadCasioEntry(entry, receipt);
             }
         } catch (err) {
             logError(err, t('casio_download_failed'));
@@ -11826,7 +11949,8 @@ async function downloadEntry(entry) {
     if (isNumWorksActive()) {
         setButtonLoading(els.btnRecvSelected, true);
         try {
-            downloadNumWorksEntry(entry);
+            if (receipt && !(await receipt.launch())) return;
+            downloadNumWorksEntry(entry, receipt);
         } catch (err) {
             logError(err, t('numworks_download_failed'));
         } finally {
@@ -11835,7 +11959,7 @@ async function downloadEntry(entry) {
         return;
     }
     if (entry.isFolder) {
-        await downloadFolderEntries(entry.folderPath || entry.name);
+        await downloadFolderEntries(entry.folderPath || entry.name, receipt);
         return;
     }
     setButtonLoading(els.btnRecvSelected, true);
@@ -11846,12 +11970,13 @@ async function downloadEntry(entry) {
         if (!module.FS.analyzePath('/downloads').exists) {
             module.FS.mkdir('/downloads');
         }
+        if (receipt && !(await receipt.launch())) return;
         const progressLabel = `Receiving ${entry.name}`;
         const result = entry.kind === 'app'
             ? await ccallAsync(module, 'calc_recv_app', 'number', ['number', 'string', 'number', 'string', 'string'], [handle, entry.name, entry.type, '/downloads', entry.name_hex], { timeoutMs: PROGRESS_IDLE_TIMEOUT_MS, useProgress: true, progressLabel })
             : await ccallAsync(module, 'calc_recv_var', 'number', ['number', 'string', 'string', 'number', 'string', 'string', 'string'], [handle, entry.folder, entry.name, entry.type, '/downloads', entry.folder_hex, entry.name_hex], { timeoutMs: getVariableReceiveTimeout(entry), useProgress: true, progressLabel });
         if (result === 0) {
-            await downloadLastReceived(module);
+            await downloadLastReceived(module, undefined, receipt);
             log(`Received ${entry.name}.`);
         } else {
             log(`Failed to receive ${entry.name} (${formatErrorResult(module, result)}).`);
@@ -12443,7 +12568,7 @@ async function previewEntry(entry, actionButton) {
     }
 }
 
-async function downloadFolderEntriesWithSession(module, handle, folderPath, confirmDownload) {
+async function downloadFolderEntriesWithSession(module, handle, folderPath, confirmDownload, receipt) {
     const target = normalizeFolderPath(folderPath);
     const entries = state.dirlist.filter(entry => {
         if (entry.is_folder === 1) {
@@ -12467,6 +12592,7 @@ async function downloadFolderEntriesWithSession(module, handle, folderPath, conf
             return false;
         }
     }
+    if (receipt && !(await receipt.launch())) return false;
     for (const entry of entries) {
         const result = await ccallAsync(
             module,
@@ -12477,7 +12603,7 @@ async function downloadFolderEntriesWithSession(module, handle, folderPath, conf
             { timeoutMs: getVariableReceiveTimeout(entry), useProgress: true, progressLabel: `Receiving ${entry.name}` }
         );
         if (result === 0) {
-            await downloadLastReceived(module);
+            await downloadLastReceived(module, undefined, receipt);
             log(`Received ${entry.name}.`);
         } else {
             log(`Failed to receive ${entry.name} (${formatErrorResult(module, result)}).`);
@@ -12486,7 +12612,7 @@ async function downloadFolderEntriesWithSession(module, handle, folderPath, conf
     return true;
 }
 
-async function downloadFolderEntries(folderPath) {
+async function downloadFolderEntries(folderPath, receipt) {
     setButtonLoading(els.btnRecvSelected, true);
     try {
         await authorizeDevice();
@@ -12495,7 +12621,7 @@ async function downloadFolderEntries(folderPath) {
         if (!module.FS.analyzePath('/downloads').exists) {
             module.FS.mkdir('/downloads');
         }
-        await downloadFolderEntriesWithSession(module, handle, folderPath, true);
+        await downloadFolderEntriesWithSession(module, handle, folderPath, true, receipt);
     } catch (err) {
         logError(err, 'Folder download failed');
     } finally {
@@ -13006,7 +13132,7 @@ async function convertReceivedPythonFile(filename, data) {
     }
 }
 
-async function downloadLastReceived(module, fallbackName) {
+async function downloadLastReceived(module, fallbackName, receipt) {
     let filename = fallbackName || 'download.bin';
     try {
         const lastPath = module.FS.readFile('/last_recv_path.txt', { encoding: 'utf8' }).trim();
@@ -13018,7 +13144,7 @@ async function downloadLastReceived(module, fallbackName) {
                 filename = converted.filename;
                 data = converted.data;
             }
-            triggerDownload(filename, data);
+            triggerDownload(filename, data, receipt);
             module.FS.unlink(lastPath);
             return;
         }
@@ -13056,7 +13182,7 @@ async function downloadDebugLog() {
     }
 }
 
-function triggerDownload(filename, data) {
+function triggerDownload(filename, data, receipt) {
     const blob = new Blob([data], { type: 'application/octet-stream' });
     const link = document.createElement('a');
     const url = URL.createObjectURL(blob);
@@ -13066,6 +13192,7 @@ function triggerDownload(filename, data) {
     link.click();
     link.remove();
     setTimeout(() => URL.revokeObjectURL(url), 0);
+    receipt?.record(blob.size);
 }
 
 function clearLog() {
@@ -13311,17 +13438,17 @@ function bindEvents() {
     els.btnSyncClock.addEventListener('click', syncClock);
     els.btnRefreshDirlist.addEventListener('click', () => refreshDirlist({ manual: true }));
     els.btnBackupDirlist?.addEventListener('click', () => refreshDirlist({ manual: true }));
-    els.btnSendFiles.addEventListener('click', sendSelectedFiles);
-    els.btnReceiveVars.addEventListener('click', receiveVariables);
-    els.btnReceiveBackup.addEventListener('click', receiveBackup);
-    els.btnReceiveOs.addEventListener('click', receiveOs);
+    els.btnSendFiles.addEventListener('click', () => withTransferCelebration('send', sendSelectedFiles));
+    els.btnReceiveVars.addEventListener('click', () => withTransferCelebration('receive', receiveVariables));
+    els.btnReceiveBackup.addEventListener('click', () => withTransferCelebration('receive', receiveBackup));
+    els.btnReceiveOs.addEventListener('click', () => withTransferCelebration('receive', receiveOs));
     els.btnSharpRecoverOs?.addEventListener('click', pickSharpRecoveryFile);
     els.btnDownloadOsPartial.addEventListener('click', downloadPartialOs);
-    els.btnDumpRom.addEventListener('click', dumpRom);
+    els.btnDumpRom.addEventListener('click', () => withTransferCelebration('receive', dumpRom));
     if (els.btnLeaveExam) {
         els.btnLeaveExam.addEventListener('click', leaveExamMode);
     }
-    els.btnRecvSelected.addEventListener('click', receiveSelected);
+    els.btnRecvSelected.addEventListener('click', () => withTransferCelebration('receive', receiveSelected));
     els.btnDeleteSelected.addEventListener('click', deleteSelected);
     els.btnScreenshot.addEventListener('click', takeScreenshot);
     els.btnNspireLiveScreen?.addEventListener('click', toggleNspireLiveScreen);
@@ -13494,7 +13621,7 @@ function bindEvents() {
                 } else if (actionButton.classList.contains('action-rename')) {
                     await renameEntry(entry);
                 } else if (actionButton.classList.contains('action-download')) {
-                    await downloadEntry(entry);
+                    await withTransferCelebration('receive', receipt => downloadEntry(entry, receipt));
                 } else {
                     await deleteEntry(entry);
                 }
@@ -13617,7 +13744,7 @@ function bindEvents() {
         const folder = folderNode?.dataset.folderPath ?? row?.dataset.folderTarget;
         try {
             const files = await getDroppedTransferFiles(event);
-            if (files.length) await sendDroppedFiles(files, folder);
+            if (files.length) await withTransferCelebration('send', receipt => sendDroppedFiles(files, folder, receipt));
         } catch (error) {
             logError(error);
         }
@@ -14056,9 +14183,9 @@ async function runSharpOperation(label, callback) {
     }
 }
 
-function saveSharpDownload(result, backend) {
+function saveSharpDownload(result, backend, receipt) {
     if (!state.connected || state.sharpBackend !== backend) return;
-    triggerDownload(result.filename, result.data);
+    triggerDownload(result.filename, result.data, receipt);
 }
 
 async function convertSharpImage(file, slot) {
@@ -14117,12 +14244,12 @@ function pickSharpRecoveryFile() {
     picker.accept = buildFileInputAccept(['bin']);
     picker.addEventListener('change', async () => {
         if (state.sharpBackend !== backend || state.sharpConnectionGeneration !== generation) return;
-        await sendSharpFiles(Array.from(picker.files), { reprogram: true });
+        await withTransferCelebration('send', receipt => sendSharpFiles(Array.from(picker.files), { reprogram: true, receipt }));
     }, { once: true });
     picker.click();
 }
 
-async function sendSharpFiles(files, { reprogram = false } = {}) {
+async function sendSharpFiles(files, { reprogram = false, receipt } = {}) {
     if (!files.length) return;
     const backend = state.sharpBackend, generation = state.sharpConnectionGeneration;
     if (reprogram || files.some(file => /\.bin$/i.test(file.name))) {
@@ -14141,7 +14268,9 @@ async function sendSharpFiles(files, { reprogram = false } = {}) {
         const notice = tFormat('sharp_os_confirm', { file: file.name, model: globalThis.WebTILPSharp.MODELS[os.model], version: os.version });
         if (!confirm(notice + '\n\n' + t(reprogram || os.manual ? 'sharp_os_manual_entry' : 'sharp_os_auto_entry'))) return;
         await runSharpOperation(t('sharp_send_os'), async current => {
+            if (receipt && !(await receipt.launch())) return;
             await current.sendOs(image, { reprogram });
+            receipt?.record(image.byteLength);
             if (state.sharpBackend === current) log(t('sharp_os_sent'));
         });
         return;
@@ -14198,22 +14327,25 @@ async function sendSharpFiles(files, { reprogram = false } = {}) {
     if (!confirm(tFormat('sharp_confirm_send', { count: prepared.length }) + '\n' + prepared.map(item => item.name).join('\n'))) return;
     if (prepared.some(item => item.decoded.backup) && !confirm(t('sharp_confirm_restore'))) return;
     await runSharpOperation(t('sharp_send'), async current => {
+        if (receipt && !(await receipt.launch())) return;
         for (const item of prepared) {
             await current.sendFile(item.data, item.name, { allowRestore: item.decoded.backup });
             if (state.sharpBackend !== current) return;
+            receipt?.record(item.data.byteLength);
             log(tFormat('sharp_sent', { file: item.name }));
         }
         state.dirlist = []; renderDirlist([]);
     });
 }
 
-async function receiveSharpDump(includeBoot) {
+async function receiveSharpDump(includeBoot, receipt) {
     if (!confirm(t(includeBoot ? 'sharp_dump_rom_notice' : 'sharp_dump_system_notice'))) return;
     await runSharpOperation(t('sharp_dump'), async backend => {
+        if (receipt && !(await receipt.launch())) return;
         const result = await backend.receiveDump({ includeBoot });
         if (state.sharpBackend !== backend) return;
         if (result.manifest.recoveredFirstHeader) log(t('sharp_dump_header_recovered'));
-        saveSharpDownload(result, backend);
+        saveSharpDownload(result, backend, receipt);
         triggerDownload(result.filename + '.json', JSON.stringify(result.manifest, null, 2));
     });
 }

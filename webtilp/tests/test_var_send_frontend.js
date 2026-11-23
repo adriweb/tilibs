@@ -11,7 +11,7 @@ function item(name, extra = {}) {
         entryType: 5, defaultLocation: 'ram', locationMask: 1, ...extra };
 }
 async function run(model, plan, {finishResult = 0, sendResult = 0, rawResult = 0, rejectSend = false,
-    decline = false, previousSnapshot = false, cancelRestore = false, parseResult = 0} = {}) {
+    decline = false, previousSnapshot = false, cancelRestore = false, parseResult = 0, receipt} = {}) {
     const calls = [];
     let confirmations = 0;
     const state = {settings: {}, operationEpoch: 0, backupDirlistGeneration: 0, backupDirlistLoaded: previousSnapshot,
@@ -43,10 +43,22 @@ async function run(model, plan, {finishResult = 0, sendResult = 0, rawResult = 0
     });
     vm.runInContext(snapshotSource + source, context);
     let result, error;
-    try { result = await context.performTransfers(plan, module, {}); } catch (err) { error = err; }
+    try { result = await context.performTransfers(plan, module, {receipt}); } catch (err) { error = err; }
     return {calls, result, error, state, confirmations};
 }
 async function main() {
+    const totals = [];
+    const receipt = {launch: async () => true, record: (bytes, count) => totals.push([bytes, count])};
+    const group = [item('ONE', {sendByEntry: true, entryIndex: 0, entrySize: 4}),
+        item('TWO', {sendByEntry: true, entryIndex: 1, entrySize: 5})];
+    const cancelledLaunch = await run(2, group, {receipt: {...receipt, launch: async () => false}});
+    assert.equal(cancelledLaunch.calls.length, 0, 'aborting the countdown prevents any send');
+    await run(2, group, {finishResult: 4, receipt});
+    assert.deepEqual(totals, [], 'failed EOT cannot earn a celebration');
+    const finished = await run(2, group, {receipt});
+    assert.ifError(finished.error);
+    assert.deepEqual(totals, [[9, 2]], 'count entry payloads only after a successful EOT');
+
     for (const model of [2, 3, 6, 7, 13, 50]) {
         for (const failure of [
             {sendResult: 256}, {sendResult: 355, rawResult: 0xCCCC},

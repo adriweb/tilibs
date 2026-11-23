@@ -306,6 +306,7 @@ async function main() {
                     click() { this.clicked = true; },
                 };
             } },
+            withTransferCelebration(_direction, transfer) { return transfer(); },
             confirm(message) { notices.push(message); return true; },
             WebTILPSharp: { ...sharp, inspectOsImage(image, model) { return {model, version: '1.21', manual: false}; } },
         });

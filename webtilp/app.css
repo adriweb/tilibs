@@ -2054,7 +2054,8 @@ body:is([data-theme="professional-light"], [data-theme="professional-dark"]) {
     .progress-bar { background: var(--surface-alt); border-radius: 2px; }
     .progress-bar-fill { background: var(--pro-primary); border-radius: 2px; }
     .modal, .modal-overlay { background: var(--pro-overlay); backdrop-filter: none; }
-    .modal-card { max-height: calc(100dvh - 48px); display: flex; flex-direction: column; }
+    /* Keep the native hidden state of closed dialogs. */
+    .modal-card:where(:not(dialog), [open]) { max-height: calc(100dvh - 48px); display: flex; flex-direction: column; }
     .modal-body { overflow-y: auto; min-height: 0; padding-bottom: 16px; }
     .modal-header, .modal-footer { flex-shrink: 0; }
     .modal-footer-actions { flex-wrap: wrap; }
@@ -2084,4 +2085,410 @@ body:is([data-theme="professional-light"], [data-theme="professional-dark"]) {
     @media (prefers-reduced-motion: reduce) {
         .btn { transition: none; }
     }
+}
+
+/* AI Slop Ultra. The sparkle economy has escaped the pricing page. */
+.slop-sky,
+.slop-badge,
+.slop-stage:not([open]) {
+    display: none;
+}
+
+body[data-theme="ai-slop"] {
+    color-scheme: dark;
+    isolation: isolate;
+    --bg: #100325;
+    --surface: #200c3e;
+    --surface-alt: #381358;
+    --border: #a457df;
+    --text: #fff3ff;
+    --muted: #e7c8ff;
+    --accent: #5effee;
+    --accent-2: #ff87f8;
+    --slop-rgb: linear-gradient(110deg, #74fff2, #8bcbff, #ff8cf6, #ffe467, #a1ff6f, #74fff2);
+    --slop-gold: linear-gradient(180deg, #fffee1 5%, #ffdc35 48%, #ff9500);
+    background: var(--bg);
+
+    .slop-sky {
+        display: block;
+        position: fixed;
+        inset: 0;
+        overflow: hidden;
+        pointer-events: none;
+        z-index: -1;
+        background:
+            radial-gradient(ellipse at 18% 15%, #780b9b, transparent 60%),
+            radial-gradient(ellipse at 80% 75%, #1216ac, transparent 65%),
+            #110422;
+    }
+
+    .slop-sky::before, .slop-sky::after {
+        content: "";
+        position: absolute;
+        inset: -15%;
+    }
+
+    .slop-sky::before {
+        background: conic-gradient(from 35deg at 48% 60%, #f600ab66, #4918ef22, #00b6e899, #a2ff4a50, #ffb10070, #f600ab66);
+        filter: blur(36px);
+    }
+
+    .slop-sky::after {
+        background:
+            radial-gradient(circle at 28% 35%, #fbfbff 0 1px, #32fffad5 2px, transparent 5px) 0 0 / 113px 107px,
+            radial-gradient(circle at 71% 62%, #ffed92 0 1px, #fb5fffbb 2px, transparent 4px) 0 0 / 157px 139px,
+            repeating-linear-gradient(121deg, #fc91ff40 0 1px, transparent 1px 90px);
+        opacity: .65;
+    }
+
+    .slop-sky span {
+        position: absolute;
+        top: var(--y);
+        left: var(--x);
+        z-index: 1;
+        color: var(--star);
+        font-size: clamp(1.6rem, 4vw, 4rem);
+        line-height: 1;
+        text-shadow: 0 0 14px currentColor, 0 0 28px currentColor;
+    }
+
+    .slop-sky span:nth-child(1) { --x: 1%; --y: 29%; --star: #fff29c; }
+    .slop-sky span:nth-child(2) { --x: 47%; --y: 44%; --star: #a0fff5; }
+    .slop-sky span:nth-child(3) { --x: 96%; --y: 63%; --star: #ff9bee; }
+    .slop-sky span:nth-child(4) { --x: 72%; --y: 76%; --star: #c4ff9a; }
+    .slop-sky span:nth-child(5) { --x: 61%; --y: 88%; --star: #a0fff5; }
+    .slop-sky span:nth-child(6) { --x: 90%; --y: 92%; --star: #fff29c; }
+
+    .topbar, .footer {
+        background: linear-gradient(105deg, #2f0754, #441063 40%, #10166a 75%, #36124c);
+        border-image: var(--slop-rgb) 1;
+        border-width: 3px;
+        box-shadow: 0 0 25px #f43aff99;
+    }
+
+    .brand-mark {
+        background: var(--slop-gold);
+        box-shadow: inset 0 0 8px white, 0 0 12px #ffdd4c, 0 0 26px #ff2bba;
+    }
+
+    .brand-title, .splash h1, .panel-header h2 {
+        color: #fff8ff;
+        font-weight: 900;
+        text-shadow: 2px 2px 0 #ab0acc, -2px -1px 0 #2a73ff, 0 0 15px #ff63f6;
+    }
+
+    .slop-badge {
+        display: inline-block;
+        margin-top: 4px;
+        padding: 2px 7px;
+        border: 1px solid #ff96e7;
+        border-radius: 99px;
+        background: #230e53;
+        color: #ffe690;
+        box-shadow: inset 0 0 8px #5c46ff, 0 0 8px #f43aff;
+        font-size: 9px;
+        font-weight: 900;
+        line-height: 1.3;
+    }
+
+    .slop-badge small {
+        color: #f2b7ff;
+        font-weight: 700;
+        font-size: inherit;
+    }
+
+    .splash-card, .panel, .modal-card:not(.slop-stage) {
+        background: linear-gradient(155deg, #401165, #190d3f 62%, #290c4c);
+        border: 2px solid #e27bff;
+        box-shadow: inset 0 0 26px #842bd84d, 0 0 9px #ff3de9bf, 0 0 28px #762bfc99;
+    }
+
+    .splash-card {
+        border-color: #ffe467;
+        box-shadow: inset 0 0 30px #ffa32a44, 0 0 15px #ffda48b0, 0 0 44px #ff27b0;
+    }
+
+    .splash h1 {
+        font-size: clamp(1.9rem, 5vw, 2.8rem);
+        line-height: 1.05;
+        text-wrap: balance;
+    }
+
+    .panel:nth-child(3n + 2) {
+        border-color: #78fff5;
+        box-shadow: inset 0 0 26px #355bff4d, 0 0 9px #3dfff5bf, 0 0 25px #2b7bfc99;
+    }
+
+    .panel:nth-child(3n) {
+        border-color: #ffe467;
+        box-shadow: inset 0 0 26px #ffa32a4d, 0 0 9px #ffb147bf, 0 0 25px #fa37a499;
+    }
+
+    .panel-header, .modal-header, .modal-footer {
+        background: linear-gradient(100deg, #681277, #432277 45%, #082b72);
+    }
+
+    .info-card, .dropzone, .var-table th, .btn.ghost, .btn.subtle {
+        background: linear-gradient(135deg, #421067, #1d174e);
+        border-color: #bf6cff;
+        box-shadow: inset 0 0 10px #9465ff33;
+    }
+
+    .dropzone {
+        border-color: #ff8aec;
+        background:
+            repeating-linear-gradient(-36deg, transparent 0 10px, #f978fa18 10px 20px),
+            linear-gradient(135deg, #631358, #111e61);
+    }
+
+    .dropzone.drag-over, .var-table tr.drop-target {
+        outline: 2px solid #6efff0;
+        outline-offset: -2px;
+        background-color: #734bae;
+    }
+
+    .btn.primary, .dropzone input[type="file"]::file-selector-button {
+        background: var(--slop-rgb);
+        background-size: 240% 100%;
+        color: #1e0842;
+        border-color: #fff6f9;
+        border-radius: 24px;
+        box-shadow: inset 0 0 8px white, 0 0 11px #9f50ff, 0 0 18px #ff52f099;
+        font-weight: 900;
+    }
+
+    .btn:not(:disabled):hover {
+        box-shadow: 0 0 13px #5bfff8, 0 0 24px #fb61ff;
+    }
+
+    .progress-bar-fill {
+        background: var(--slop-rgb);
+        background-size: 220% 100%;
+    }
+
+    :focus-visible {
+        outline: 2px solid #fff679;
+        outline-offset: 3px;
+    }
+}
+
+body[data-theme="ai-slop"] .slop-stage {
+    position: fixed;
+    width: min(620px, calc(100% - 28px));
+    max-height: calc(100dvh - 28px);
+    overflow: auto;
+    padding: clamp(16px, 4vw, 30px);
+    text-align: center;
+    color: var(--text);
+    border: 3px solid transparent;
+    border-radius: 26px;
+    background:
+        radial-gradient(ellipse at 50% 0%, #641158, #18062c 75%) padding-box,
+        var(--slop-rgb) border-box;
+    background-size: 100% 100%, 240% 100%;
+    box-shadow: inset 0 0 34px #fd59d960, 0 0 20px #ffe560cf, 0 0 80px #f119ebcc;
+}
+
+.slop-stage::backdrop {
+    background: repeating-conic-gradient(at center, #660c86a8 0deg 12deg, #280841d9 12deg 24deg);
+    backdrop-filter: blur(5px);
+}
+
+.slop-countdown::backdrop {
+    background:
+        radial-gradient(ellipse at center, #31071a10, #26001ded 85%),
+        repeating-linear-gradient(-36deg, #bd217a70 0 5vw, #5c042cb3 5vw 10vw);
+}
+
+.slop-stage h2 {
+    position: relative;
+    margin: 8px auto;
+    font-size: clamp(1.9rem, 7vw, 3.9rem);
+    font-weight: 950;
+    line-height: .94;
+    letter-spacing: -.045em;
+    text-wrap: balance;
+    background: var(--slop-rgb) 0 / 240% 100%;
+    background-clip: text;
+    color: transparent;
+    filter: drop-shadow(2px 3px 0 #4b0caf) drop-shadow(0 0 9px #ff6eef88);
+}
+
+.slop-stage p {
+    position: relative;
+    margin: 12px auto;
+    max-width: 43ch;
+    text-wrap: balance;
+    font-weight: 700;
+}
+
+.slop-stage .slop-award {
+    display: inline-block;
+    margin: 0 auto;
+    padding: 4px 10px;
+    border: 1px solid #fff4ab;
+    border-radius: 100px;
+    background: var(--slop-gold);
+    color: #380e04;
+    box-shadow: inset 0 0 6px white, 0 0 15px #ffb43a;
+    font-size: .7rem;
+    font-weight: 950;
+    letter-spacing: .1em;
+}
+
+.slop-trophy {
+    position: relative;
+    margin: 0 auto 10px;
+    font-size: clamp(2rem, 10vw, 4rem);
+    color: #ffed70;
+    filter: drop-shadow(0 0 11px #ffb32f) drop-shadow(0 0 23px #ff52d5);
+}
+
+.slop-stats {
+    position: relative;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+    margin: 16px 0;
+}
+
+.slop-stats > div {
+    --tier: #79fff8;
+    display: flex;
+    flex-direction: column-reverse;
+    justify-content: center;
+    padding: 9px 5px;
+    color: var(--tier);
+    border: 1px solid var(--tier);
+    border-radius: 13px;
+    background: #1c0a42;
+    box-shadow: inset 0 0 18px #8e59f86b, 0 0 9px color-mix(in srgb, var(--tier) 55%, transparent);
+}
+
+.slop-stats > div:nth-child(2) { --tier: #ff8fee; }
+.slop-stats > div:nth-child(3) { --tier: #b1ff7c; }
+.slop-stats > div:nth-child(4) { --tier: #ffe982; }
+
+.slop-stats dt {
+    color: #fff3ff;
+    font-size: .76rem;
+    font-weight: 750;
+}
+
+.slop-stats dd {
+    margin: 0;
+    font-size: clamp(1.1rem, 5vw, 1.8rem);
+    font-weight: 950;
+    font-variant-numeric: tabular-nums;
+    text-shadow: 0 0 13px currentColor;
+}
+
+body[data-theme="ai-slop"] .slop-stage .slop-accept {
+    background: var(--slop-gold);
+    color: #3b1700;
+    box-shadow: inset 0 0 10px white, 0 0 16px #ffb22f, 0 0 24px #ff33ce;
+}
+
+.slop-fine-print {
+    position: relative;
+    display: block;
+    margin-top: 13px;
+    color: #ffd0fa;
+    font-size: .68rem;
+}
+
+.slop-countdown-clock {
+    display: grid;
+    place-items: center;
+    position: relative;
+    width: clamp(102px, 28vw, 156px);
+    aspect-ratio: 1;
+    margin: 20px auto 14px;
+    border: 4px solid #84fff1;
+    border-radius: 50%;
+    background: radial-gradient(circle, #6e0c72, #200b50 72%);
+    color: #fffaa2;
+    box-shadow: inset 0 0 23px #c45cff, 0 0 28px #f74cff;
+    font-size: clamp(3rem, 17vw, 6rem);
+    font-weight: 950;
+    line-height: 1;
+    text-shadow: 0 0 14px #ff6d17, 0 0 28px #f24cde;
+}
+
+.slop-countdown-clock::before {
+    content: "";
+    position: absolute;
+    inset: -12px;
+    border: 3px dashed #ffb5fa;
+    border-radius: inherit;
+}
+
+.slop-confetti {
+    position: absolute;
+    inset: 0;
+    overflow: hidden;
+    pointer-events: none;
+}
+
+.slop-confetti span {
+    position: absolute;
+    top: -16px;
+    left: var(--x);
+    width: 7px;
+    height: 14px;
+    background: hsl(var(--hue) 100% 71%);
+    animation: slop-confetti-fall 2.5s var(--delay) ease-in forwards;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+    body[data-theme="ai-slop"] {
+        .slop-sky::before { animation: slop-aurora 15s ease-in-out infinite alternate; }
+        .slop-sky::after { animation: slop-twinkle 5s ease-in-out infinite alternate; }
+        .slop-sky span { animation: slop-sparkle 3s -1.5s ease-in-out infinite alternate; }
+        .slop-sky span:nth-child(even) { animation-direction: alternate-reverse; }
+        .brand-mark, .slop-trophy { animation: slop-float 2.6s ease-in-out infinite; }
+        .btn.primary:not(:disabled, .slop-accept), .progress-bar-fill,
+        .slop-stage, .slop-stage h2 { animation: slop-gradient 3.6s ease-in-out infinite alternate; }
+        .slop-countdown-clock::before { animation: slop-orbit 5s linear infinite; }
+        .slop-countdown-clock span { animation: slop-pulse 1s ease-out infinite; }
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .slop-confetti { display: none; }
+}
+
+@keyframes slop-aurora {
+    to { transform: rotate(45deg) scale(1.45); }
+}
+
+@keyframes slop-twinkle {
+    from { opacity: .34; }
+    to { opacity: .75; transform: translate(26px, 14px); }
+}
+
+@keyframes slop-float {
+    50% { transform: translateY(-5px) rotate(6deg); }
+}
+
+@keyframes slop-sparkle {
+    from { opacity: .4; transform: rotate(-16deg) scale(.6); }
+    to { opacity: .95; transform: rotate(18deg) scale(1.15); }
+}
+
+@keyframes slop-gradient {
+    to { background-position: 100% 50%; }
+}
+
+@keyframes slop-orbit {
+    to { transform: rotate(360deg); }
+}
+
+@keyframes slop-pulse {
+    from { transform: scale(1.18); }
+    60%, 100% { transform: scale(.92); }
+}
+
+@keyframes slop-confetti-fall {
+    to { transform: translate(40px, 570px) rotate(450deg); opacity: .15; }
 }

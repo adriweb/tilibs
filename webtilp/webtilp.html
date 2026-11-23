@@ -14,6 +14,9 @@
     <link rel="stylesheet" href="build-profile.css">
 </head>
 <body class="initializing" aria-busy="true">
+    <div class="slop-sky" aria-hidden="true">
+        <span>✦</span><span>✧</span><span>✦</span><span>✦</span><span>✧</span><span>✦</span>
+    </div>
     <section class="initialization-screen" id="initializationScreen" role="status" aria-live="polite" aria-atomic="true">
         <div class="splash-card initialization-card">
             <div class="brand-title">WebTILP</div>
@@ -62,6 +65,7 @@
             <div>
                 <div class="brand-title">WebTILP</div>
                 <div class="brand-subtitle" id="brandSubtitle">Universal linking, right from your browser!</div>
+                <div class="slop-badge" lang="en">✦ AI POWERED* <small>*Additional Invoices</small></div>
             </div>
         </div>
         <div class="status">
@@ -451,6 +455,34 @@
             <button class="btn ghost" id="btnCancelCasioFlash">Cancel</button>
             <button class="btn primary" id="btnChooseCasioFlash" type="button" autofocus>Choose drive…</button>
         </form>
+    </dialog>
+
+    <dialog class="modal-card slop-stage slop-countdown" id="slopCountdown" lang="en" aria-labelledby="slopCountdownTitle">
+        <p class="slop-award">MISSION CONTROL IS SWEATING</p>
+        <h2 id="slopCountdownTitle">TRANSFER LAUNCH IMMINENT</h2>
+        <div class="slop-countdown-clock"><span id="slopCountdownNumber" aria-live="polite" aria-atomic="true">3</span></div>
+        <p>The fate of these bytes rests entirely on one USB cable.</p>
+        <form method="dialog">
+            <button class="btn ghost" autofocus>Abort launch</button>
+        </form>
+    </dialog>
+
+    <dialog class="modal-card slop-stage slop-victory" id="slopVictory" lang="en" aria-labelledby="slopVictoryTitle" aria-describedby="slopVictoryMessage">
+        <div class="slop-confetti" aria-hidden="true"></div>
+        <div class="slop-trophy" aria-hidden="true">✦ 🏆 ✦</div>
+        <p class="slop-award">CALCULATORS GO FURTHER™</p>
+        <h2 id="slopVictoryTitle">TRANSFER LEGEND<br>UNLOCKED!</h2>
+        <p id="slopVictoryMessage">YOU DID IT!!! The cloud is sobbing. Your USB cable has been promoted to Chief Vibes Officer.</p>
+        <dl class="slop-stats">
+            <div><dt id="slopVictoryDirection"></dt><dd id="slopVictoryCount"></dd></div>
+            <div><dt>Data moved</dt><dd id="slopVictoryBytes"></dd></div>
+            <div><dt>Elapsed</dt><dd id="slopVictoryElapsed"></dd></div>
+            <div><dt>Main-character energy</dt><dd>∞</dd></div>
+        </dl>
+        <form method="dialog">
+            <button class="btn primary slop-accept" autofocus>✨ I accept my destiny ✨</button>
+        </form>
+        <small class="slop-fine-print">Victory surcharge waived. Your USB cable is still free.</small>
     </dialog>
 
     <div class="modal hidden" id="connectionHelpModal" aria-hidden="true">
