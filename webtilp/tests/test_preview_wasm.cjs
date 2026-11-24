@@ -52,6 +52,7 @@ async function main() {
         unlink: name => assert.ok(files.delete(name), name)
     } };
     const errors = [], previews = [];
+    let modelId = 20;
     const context = vm.createContext({
         console, URL, Uint8Array,
         EVO_PYTHON_CALC_MODELS: new Map([[48, '84Evo']]),
@@ -62,7 +63,7 @@ async function main() {
         PROGRESS_IDLE_TIMEOUT_MS: 5000,
         canPreviewVariable: () => true,
         getHPPrimePreviewKind: () => '',
-        getActiveCalcModelId: () => 20,
+        getActiveCalcModelId: () => modelId,
         isNspireActive: () => false,
         authorizeDevice: async () => {},
         initModule: async () => module,
@@ -115,6 +116,46 @@ async function main() {
         assert.deepEqual(tivars.FS.readdir('/').filter(name => name.startsWith('preview-')), [], 'converter inputs are cleaned up');
     }
     console.log('PASS: real WASM previews for BASIC, protected BASIC, CE C/ICE, CSE, and Z80 ASM');
+
+    // Calculator exports for body version 2 and an LF-terminated Python source object.
+    modelId = 48;
+    for (const fixture of [
+        {
+            name: 'X', type: 0, typeName: 'Real', extension: '8xn2',
+            hex: 'bf686d65746144617461bf6474797065006776657273696f6e0165666c61677300646e616d654417e80000ff6776657273696f6e02'
+                + '65666c61677318206861727261796c656e0c6473697a6518186464617461581803000100010001002100020001001f00510026008f008b00ff8bc9',
+            content: '1/3+sqrt(2)*i', parsedType: 'Number', version: 2
+        },
+        {
+            name: 'A', type: 15, typeName: 'Python Script', extension: '8xpy2',
+            hex: 'bf686d65746144617461bf64747970650f6776657273696f6e0165666c61677300646e616d654400e80000ff6776657273696f6e01'
+                + '6473697a6518286464617461582813010000270000000100000041001400000266726f6d2073636961707020696d706f7274202a0a0affbbf6',
+            content: 'from sciapp import *', parsedType: 'PythonScript', version: 1
+        }
+    ]) {
+        const received = `/previews/${fixture.name}.${fixture.extension}`;
+        const data = Buffer.from(fixture.hex, 'hex');
+        files.set(received, data);
+        files.set('/last_recv_path.txt', Buffer.from(received));
+        await context.previewEntry({
+            name: fixture.name, type: fixture.type, typeName: fixture.typeName, size: data.length
+        }, {});
+        assert.deepEqual(errors, [], `${fixture.extension}: converter exceptions`);
+        const { entry, readable } = previews.at(-1);
+        assert.equal(entry.name, fixture.name);
+        const metadata = JSON.parse(readable);
+        assert.equal(metadata.typeName, fixture.parsedType);
+        assert.equal(metadata.version, fixture.version);
+        assert.equal(context.unwrapReadablePreview(readable).content, fixture.content);
+        if (fixture.type === 15) {
+            assert.equal(metadata.python.trailerHex, '0A');
+            assert.equal(metadata.python.outerTrailerHex, '0A');
+        }
+        context.closePreviewModal();
+        assert.equal(files.has(received), false, 'received preview is cleaned up');
+        assert.deepEqual(tivars.FS.readdir('/').filter(name => name.startsWith('preview-')), [], 'converter inputs are cleaned up');
+    }
+    console.log('PASS: real WASM previews for Evo exact numbers and LF-terminated Python');
 }
 
 main().catch(error => { console.error(error); process.exitCode = 1; });
