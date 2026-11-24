@@ -1,5 +1,17 @@
 const CACHE_VERSION = '__BUILD_ID__';
 const CACHE_NAME = `webtilp-${CACHE_VERSION}`;
+const BASE_URL = new URL('./', self.location.href);
+
+const REQUIRED_ASSETS = new Set([
+  'webtilp.html',
+  'app.bundle.js',
+  'webtilp.js',
+  'webtilp.wasm',
+  'TIVarsLib.js',
+  'TIVarsLib.wasm',
+  'WebLuna.js',
+  'WebLuna.wasm'
+]);
 
 const PRECACHE_URLS = [
   'webtilp.html',
@@ -85,16 +97,18 @@ async function cacheResponse(cache, request, response) {
 }
 
 self.addEventListener('install', event => {
-  const base = self.location.href.replace(/[^/]*$/, '');
-  const precacheRequests = PRECACHE_URLS.map(url => new URL(url, base).toString());
   event.waitUntil(
     caches.open(CACHE_NAME).then(cache => Promise.all(
-      precacheRequests.map(async url => {
+      PRECACHE_URLS.map(async asset => {
+        const url = new URL(asset, BASE_URL).href;
         try {
           const response = await fetch(url, { cache: 'no-store' });
+          if (REQUIRED_ASSETS.has(asset) && !response.ok) {
+            throw new Error(`Cannot cache WebTILP asset ${asset}: HTTP ${response.status}`);
+          }
           await cacheResponse(cache, url, response);
-        } catch {
-          // ignore
+        } catch (error) {
+          if (REQUIRED_ASSETS.has(asset)) throw error;
         }
       })
     )).then(() => self.skipWaiting())
@@ -128,7 +142,10 @@ self.addEventListener('fetch', event => {
     const cache = await caches.open(CACHE_NAME);
     const cached = await cache.match(event.request, { ignoreSearch: true, ignoreVary: true });
     try {
-      const response = await fetch(event.request);
+      // The WASM loaders, worker scripts, and binaries must bypass cached
+      // HTTP responses from deployments that reused these URLs.
+      const runtimeAsset = url.pathname.startsWith(BASE_URL.pathname) && /\.(?:js|wasm)$/.test(url.pathname);
+      const response = await fetch(event.request, runtimeAsset ? { cache: 'no-store' } : undefined);
       // A full/disabled cache must not turn a successful network fetch into a failure.
       try {
         await cacheResponse(cache, event.request, response);
