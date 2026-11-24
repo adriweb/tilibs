@@ -1,6 +1,14 @@
 <IfModule mod_headers.c>
     Header always set Cross-Origin-Opener-Policy "same-origin"
     Header always set Cross-Origin-Embedder-Policy "require-corp"
+
+    <FilesMatch "\.(html|js|wasm|css|json)$">
+        Header always set Cache-Control "no-store"
+    </FilesMatch>
+
+    <FilesMatch "^(?!sw\.js$).+\.(js|wasm)$">
+        Header always set Cloudflare-CDN-Cache-Control "public, max-age=3600"
+    </FilesMatch>
 </IfModule>
 
 AddType application/wasm .wasm
