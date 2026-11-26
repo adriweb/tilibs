@@ -92,23 +92,26 @@ node build-emscripten/hplp/libhpcalcs/hpcalcs_webhid_mock_test.js
 ## GitHub Actions integration
 
 [`build.webtilp.workflow.yml`](../../.github/workflows/build.webtilp.workflow.yml)
-builds the production site on Ubuntu 24.04 for pushes, pull requests, and
-manual dispatch. It installs Emscripten 6.0.9, Meson 1.12.0, Node 24.19.0,
+builds the site for pushes, pull requests, and manual dispatch. It shares
+[`build.webtilp.assets.workflow.yml`](../../.github/workflows/build.webtilp.assets.workflow.yml)
+with the desktop packaging workflow. The shared build runs on Ubuntu 24.04
+and installs Emscripten 6.0.9, Meson 1.12.0, Node 24.19.0,
 and Bun 1.4.2, and checks out pinned TIVarsLib and Luna revisions below
 `build-wasm-deps/`. No sibling checkouts or prebuilt local libraries are needed.
 The converter outputs are cleaned before building because their repositories
 track generated binaries.
 
 The dependency cache key includes the platform, tool versions, recipe,
-patches, source lock, and workflow. An exact cache hit skips the dependency
+patches, and source lock. An exact cache hit skips the dependency
 builder; tests and consumer builds still run. There are no partial restores.
 
 The job runs dependency, Evo file, HP WebHID mock, frontend, and module-startup
-tests, then uploads `webtilp-<commit>` with the service worker's required site
+tests, then uploads `github-pages` for the site or `webtilp-site` for desktop
+packaging. Both include the service worker's required site
 assets, every translation, third-party notices, `webtilp-deps.txt`, and a
 `build-sources.json` recording source revisions and tool versions. Packaging
-fails if any precached asset is missing. The workflow builds an artifact;
-it does not deploy it. Hosting must provide the cross-origin isolation
+fails if any precached asset is missing. The site workflow deploys to Pages
+from `exp2-full-emscripten`. Hosting must provide the cross-origin isolation
 headers needed by the pthread build: `Cross-Origin-Opener-Policy: same-origin`
 and `Cross-Origin-Embedder-Policy: require-corp`.
 

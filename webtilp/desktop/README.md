@@ -151,8 +151,10 @@ local files, C++ source and arbitrary directories are excluded from packages.
 [build.webntilp.workflow.yml](../../.github/workflows/build.webntilp.workflow.yml)
 builds the web assets once using the pinned WebTILP toolchain, then packages
 the same source revision on Windows, macOS and Linux. Each platform runs the
-desktop tests and an actual Chromium smoke test before packaging. Manual
-workflow runs expose downloadable artifacts without publishing a release.
+desktop tests and an actual Chromium smoke test before packaging. Pushes to
+`exp2-full-emscripten` and `other-calc-families`, as well as manual runs, upload
+packages to the **Artifacts** section of the **Build Web'nTILP** run. Release
+preparation runs for `webntilp-v*` tags.
 
 To prepare a release, update `package.json` and `package-lock.json` to the
 same version, then tag that source revision `webntilp-v<VERSION>`. The tag
