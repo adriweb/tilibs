@@ -6,8 +6,9 @@ on:
     paths:
       - 'webtilp/desktop/**'
       - '.github/workflows/build.webntilp.workflow.yml'
-      - '.github/workflows/build.webtilp.workflow.yml'
+      - '.github/workflows/build.webtilp.assets.workflow.yml'
   push:
+    branches: ['exp2-full-emscripten','other-calc-families']
     tags: ['webntilp-v*']
 
 permissions:
@@ -20,7 +21,7 @@ concurrency:
 jobs:
   web:
     name: Build shared offline web assets
-    uses: ./.github/workflows/build.webtilp.workflow.yml
+    uses: ./.github/workflows/build.webtilp.assets.workflow.yml
     with:
       desktop-build: true
 
