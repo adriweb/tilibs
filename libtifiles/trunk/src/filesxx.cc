@@ -173,7 +173,8 @@ FileContent* TICALL tifiles_content_dup_regular(FileContent *content)
  * Load the single/group file into a FileContent structure.
  *
  * Structure content must be freed with #tifiles_content_delete_regular when
- * no longer used. If an error occurs, the structure content is released for you.
+ * no longer used. With valid arguments, an error releases the structure content
+ * for you. A NULL argument returns an error without consuming a valid content.
  *
  * Return value: an error code, 0 otherwise.
  **/
@@ -188,7 +189,13 @@ int tifiles_file_read_regular(const char *filename, FileContent *content)
 #if !defined(DISABLE_TI8X)
 	if (ticonv_model_is_tievo(tifiles_file_get_model(filename)))
 	{
-		return evo_file_read_regular(filename, content);
+		const int ret = evo_file_read_regular(filename, content);
+		// Evo readers retain content on failure; the public API consumes it.
+		if (ret)
+		{
+			tifiles_content_delete_regular(content);
+		}
+		return ret;
 	}
 	else
 	if (tifiles_calc_is_ti8x(tifiles_file_get_model(filename)))
@@ -700,7 +707,8 @@ FlashContent* TICALL tifiles_content_dup_flash(FlashContent *content)
  * Load the FLASH file into a FlashContent structure.
  *
  * Structure content must be freed with #tifiles_content_delete_flash when
- * no longer used. If an error occurs, the structure content is released for you.
+ * no longer used. With valid arguments, an error releases the structure content
+ * for you. A NULL argument returns an error without consuming a valid content.
  *
  * Return value: an error code, 0 otherwise.
  **/
@@ -715,7 +723,13 @@ int tifiles_file_read_flash(const char *filename, FlashContent *content)
 #if !defined(DISABLE_TI8X)
 	if (ticonv_model_is_tievo(tifiles_file_get_model(filename)))
 	{
-		return evo_file_read_flash(filename, content);
+		const int ret = evo_file_read_flash(filename, content);
+		// Evo readers retain content on failure; the public API consumes it.
+		if (ret)
+		{
+			tifiles_content_delete_flash(content);
+		}
+		return ret;
 	}
 	else if (tifiles_calc_is_ti8x(tifiles_file_get_model(filename)))
 	{

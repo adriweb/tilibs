@@ -273,6 +273,7 @@ int TICALL tifiles_group_files(char **src_filenames, const char *dst_filename)
 		ret = tifiles_file_read_regular(src_filenames[i], src[i]);
 		if (ret)
 		{
+			src[i] = nullptr; // The reader consumes content on failure.
 			goto tgf2;
 		}
 	}

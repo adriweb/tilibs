@@ -306,7 +306,6 @@ static int tifileutil_metadata_apply_pairs(char *** argv, const char * infilenam
 		}
 		ret = err_print(argv, "tifiles_file_read_regular", tifiles_file_read_regular(infilename, content));
 		if (ret) {
-			tifiles_content_delete_regular(content);
 			return 1;
 		}
 		for (i = 0; pairs && pairs[i].key != nullptr; i++) {
@@ -406,7 +405,6 @@ static int tifileutil_metadata_apply_pairs(char *** argv, const char * infilenam
 		}
 		ret = err_print(argv, "tifiles_file_read_backup", tifiles_file_read_backup(infilename, content));
 		if (ret) {
-			tifiles_content_delete_backup(content);
 			return 1;
 		}
 		for (i = 0; pairs && pairs[i].key != nullptr; i++) {
@@ -472,7 +470,6 @@ static int tifileutil_metadata_apply_pairs(char *** argv, const char * infilenam
 		}
 		ret = err_print(argv, "tifiles_file_read_flash", tifiles_file_read_flash(infilename, content));
 		if (ret) {
-			tifiles_content_delete_flash(content);
 			return 1;
 		}
 		for (i = 0; pairs && pairs[i].key != nullptr; i++) {
