@@ -6,7 +6,7 @@
 #   open http://localhost:8080/webtilp.html
 #
 # BUILD_PROFILE accepts dev (default) or prod; BUILD_SHA labels version.json.
-ARG EMSDK_VERSION=6.0.9
+ARG EMSDK_VERSION=6.0.13
 
 FROM emscripten/emsdk:$EMSDK_VERSION AS base
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
@@ -18,7 +18,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # The generated pkg-config files contain absolute paths. All consumer stages
 # keep the install at /work/tilibs/wasm-deps.
 FROM base AS deps
-ARG MESON_VERSION=1.12.0
+ARG MESON_VERSION=1.12.1
 RUN apt-get update && apt-get install -y --no-install-recommends \
         python3-venv patch \
     && python3 -m venv /opt/meson \
@@ -65,7 +65,7 @@ RUN ./build_wasm.sh
 FROM base AS webtilp-builder
 ARG BUILD_PROFILE=dev
 ARG BUILD_SHA=docker
-ARG BUN_VERSION=1.4.2
+ARG BUN_VERSION=1.4.5
 WORKDIR /work/tilibs
 COPY --from=deps /work/tilibs/wasm-deps ./wasm-deps
 COPY --from=tilibs /work/tilibs/build-emscripten ./build-emscripten

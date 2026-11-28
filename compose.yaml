@@ -9,7 +9,7 @@ services:
       platforms:
         - linux/amd64
       args:
-        EMSDK_VERSION: "6.0.9"
+        EMSDK_VERSION: "6.0.13"
         BUILD_PROFILE: dev
         BUILD_SHA: docker
     image: webtilp:dev

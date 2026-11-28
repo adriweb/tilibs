@@ -15,7 +15,7 @@ node webtilp/tests/test_wasm_startup.cjs
 
 The dependency builder needs Emscripten, Meson >= 1.4, Ninja, CMake, Make,
 pkg-config, Python 3, curl, tar, and patch. It uses an already activated SDK,
-or sources `${EMSDK:-$HOME/emsdk}/emsdk_env.sh`. CI uses Emscripten 6.0.9;
+or sources `${EMSDK:-$HOME/emsdk}/emsdk_env.sh`. CI uses Emscripten 6.0.13;
 the exact compiler version is recorded in the install manifest. Rebuild the
 dependencies and tilibs when updating the SDK so old compiler outputs are
 not reused.
@@ -95,8 +95,8 @@ node build-emscripten/hplp/libhpcalcs/hpcalcs_webhid_mock_test.js
 builds the site for pushes, pull requests, and manual dispatch. It shares
 [`build.webtilp.assets.workflow.yml`](../../.github/workflows/build.webtilp.assets.workflow.yml)
 with the desktop packaging workflow. The shared build runs on Ubuntu 24.04
-and installs Emscripten 6.0.9, Meson 1.12.0, Node 24.19.0,
-and Bun 1.4.2, and checks out pinned TIVarsLib and Luna revisions below
+and installs Emscripten 6.0.13, Meson 1.12.1, Node 24.22.3,
+and Bun 1.4.5, and checks out pinned TIVarsLib and Luna revisions below
 `build-wasm-deps/`. No sibling checkouts or prebuilt local libraries are needed.
 The converter outputs are cleaned before building because their repositories
 track generated binaries.
@@ -116,5 +116,5 @@ headers needed by the pthread build: `Cross-Origin-Opener-Policy: same-origin`
 and `Cross-Origin-Embedder-Policy: require-corp`.
 
 The dependency recipe and production commands have been validated locally
-with Emscripten 6.0.9, Node 24.19.0, and Bun 1.4.2. Execution on a GitHub runner
+with Emscripten 6.0.13, Node 24.22.3, and Bun 1.4.5. Execution on a GitHub runner
 remains to be verified after the workflow is pushed.

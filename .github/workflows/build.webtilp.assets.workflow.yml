@@ -22,12 +22,12 @@ jobs:
       run:
         shell: bash
     env:
-      EMSDK_VERSION: '6.0.9'
-      EMSDK_REF: 5eb0bde7585670252e8ba05e9d361627bffd08b5
+      EMSDK_VERSION: '6.0.13'
+      EMSDK_REF: 35659964bc2762fffec0d257997fb61475f765b7
       TIVARS_REF: 3d0f22d4cc09af834e17166337d37c975639b85f
       LUNA_REF: a9924a9a968954eba9adcc161a58ac607f97ce8c
-      MESON_VERSION: '1.12.0'
-      BUN_VERSION: '1.4.2'
+      MESON_VERSION: '1.12.1'
+      BUN_VERSION: '1.4.5'
       EMSDK: ${{ github.workspace }}/build-wasm-deps/emsdk
       TIVARS_DIR: ${{ github.workspace }}/build-wasm-deps/tivars_lib_cpp
       LUNA_DIR: ${{ github.workspace }}/build-wasm-deps/Luna/emscripten
@@ -83,7 +83,7 @@ jobs:
       - name: Set up Node
         uses: actions/setup-node@v7
         with:
-          node-version: '24.19.0'
+          node-version: '24.22.3'
 
       - name: Set up Bun
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
@@ -222,7 +222,7 @@ jobs:
 
       - name: Upload site for desktop packaging
         if: inputs.desktop-build
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: webtilp-site
           path: build-wasm-deps/site

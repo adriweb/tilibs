@@ -62,12 +62,12 @@ jobs:
       - name: Set up Node
         uses: actions/setup-node@v7
         with:
-          node-version: '24.19.0'
+          node-version: '24.22.3'
           cache: npm
           cache-dependency-path: webtilp/desktop/package-lock.json
 
       - name: Download source-built web assets
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: webtilp-site
           path: webtilp
@@ -168,7 +168,7 @@ jobs:
         run: npm run smoke
 
       - name: Upload desktop downloads
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: webntilp-${{ matrix.platform }}-${{ matrix.arch }}
           path: |
@@ -189,7 +189,7 @@ jobs:
       contents: write
     steps:
       - name: Download all desktop packages
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           pattern: webntilp-*
           path: downloads
