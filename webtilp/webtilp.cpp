@@ -960,6 +960,9 @@ const char* get_file_extensions(int model) {
             }
             add(tifiles_fext_of_group(source));
         }
+        // TI's Lab Report files use ordinary multi-entry 68k containers, but
+        // their historical aliases are not represented by a distinct vartype.
+        for (const char* ext : {"89r", "92r", "9xr", "v2r"}) add(ext);
         if (tifiles_fext_of_flash_os(calc)) add("tib");
     }
     if (evo) {
@@ -2581,6 +2584,13 @@ static void get_file_metadata_json(const char* filename, const char** class_name
     const int ret = tifiles_file_read_regular(filename, content);
     if (ret != 0) {
         return;
+    }
+    // Some historical aliases (notably 68k Lab Reports) are not vartypes,
+    // so their extension alone cannot distinguish a single from a group.
+    if (class_name_out
+        && (fclass == TIFILE_NONE || fclass == TIFILE_SINGLE
+            || fclass == TIFILE_GROUP || fclass == TIFILE_REGULAR)) {
+        *class_name_out = content->num_entries > 1 ? "group" : "single";
     }
 
     bool first = true;

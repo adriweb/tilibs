@@ -27,6 +27,7 @@ vm.runInContext([
 const nativeExtensions = new Map([
     [2, '82p,82y,82b,82g'], [3, '83p,83y,83b,83g'],
     [7, '86p,86k,86b,86g,86u'], [4, '8xp,8xv,8xy,8xg,8xk,8xu'], [18, '8xp,8ci,8ca,8cg,8ck,8cu'],
+    [8, '89p,89g,89r,92r,9xr,v2r'],
     [19, '8xp,8xv,8ci,8ca,8pu,8ek'], [20, '8xp,8xv,8ci,8ca,8eu,8ek'],
     [28, 'tns,tco'], [32, 'tns,tco2'], [48, '8xp2,8xpy2,8mp2,84b2,84pk2']
 ]);
@@ -58,6 +59,9 @@ select(7);
 for (const name of ['os.86u', 'os.86U', 'constant.86k']) assert.ok(accepts(name), name);
 assert.ok(!accepts('os.8xu'));
 assert.ok(!context.isLegacyTivarsConversionCandidate('OS.86U'));
+select(8);
+for (const name of ['report.89R', 'report.92r', 'report.9xR', 'report.V2R']) assert.ok(accepts(name), name);
+assert.ok(!accepts('report.86r'));
 state.settings.calcModel = '20';
 select(0);
 assert.ok(accepts('demo.Py'), 'use explicitly configured model before identification');
@@ -171,7 +175,7 @@ async function checkNative() {
     includes(18, ['8xp', '8ci', '8ca', '8cg', '8cu']);
     includes(19, ['8xp', '8ci', '8pu', '8ek'], ['8eu']);
     includes(20, ['8xp', '8ci', '8eu', '8ek'], ['8pu']);
-    includes(8, ['89p', '92p', '9xp', 'v2p', '89u', 'tib'], ['9xu', '92b']);
+    includes(8, ['89p', '92p', '9xp', 'v2p', '89u', 'tib', '89r', '92r', '9xr', 'v2r'], ['9xu', '92b']);
     includes(10, ['92p', '89p', '92b', '92g'], ['tib', '89u']);
     includes(28, ['tns', 'tco'], ['tcc', '8xp', 'tig']);
     includes(32, ['tns', 'tco2'], ['tco', 'tcc2']);

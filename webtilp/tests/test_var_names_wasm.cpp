@@ -26,6 +26,14 @@ int capture_send(CalcHandle* handle, CalcMode, FileContent* content) {
     assert(content->entries[0]->attr == ATTRB_ARCHIVED);
     return capture_name(handle, content->entries[0]);
 }
+int capture_lab_report(CalcHandle*, CalcMode, FileContent* content) {
+    assert(content && content->num_entries == 1 && content->entries[0]);
+    const VarEntry* entry = content->entries[0];
+    assert(!strcmp(entry->name, "TWO"));
+    assert(!strcmp(entry->folder, "main"));
+    assert(entry->type == 0x12 && entry->attr == ATTRB_ARCHIVED);
+    return TICABLES_ERR_READ_TIMEOUT;
+}
 int capture_app(CalcHandle* handle, FlashContent*, VarRequest* request) {
     return capture_name(handle, request);
 }
@@ -296,4 +304,70 @@ extern "C" EMSCRIPTEN_KEEPALIVE void test_var_name_files() {
     entry->data = static_cast<uint8_t*>(g_malloc0(1));
     assert(tifiles_file_write_regular("/theta.89e", content, nullptr) == 0);
     tifiles_content_delete_regular(content);
+}
+
+extern "C" EMSCRIPTEN_KEEPALIVE int test_lab_report_aliases() {
+    std::string extensions = "," + std::string(get_file_extensions(CALC_TI89)) + ",";
+    for (const char* ext : {"89r", "92r", "9xr", "v2r"}) {
+        assert(extensions.find("," + std::string(ext) + ",") != std::string::npos);
+    }
+
+    FileContent* report = tifiles_content_create_regular(CALC_TI89);
+    assert(report);
+    report->num_entries = 2;
+    report->entries = tifiles_ve_create_array(2);
+    for (unsigned int i = 0; i < report->num_entries; ++i) {
+        VarEntry* entry = report->entries[i] = tifiles_ve_create();
+        assert(entry);
+        strcpy(entry->name, i ? "TWO" : "ONE");
+        strcpy(entry->folder, "main");
+        entry->type = 0x12; // TI-68k program
+        entry->attr = ATTRB_ARCHIVED;
+        entry->size = 3;
+        entry->data = static_cast<uint8_t*>(g_malloc0(entry->size));
+    }
+    assert(tifiles_file_write_regular("/report.89g", report, nullptr) == 0);
+    tifiles_content_delete_regular(report);
+
+    // Keep the ordinary 68k group signature and change only the historical
+    // filename alias, proving that inspection does not invent a new vartype.
+    char* bytes = nullptr;
+    gsize length = 0;
+    assert(g_file_get_contents("/report.89g", &bytes, &length, nullptr));
+    assert(g_file_set_contents("/report.89r", bytes, length, nullptr));
+    g_free(bytes);
+    unlink("/report.89g");
+
+    const char* metadata = file_get_entries_json("/report.89r");
+    assert(metadata && strstr(metadata, "\"class\":\"group\""));
+    assert(strstr(metadata, "\"name\":\"ONE\"") && strstr(metadata, "\"name\":\"TWO\""));
+
+    g_calc_model = CALC_TI89;
+    g_cable_handle = ticables_handle_new(CABLE_NUL, PORT_1);
+    assert(g_cable_handle);
+    CableFncts* original_cable = g_cable_handle->cable;
+    g_calc_handle = ticalcs_handle_new(g_calc_model);
+    assert(g_calc_handle);
+    CalcFncts* original_calc = g_calc_handle->calc;
+    assert(ticalcs_cable_attach(g_calc_handle, g_cable_handle) == 0);
+    auto callbacks = original_calc->fncts;
+    callbacks.send_var = capture_lab_report;
+    CalcFncts* capture_calc = new CalcFncts{g_calc_model, "test", "test", "test",
+        original_calc->features, original_calc->product_id, {}, callbacks};
+    g_calc_handle->calc = capture_calc;
+    g_calc_attached = g_calc_ready = 1;
+    assert(send_file_entry_custom(g_cable_handle, "/report.89r", 1, 0, "", 1, 0)
+        == TICABLES_ERR_READ_TIMEOUT);
+
+    g_calc_handle->calc = original_calc;
+    delete capture_calc;
+    ticalcs_cable_detach(g_calc_handle);
+    ticalcs_handle_del(g_calc_handle);
+    g_calc_handle = nullptr;
+    g_calc_attached = g_calc_ready = 0;
+    g_cable_handle->cable = original_cable;
+    ticables_handle_del(g_cable_handle);
+    g_cable_handle = nullptr;
+    unlink("/report.89r");
+    return 0;
 }

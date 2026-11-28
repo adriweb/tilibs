@@ -40,6 +40,8 @@ const timeout = setTimeout(() => { console.error('Variable-name WASM test timed 
     assert.equal(subtypeMetadata(tagged, 8, 0x21).type_subtype, undefined, 'wire type must be Other');
     console.log('TI-68k Other subtypes preserve case, wire types and container metadata; malformed footers are ignored.');
     module.ccall('test_var_name_files', null, [], []);
+    assert.equal(await module.ccall('test_lab_report_aliases', 'number', [], [], {async: true}), 0);
+    console.log('TI-68k Lab Report aliases expose, inspect and send ordinary multi-entry containers.');
     // AppVar headers are literal even when a leading lowercase byte coincides
     // with a built-in token, or the whole name looks like a picture/GDB/string.
     for (const model of [4, 5, 17, 13, 18, 19, 20, 21, 22, 36]) {
