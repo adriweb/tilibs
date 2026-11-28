@@ -2449,6 +2449,24 @@ static uint32_t get_flash_content_size(const FlashContent* content) {
     return 0;
 }
 
+static FileClass get_flash_content_class(const FlashContent* content, FileClass fallback_class) {
+    if (!content) {
+        return TIFILE_FLASH;
+    }
+    if (content->data_type == TI83p_AMS) {
+        return TIFILE_OS;
+    }
+    const CalcModel model = content->model != CALC_NONE ? content->model : g_calc_model;
+    const uint8_t app_type = tifiles_flash_type(model);
+    if (app_type != G_MAXUINT8 && content->data_type == app_type) {
+        return TIFILE_APP;
+    }
+    if (content->data_type == 0 && (fallback_class == TIFILE_OS || fallback_class == TIFILE_APP)) {
+        return fallback_class;
+    }
+    return TIFILE_FLASH;
+}
+
 static void append_flash_entry_json(GString* out, const FlashContent* content, const char* container_type, int container_index, FileClass flash_class) {
     if (!out || !content) {
         return;
@@ -2486,6 +2504,9 @@ static void append_flash_entry_json(GString* out, const FlashContent* content, c
     g_string_append_printf(out, "%u", (unsigned int)type_id);
     g_string_append(out, ",\"type_name\":\"");
     json_append_escaped(out, type_name ? type_name : "");
+    g_string_append(out, "\"");
+    g_string_append(out, ",\"entry_class\":\"");
+    json_append_escaped(out, tifiles_class_to_string(flash_class));
     g_string_append(out, "\"");
     g_string_append(out, ",\"attr\":");
     g_string_append_printf(out, "%u", (unsigned int)ATTRB_ARCHIVED);
@@ -2570,7 +2591,16 @@ static void get_file_metadata_json(const char* filename, const char** class_name
         }
         const int ret = tifiles_file_read_flash(filename, content);
         if (ret == 0) {
-            append_flash_entry_json(entries_json_out, content, nullptr, -1, fclass);
+            bool first = true;
+            int member_index = 0;
+            for (const FlashContent* member = content; member; member = member->next, member_index++) {
+                if (!first) {
+                    g_string_append(entries_json_out, ",");
+                }
+                const FileClass member_class = get_flash_content_class(member, fclass);
+                append_flash_entry_json(entries_json_out, member, "flash", member_index, member_class);
+                first = false;
+            }
             tifiles_content_delete_flash(content);
         }
         // tifiles_file_read_flash owns and frees content on failure.
@@ -3217,13 +3247,56 @@ int send_file_entry_custom(CableHandle* cable_handle, const char* filename, int 
         return ERR_WEB_NOT_TI_FILE;
     }
 
-    const int ready_result = ensure_calc_ready(cable_handle, 0);
-    if (ready_result != 0) {
-        return ready_result;
-    }
-
     int result = 0;
     const FileClass fclass = tifiles_file_get_class(filename);
+    if (fclass == TIFILE_FLASH || fclass == TIFILE_APP || fclass == TIFILE_OS) {
+        CalcModel parse_model = tifiles_file_get_model(filename);
+        if (parse_model == CALC_NONE) {
+            parse_model = g_calc_model;
+        }
+        FlashContent* content = tifiles_content_create_flash(parse_model);
+        if (!content) {
+            return ERR_WEB_OUT_OF_MEMORY;
+        }
+        result = tifiles_file_read_flash(filename, content);
+        if (result != 0) {
+            // tifiles_file_read_flash owns and frees content on failure.
+            return result;
+        }
+        FlashContent* member = content;
+        for (int i = 0; member && i < entry_index; i++) {
+            member = member->next;
+        }
+        if (!member) {
+            tifiles_content_delete_flash(content);
+            return ERR_WEB_INVALID_ENTRY_INDEX;
+        }
+
+        const FileClass member_class = get_flash_content_class(member, fclass);
+        const int ready_result = member_class == TIFILE_OS
+            ? ensure_calc_handle_attached(cable_handle)
+            : ensure_calc_ready(cable_handle, 0);
+        if (ready_result != 0) {
+            tifiles_content_delete_flash(content);
+            return ready_result;
+        }
+
+        // The selected row represents one TIFL member. Do not let a backend
+        // which walks FlashContent::next send the remaining container members.
+        FlashContent* next = member->next;
+        member->next = nullptr;
+        result = member_class == TIFILE_OS
+            ? ticalcs_calc_send_os(g_calc_handle, member)
+            : ticalcs_calc_send_app(g_calc_handle, member);
+        member->next = next;
+        tifiles_content_delete_flash(content);
+    } else {
+        const int ready_result = ensure_calc_ready(cable_handle, 0);
+        if (ready_result != 0) {
+            return ready_result;
+        }
+    }
+
     if (fclass == TIFILE_TIGROUP) {
         TigContent* content = tifiles_content_create_tigroup(g_calc_model, 0);
         if (!content) {
@@ -3262,7 +3335,7 @@ int send_file_entry_custom(CableHandle* cable_handle, const char* filename, int 
         }
 
         tifiles_content_delete_tigroup(content);
-    } else {
+    } else if (fclass != TIFILE_FLASH && fclass != TIFILE_APP && fclass != TIFILE_OS) {
         FileContent* content = tifiles_content_create_regular(g_calc_model);
         if (!content) {
             return ERR_WEB_OUT_OF_MEMORY;

@@ -9860,11 +9860,12 @@ async function buildTransferPlanFromFsEntries(entries, module) {
 
         entriesInfo.forEach((entryInfo, idx) => {
             const containerType = entryInfo.container_type || '';
-            const containerKind = containerType === 'app' ? 2 : (containerType === 'var' ? 1 : 0);
+            const containerKind = containerType === 'flash' ? 3 : (containerType === 'app' ? 2 : (containerType === 'var' ? 1 : 0));
             const entryIndex = Number.isInteger(entryInfo.container_index) ? entryInfo.container_index : idx;
-            const effectiveClass = containerType === 'app'
+            const effectiveClass = entryInfo.entry_class
+                || (containerType === 'app'
                 ? 'application'
-                : (fileClass === 'group' || fileClass === 'tigroup' ? 'single' : fileClass);
+                : (fileClass === 'group' || fileClass === 'tigroup' ? 'single' : fileClass));
             const defaultName = entryInfo.name || baseName;
             const defaultFolder = entryInfo.folder || '';
             const entrySize = Number.isFinite(Number(entryInfo.size)) ? Number(entryInfo.size) : null;

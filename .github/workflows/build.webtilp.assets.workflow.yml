@@ -165,6 +165,7 @@ jobs:
           make -C webtilp test-preview-wasm
           make -C webtilp test-var-names-wasm
           make -C webtilp test-flash-gc-wasm
+          make -C webtilp test-accessory-flash-wasm
           make -C webtilp test-receive-bounds-wasm
           node webtilp/tests/test_debug_log_wasm.cjs webtilp/webtilp.js
           node webtilp/tests/test_wasm_startup.cjs
