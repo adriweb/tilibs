@@ -54,5 +54,6 @@
 #define TI86_ZRCL  0x1B
 #define TI86_BKUP  0x1D
 #define TI86_UNKN  0x1E
+#define TI86_EQU_SELECTED (TI86_EQU | 0x20)
 
 #endif

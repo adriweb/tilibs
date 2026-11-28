@@ -54,5 +54,6 @@
 #define TI85_ZRCL  0x1B
 #define TI85_BKUP  0x1D
 #define TI85_UNKN  0x1E
+#define TI85_EQU_SELECTED (TI85_EQU | 0x20)
 
 #endif
