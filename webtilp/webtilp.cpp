@@ -1631,7 +1631,6 @@ static void get_file_metadata_json(const char* filename, const char** class_name
     }
     const int ret = tifiles_file_read_regular(filename, content);
     if (ret != 0) {
-        tifiles_content_delete_regular(content);
         return;
     }
 
