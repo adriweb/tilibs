@@ -30,6 +30,69 @@
 #include "rwfile.h"
 
 
+typedef struct
+{
+  uint8_t id;
+  uint8_t owners;
+  const char *type;
+  const char *desc;
+} AccessoryType;
+
+enum
+{
+  ACCESSORY_CBL2 = 1,
+  ACCESSORY_TIPRESENTER = 2,
+};
+
+static const AccessoryType ACCESSORY_TYPES[] =
+{
+  { 0x07, ACCESSORY_CBL2,                         "STR",     N_("String") },
+  { 0x08, ACCESSORY_CBL2,                         "LIST",    N_("List") },
+  { 0x0A, ACCESSORY_CBL2,                         "SETUP",   N_("Setup") },
+  { 0x0D, ACCESSORY_CBL2,                         "DATA",    N_("Normal data list") },
+  { 0x1F, ACCESSORY_CBL2 | ACCESSORY_TIPRESENTER, "DIR",     N_("Full Directory") },
+  { 0x23, ACCESSORY_CBL2 | ACCESSORY_TIPRESENTER, "AMS",     N_("OS upgrade") },
+  { 0x29, ACCESSORY_CBL2,                         "APPL",    N_("User Flash Application") },
+  { 0x2A, ACCESSORY_CBL2,                         "ARCHIVE", N_("Archive record") },
+  { 0xF0, ACCESSORY_CBL2 | ACCESSORY_TIPRESENTER, "INFO",    N_("Information") },
+};
+
+static uint8_t accessory_owner_mask(CalcModel model)
+{
+  switch (model)
+  {
+  case CALC_CBL2:
+  case CALC_LABPRO:
+  case CALC_LABPRO_USB:
+    return ACCESSORY_CBL2;
+  case CALC_TIPRESENTER:
+    return ACCESSORY_TIPRESENTER;
+  default:
+    return 0;
+  }
+}
+
+static const AccessoryType *accessory_type_info(CalcModel model, uint8_t id)
+{
+  const uint8_t owner = accessory_owner_mask(model);
+  for (const AccessoryType &type : ACCESSORY_TYPES)
+  {
+    if (type.id == id && (type.owners & owner)) return &type;
+  }
+  return nullptr;
+}
+
+static const AccessoryType *accessory_type_info(CalcModel model, const char *name)
+{
+  const uint8_t owner = accessory_owner_mask(model);
+  for (const AccessoryType &type : ACCESSORY_TYPES)
+  {
+    if ((type.owners & owner) && !strcmp(type.type, name)) return &type;
+  }
+  return nullptr;
+}
+
+
 /********************************/
 /* Calculator independent types */
 /********************************/
@@ -168,6 +231,11 @@ static const char *evo_byte2desc(uint8_t data)
  **/
 const char *TICALL tifiles_vartype2string(CalcModel model, uint8_t data)
 {
+  if (accessory_owner_mask(model))
+  {
+    const AccessoryType *type = accessory_type_info(model, data);
+    return type ? type->type : "";
+  }
   switch (model) 
   {
 #ifndef DISABLE_TI8X
@@ -264,6 +332,12 @@ uint8_t TICALL tifiles_string2vartype(CalcModel model, const char *s)
     return 0;
   }
 
+  if (accessory_owner_mask(model))
+  {
+    const AccessoryType *type = accessory_type_info(model, s);
+    return type ? type->id : (uint8_t)-1;
+  }
+
   switch (model) 
   {
 #ifndef DISABLE_TI8X
@@ -354,6 +428,13 @@ uint8_t TICALL tifiles_string2vartype(CalcModel model, const char *s)
  **/
 const char *TICALL tifiles_vartype2fext(CalcModel model, uint8_t data)
 {
+  const uint8_t accessory = accessory_owner_mask(model);
+  if (accessory)
+  {
+    if (data == 0x23 || (accessory == ACCESSORY_CBL2 && data == 0x29))
+      return accessory == ACCESSORY_TIPRESENTER ? "hex" : "c2u";
+    return accessory == ACCESSORY_TIPRESENTER ? "he?" : "c2?";
+  }
   switch (model) 
   {
 #ifndef DISABLE_TI8X
@@ -450,6 +531,14 @@ uint8_t TICALL tifiles_fext2vartype(CalcModel model, const char *s)
     return 0;
   }
 
+
+  const uint8_t accessory = accessory_owner_mask(model);
+  if (accessory)
+  {
+    const char *os_extension = accessory == ACCESSORY_TIPRESENTER ? "hex" : "c2u";
+    return g_ascii_strcasecmp(s, os_extension) ? (uint8_t)-1 : 0x23;
+  }
+
   switch (model) 
   {
 #ifndef DISABLE_TI8X
@@ -541,6 +630,11 @@ uint8_t TICALL tifiles_fext2vartype(CalcModel model, const char *s)
  **/
 const char *TICALL tifiles_vartype2type(CalcModel model, uint8_t vartype)
 {
+  if (accessory_owner_mask(model))
+  {
+    const AccessoryType *type = accessory_type_info(model, vartype);
+    return type ? type->desc : _("Unknown");
+  }
   switch (model)
   {
 #ifndef DISABLE_TI8X
@@ -632,6 +726,11 @@ const char *TICALL tifiles_vartype2type(CalcModel model, uint8_t vartype)
  **/
 const char *TICALL tifiles_vartype2icon(CalcModel model, uint8_t vartype)
 {
+  if (accessory_owner_mask(model))
+  {
+    const AccessoryType *type = accessory_type_info(model, vartype);
+    return type ? type->desc : "Unknown";
+  }
   switch (model) 
   {
 #ifndef DISABLE_TI8X
@@ -725,6 +824,8 @@ const char *TICALL tifiles_vartype2icon(CalcModel model, uint8_t vartype)
  **/
 uint8_t TICALL tifiles_folder_type(CalcModel model)
 {
+  // Type 1Fh is a full-directory transfer record, not a navigable folder.
+  if (accessory_owner_mask(model)) return (uint8_t)-1;
   switch (model) 
   {
 #ifndef DISABLE_TI8X
@@ -809,6 +910,8 @@ uint8_t TICALL tifiles_folder_type(CalcModel model)
  **/
 uint8_t TICALL tifiles_flash_type(CalcModel model)
 {
+  const uint8_t accessory = accessory_owner_mask(model);
+  if (accessory) return accessory == ACCESSORY_CBL2 ? 0x29 : (uint8_t)-1;
   switch (model) 
   {
 #ifndef DISABLE_TI8X
