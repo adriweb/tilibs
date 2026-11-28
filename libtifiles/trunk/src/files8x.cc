@@ -125,7 +125,6 @@ int ti8x_file_read_regular(const char *filename, Ti8xRegular *content)
 	long cur_pos;
 	uint32_t file_size;
 	char signature[9];
-	int padded86 = 0;
 	char varname[VARNAME_MAX];
 	int ret = ERR_FILE_IO;
 
@@ -228,7 +227,7 @@ int ti8x_file_read_regular(const char *filename, Ti8xRegular *content)
 			 * unpadded (like TI85) or partially padded (garbaged).  
 			 * TI's software accepts all four, so we should too.
 			 */
-			padded86 = tmp < 0x0C ? 0 : !0;	// TI-85 style file
+			const bool padded86 = tmp >= 0x0C;	// Shorter headers use TI-85 style names.
 
 			if (fskip(f, 3) < 0) goto tfrr; // Offset N+2, 0x39 for the first entry
 			if (fread_byte(f, &name_length) < 0) goto tfrr; // Offset N+5, 0x3C for the first entry
@@ -291,7 +290,8 @@ int ti8x_file_read_regular(const char *filename, Ti8xRegular *content)
 		}
 		if (fread_n_chars(f, name_length, varname) < 0) goto tfrr; // Offset up to 0x44
 		ticonv_varname_from_tifile_sn(content->model_dst, varname, entry->name, sizeof(entry->name), entry->type);
-		if ((content->model == CALC_TI86) && padded86)
+		// TI-86 groups can mix padded and unpadded names.
+		if (content->model == CALC_TI86 && packet_length >= 0x0C)
 		{
 			for (unsigned int j = 0; j < 8U - name_length; j++)
 			{

@@ -155,6 +155,42 @@ static void write_file(const char *name, const uint8_t *data, size_t n)
 	assert(fclose(f) == 0);
 }
 
+static void test_ti86_mixed_name_padding(void)
+{
+	static const uint8_t entries[] = {
+		/* Header size, data size, type, name length, name field, data size, data. */
+		12, 0, 3, 0, TI86_STRNG, 1, 'A', ' ', ' ', ' ', ' ', ' ', ' ', ' ', 3, 0, 1, 0, 'a',
+		 5, 0, 3, 0, TI86_STRNG, 1, 'B',                                    3, 0, 1, 0, 'b',
+		12, 0, 3, 0, TI86_STRNG, 1, 'C', 'x', 'y',  0,   0,   0,   0,   0,  3, 0, 1, 0, 'c',
+	};
+	static const char filename[] = "mixed-name-padding.86g";
+	uint8_t group[55 + sizeof(entries) + 2] = "**TI86**\x1a\x0a";
+	const uint16_t checksum = tifiles_checksum(entries, sizeof(entries));
+	char *path = g_build_filename(g_tmpdir, filename, NULL);
+	FileContent *content = tifiles_content_create_regular(CALC_TI86);
+	unsigned int i;
+
+	group[53] = sizeof(entries);
+	memcpy(group + 55, entries, sizeof(entries));
+	group[55 + sizeof(entries)] = (uint8_t)checksum;
+	group[56 + sizeof(entries)] = (uint8_t)(checksum >> 8);
+	write_file(filename, group, sizeof(group));
+
+	assert(content != NULL);
+	assert(tifiles_file_read_regular(path, content) == 0);
+	assert(content->num_entries == 3 && content->checksum == checksum);
+	for (i = 0; i < content->num_entries; i++)
+	{
+		const VarEntry *entry = content->entries[i];
+		assert(entry->name[0] == 'A' + i && entry->name[1] == '\0');
+		assert(entry->type == TI86_STRNG && entry->size == 3);
+		assert(entry->data[0] == 1 && entry->data[1] == 0 && entry->data[2] == 'a' + i);
+	}
+	tifiles_content_delete_regular(content);
+	assert(g_unlink(path) == 0);
+	g_free(path);
+}
+
 static void classify(const char *path,
                      int *is_ti, int *is_single, int *is_group, int *is_regular,
                      int *is_backup, int *is_os, int *is_app, int *is_tib,
@@ -633,6 +669,7 @@ int main(int argc, char **argv)
     tifiles_library_init();
 
     run_memreader_tests(argc > 1 ? argv[1] : ".");
+    test_ti86_mixed_name_padding();
 
     PRINTF(tifiles_error_get, INT, -1, NULL);
     PRINTF(tifiles_error_free, INT, NULL);
