@@ -216,6 +216,15 @@ EMSCRIPTEN_KEEPALIVE int test_ti_reader_cleanup()
     char* valid_group[] = {regular, regular, nullptr};
 
     for (unsigned repeat = 0; repeat < 2; ++repeat) {
+        // Keep the Flash signature valid so metadata reaches the public reader,
+        // whose failure path owns and consumes the content object.
+        begin();
+        assert(tifiles_file_get_metadata(bad_app) == nullptr);
+        finish(0, 0, 0, 1);
+        begin();
+        assert(tifiles_file_get_metadata(bad_flash) == nullptr);
+        finish(0, 0, 0, 1);
+
         begin();
         assert(tifiles_group_files(regular_only, "/cleanup_group.8xg") != 0);
         finish(0, 1);

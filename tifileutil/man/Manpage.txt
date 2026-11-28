@@ -228,15 +228,14 @@
             *      [1m-v[22m: be verbose
 
      Single,  group,  backup, flash and tigroup files are supported. The file is
-     classified by its content (magic number and type byte), the extension being
-     only cross-checked, so that files with a missing, unrecognized or wrong ex-
-     tension are still parsed. The emitted pairs use  the  following  keys,  all
-     values being strings:
+     normally classified by its content (magic number and type byte). Evo OS
+     extensions select the Evo reader, which validates the package contents.
+     The emitted pairs use the following keys, all values being strings:
 
             metadata.version           version of the interchange format (always "1")
             file.class                 single, group, backup, flash or tigroup
             file.model                 calculator model (e.g. "TI83+")
-            file.magic                 8 first bytes of the file (4 for ZIP-based tigroup files)
+            file.magic                 first 8 bytes (hex for raw Evo OS packages, 4 bytes for ZIP files)
             file.comment               file comment (regular, backup, tigroup)
             file.name                  application or OS name (flash)
             file.checksum.computed     computed data checksum (regular, backup)

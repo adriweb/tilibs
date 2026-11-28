@@ -450,6 +450,48 @@ static void test_evo_external_python_pairs(void)
 	g_assert_cmpuint(count, >, 0);
 }
 
+static void test_evo_os_package_metadata(void)
+{
+	char *dir = g_dir_make_tmp("tilibs-evo-os-XXXXXX", nullptr);
+	g_assert_nonnull(dir);
+	char *path = g_build_filename(dir, "os.84pk2", nullptr);
+	uint8_t sections[2][32] = {{0x3d, 0xb8, 0xf3, 0x96}, {0x3d, 0xb8, 0xf3, 0x96}};
+	// The 7.1.258.4421 section must win over a lower major with a larger minor.
+	sections[0][10] = 0x51;
+	sections[0][20] = 7;
+	sections[0][21] = 1;
+	sections[0][22] = 2;
+	sections[0][23] = 1;
+	sections[0][24] = 0x45;
+	sections[0][25] = 0x11;
+	sections[1][20] = 6;
+	sections[1][21] = 9;
+	g_assert_true(g_file_set_contents(path, (const char *)sections, sizeof(sections), nullptr));
+	g_assert_cmpint(tifiles_file_get_class(path), ==, TIFILE_OS);
+
+	FlashContent *content = tifiles_content_create_flash(CALC_TI84EVO_USB);
+	g_assert_cmpint(tifiles_file_read_flash(path, content), ==, 0);
+	g_assert_cmpint(content->model, ==, CALC_TI84EVO_USB);
+	g_assert_cmpstr(content->name, ==, "7.1.258.4421");
+	g_assert_cmpuint(content->revision_minor, ==, 1);
+	g_assert_cmpmem(content->data_part, content->data_length, sections, sizeof(sections));
+	tifiles_content_delete_flash(content);
+
+	TifilesMetadataPair *metadata = tifiles_file_get_metadata(path);
+	g_assert_nonnull(metadata);
+	g_assert_cmpstr(tifiles_metadata_find_pair(metadata, "file.class")->value, ==, "flash");
+	g_assert_cmpstr(tifiles_metadata_find_pair(metadata, "file.model")->value, ==,
+	                tifiles_model_to_string(CALC_TI84EVO_USB));
+	g_assert_cmpstr(tifiles_metadata_find_pair(metadata, "file.name")->value, ==, "7.1.258.4421");
+	g_assert_cmpstr(tifiles_metadata_find_pair(metadata, "file.magic")->value, ==, "3DB8F39600000000");
+	g_assert_null(tifiles_metadata_find_pair(metadata, "file.warnings"));
+	tifiles_metadata_free(metadata);
+	g_remove(path);
+	g_rmdir(dir);
+	g_free(path);
+	g_free(dir);
+}
+
 static void test_evo_external_fixtures(void)
 {
 	const char *fixture_dir = g_getenv("TILIBS_EVO_FIXTURE_DIR");
@@ -494,6 +536,7 @@ int main(int argc, char **argv)
 	g_test_add_func("/evo/files/appvar-name", test_evo_appvar_name);
 	g_test_add_func("/evo/files/python-module", test_evo_python_module);
 	g_test_add_func("/evo/files/python-repack", test_evo_python_repack);
+	g_test_add_func("/evo/files/os-package-metadata", test_evo_os_package_metadata);
 	g_test_add_func("/evo/files/external-python-pairs", test_evo_external_python_pairs);
 	g_test_add_func("/evo/files/external-fixtures", test_evo_external_fixtures);
 	const int ret = g_test_run();

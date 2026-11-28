@@ -400,9 +400,10 @@ static int metadata_fill_tigroup(TifilesMetadataPair ** pairs, unsigned int * co
  *
  * Parse the file and return its metadata as a nullptr-terminated array of
  * key/value pairs, whose keys are documented in the tifileutil(1) manual page.
- * The file is classified by its content (magic and type byte), the extension
- * being only cross-checked for the "file.warnings" key. The array and all its
- * strings are allocated with malloc()/strdup() and must be freed with
+ * The file is generally classified by its content (magic and type byte), the
+ * extension being cross-checked for the "file.warnings" key. Evo OS extensions
+ * select the Evo reader, which validates the package contents. The array and
+ * all its strings are allocated with malloc()/strdup() and must be freed with
  * tifiles_metadata_free().
  *
  * Return value: the array of pairs, or nullptr on error (unknown file class,
@@ -416,7 +417,6 @@ TifilesMetadataPair * TICALL tifiles_file_get_metadata(const char *filename)
 	char warnings[128] = "";
 	FileClass ext_fileclass;
 	FileClass content_fileclass = TIFILE_NONE;
-	CalcModel ext_model;
 	CalcModel content_model = CALC_NONE;
 	CalcModel model;
 	int ret;
@@ -431,8 +431,15 @@ TifilesMetadataPair * TICALL tifiles_file_get_metadata(const char *filename)
 		return nullptr;
 	}
 
-	// Classify the file by its content: the magic, and the type byte.
-	if (!memcmp(magic, "PK\x03\x04", 4))
+	const CalcModel ext_model = tifiles_file_get_model(filename);
+	const bool is_zip = !memcmp(magic, "PK\x03\x04", 4);
+	// Evo packages have binary headers, and Evo bundles are ZIP archives.
+	// Let the Evo reader verify either form instead of using classic signatures.
+	if (ticonv_model_is_tievo(ext_model) && tifiles_file_is_os(filename))
+	{
+		content_fileclass = TIFILE_OS;
+	}
+	else if (is_zip)
 	{
 		content_fileclass = TIFILE_TIGROUP;
 	}
@@ -477,12 +484,11 @@ TifilesMetadataPair * TICALL tifiles_file_get_metadata(const char *filename)
 
 	// The extension-derived model and class, for cross-checking.
 	ext_fileclass = tifiles_file_get_class(filename);
-	ext_model = tifiles_file_get_model(filename);
 
 	// The model used for parsing: the content-derived one, except for flash
 	// (whose model is extension-derived) and tigroup files (ZIP archives).
 	model = content_model;
-	if (content_fileclass == TIFILE_FLASH)
+	if (content_fileclass == TIFILE_FLASH || content_fileclass == TIFILE_OS)
 	{
 		model = ext_model;
 	}
@@ -555,35 +561,32 @@ TifilesMetadataPair * TICALL tifiles_file_get_metadata(const char *filename)
 		break;
 	}
 	case TIFILE_FLASH:
+	case TIFILE_OS:
 	{
 		FlashContent * content = tifiles_content_create_flash(model);
-		uint8_t dev_type = 0, data_type = 0;
 
 		if (!content)
 		{
 			goto fail;
 		}
-		if (model == CALC_NONE)
-		{
-			// Unknown model (e.g. unrecognized extension): resolve the family
-			// from the flash device type.
-			tifiles_file_has_tifl_header(filename, &dev_type, &data_type);
-			ret = (dev_type == DEVICE_TYPE_89 || dev_type == DEVICE_TYPE_92P) ? ti9x_file_read_flash(filename, content) : ti8x_file_read_flash(filename, content);
-		}
-		else if (tifiles_calc_is_ti8x(model))
-		{
-			ret = ti8x_file_read_flash(filename, content);
-		}
-		else
-		{
-			ret = ti9x_file_read_flash(filename, content);
-		}
+		ret = tifiles_file_read_flash(filename, content);
 		if (ret)
 		{
-			tifiles_content_delete_flash(content);
+			// The public reader consumes valid content arguments on failure.
 			goto fail;
 		}
-		ret = metadata_fill_flash(&pairs, &count, content, magic);
+		// The metadata API exposes strings. Escape raw Evo header bytes as hex.
+		char binary_magic[17];
+		const char *flash_magic = magic;
+		if (content_fileclass == TIFILE_OS && !is_zip)
+		{
+			for (size_t i = 0; i < 8; i++)
+			{
+				snprintf(binary_magic + i * 2, 3, "%02X", (unsigned int)(unsigned char)magic[i]);
+			}
+			flash_magic = binary_magic;
+		}
+		ret = metadata_fill_flash(&pairs, &count, content, flash_magic);
 		tifiles_content_delete_flash(content);
 		if (ret)
 		{
