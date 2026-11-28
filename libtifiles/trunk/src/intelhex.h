@@ -24,7 +24,7 @@
 
 #include "macros.h"
 
-int hex_block_read(FILE *f, uint16_t *size, uint16_t *addr, uint8_t *type, uint8_t *data, uint16_t *page);
+int hex_block_read(FILE *f, long end_offset, uint16_t *size, uint16_t *addr, uint8_t *type, uint8_t *data, uint16_t *page);
 int hex_block_write(FILE *f, uint16_t size, uint16_t  addr, uint8_t  type, uint8_t *data, uint16_t  page, uint16_t extra_bytes);
 
 #endif

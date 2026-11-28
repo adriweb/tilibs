@@ -284,7 +284,7 @@ struct _FlashContent
 	unsigned int			num_pages;	// TI-Z80 only
 	FlashPage**	pages;		// TI-Z80 only
 
-	FlashContent*	next;		// TI-68k only
+	FlashContent*	next;		// next member in a multi-entry Flash container
 };
 
 typedef struct

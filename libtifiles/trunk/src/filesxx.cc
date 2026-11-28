@@ -35,6 +35,7 @@
 #include "files_evo.h"
 #include "files9x.h"
 #include "filesnsp.h"
+#include "flash_format.h"
 #include "logging.h"
 
 // Whether to print detailed information about FileContent, BackupContent, FlashContent instances throughout their lifecycle.
@@ -654,22 +655,19 @@ FlashContent* TICALL tifiles_content_dup_flash(FlashContent *content)
 			{
 				memcpy(q, p, sizeof(FlashContent));
 
-				// TI-68k or TI-eZ80 part
-				if (tifiles_calc_is_ti9x(content->model) || ticonv_model_is_tiez80(content->model))
+				// Flat Flash payload, certificate, license or information record.
+				if (p->data_part != nullptr)
 				{
-					if (p->data_part)
-					{
-						q->data_part = (uint8_t *)g_malloc0(p->data_length+1);
-						memcpy(q->data_part, p->data_part, p->data_length+1);
-					}
+					q->data_part = (uint8_t *)g_malloc0(p->data_length + 1);
+					memcpy(q->data_part, p->data_part, p->data_length);
 				}
 
-				// TI-Z80 part
-				if (tifiles_calc_is_ti8x(content->model))
+				// Intel HEX pages.
+				if (p->pages != nullptr)
 				{
 					// copy pages
 					q->pages = tifiles_fp_create_array(p->num_pages);
-					for (unsigned int i = 0; i < content->num_pages; i++)
+					for (unsigned int i = 0; i < p->num_pages; i++)
 					{
 						q->pages[i] = (FlashPage *)g_malloc0(sizeof(FlashPage));
 						memcpy(q->pages[i], p->pages[i], sizeof(FlashPage));
@@ -719,9 +717,12 @@ int tifiles_file_read_flash(const char *filename, FlashContent *content)
 		tifiles_critical("%s: an argument is NULL", __FUNCTION__);
 		return ERR_INVALID_FILE;
 	}
+	const CalcModel file_model = tifiles_file_get_model(filename);
+	uint8_t device_type = DEVICE_TYPE_NONE;
+	const int has_tifl = tifiles_file_has_tifl_header(filename, &device_type, nullptr);
 
 #if !defined(DISABLE_TI8X)
-	if (ticonv_model_is_tievo(tifiles_file_get_model(filename)))
+	if (ticonv_model_is_tievo(file_model))
 	{
 		const int ret = evo_file_read_flash(filename, content);
 		// Evo readers retain content on failure; the public API consumes it.
@@ -731,14 +732,17 @@ int tifiles_file_read_flash(const char *filename, FlashContent *content)
 		}
 		return ret;
 	}
-	else if (tifiles_calc_is_ti8x(tifiles_file_get_model(filename)))
+	else if (   (has_tifl && tifiles_device_uses_ti8x_flash(device_type))
+	        || tifiles_model_uses_ti8x_flash(file_model))
 	{
 		return ti8x_file_read_flash(filename, content);
 	}
 	else 
 #endif
 #if !defined(DISABLE_TI9X)
-	if (tifiles_calc_is_ti9x(tifiles_file_get_model(filename)) || tifiles_file_is_tib(filename))
+	if (   (has_tifl && (device_type == DEVICE_TYPE_89 || device_type == DEVICE_TYPE_92P))
+	    || tifiles_calc_is_ti9x(file_model)
+	    || tifiles_file_is_tib(filename))
 	{
 		return ti9x_file_read_flash(filename, content);
 	}
@@ -779,7 +783,7 @@ int tifiles_file_write_flash2(const char *filename, FlashContent *content, char 
 	}
 
 #if !defined(DISABLE_TI8X)
-	if (tifiles_calc_is_ti8x(content->model))
+	if (tifiles_model_uses_ti8x_flash(content->model))
 	{
 		return ti8x_file_write_flash(filename, content, real_fname);
 	}
@@ -834,7 +838,7 @@ int TICALL tifiles_file_display_flash(FlashContent *content)
 	}
 
 #if !defined(DISABLE_TI8X)
-	if (tifiles_calc_is_ti8x(content->model))
+	if (tifiles_model_uses_ti8x_flash(content->model))
 	{
 		return ti8x_content_display_flash(content);
 	}
@@ -865,7 +869,7 @@ int TICALL tifiles_file_display(const char *filename)
 		return tifiles_file_display_tigroup(filename);
 	}
 #if !defined(DISABLE_TI8X)
-	if (tifiles_calc_is_ti8x(tifiles_file_get_model(filename)))
+	if (tifiles_model_uses_ti8x_flash(tifiles_file_get_model(filename)))
 	{
 		return ti8x_file_display(filename);
 	}

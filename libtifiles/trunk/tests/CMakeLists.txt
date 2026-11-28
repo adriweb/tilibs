@@ -8,6 +8,7 @@ add_executable(test_tifiles_2 test_tifiles_2.cc)
 add_executable(test_evo_files test_evo_files.cc)
 add_executable(test_ti73_types test_ti73_types.cc)
 add_executable(test_accessory_types test_accessory_types.cc)
+add_executable(test_accessory_tifl test_accessory_tifl.cc)
 add_executable(test_vartypes test_vartypes.cc)
 
 pkg_check_modules(glib REQUIRED IMPORTED_TARGET glib-2.0)
@@ -17,7 +18,7 @@ if(USE_ICONV)
     add_compile_definitions(USE_ICONV)
 endif()
 
-foreach(tar torture_tifiles test_tifiles_2 test_evo_files test_ti73_types test_accessory_types test_vartypes)
+foreach(tar torture_tifiles test_tifiles_2 test_evo_files test_ti73_types test_accessory_types test_accessory_tifl test_vartypes)
     if(Iconv_FOUND AND NOT Iconv_IS_BUILT_IN)
         target_include_directories(${tar} PRIVATE ${Iconv_INCLUDE_DIRS})
         target_link_libraries(${tar} PRIVATE ${Iconv_LIBRARIES})
@@ -36,8 +37,9 @@ add_custom_target(tifiles2_check
 	COMMAND "$<TARGET_FILE:test_evo_files>"
 	COMMAND "$<TARGET_FILE:test_ti73_types>"
 	COMMAND "$<TARGET_FILE:test_accessory_types>"
+	COMMAND "$<TARGET_FILE:test_accessory_tifl>"
 	COMMAND "$<TARGET_FILE:test_vartypes>"
-	DEPENDS torture_tifiles test_evo_files test_ti73_types test_accessory_types test_vartypes
+	DEPENDS torture_tifiles test_evo_files test_ti73_types test_accessory_types test_accessory_tifl test_vartypes
 	COMMENT "Run the tifiles2 torture tests"
 	EXCLUDE_FROM_ALL
 )

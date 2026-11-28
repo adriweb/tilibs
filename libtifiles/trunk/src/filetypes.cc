@@ -32,6 +32,7 @@
 #include "error.h"
 #include "rwfile.h"
 #include "memreader.h"
+#include "flash_format.h"
 
 // Whether to enable strict file extension checking.
 #define CHECK_FILE_EXTENSIONS
@@ -744,14 +745,33 @@ static int buffer_has_tig_header(TiMemReader *r)
 	return 0;
 }
 
-static int buffer_has_tifl_header(TiMemReader *r, uint8_t *dev_type, uint8_t *data_type)
+static int tifl_entry_matches(uint8_t device_type, uint8_t data_type, int wanted_device, FileClass wanted_class)
+{
+	if (wanted_device != DEVICE_TYPE_NONE && device_type != wanted_device)
+	{
+		return 0;
+	}
+	if (wanted_class == TIFILE_OS)
+	{
+		return tifiles_tifl_type_is_os(device_type, data_type);
+	}
+	if (wanted_class == TIFILE_APP)
+	{
+		return tifiles_tifl_type_is_app(device_type, data_type);
+	}
+	return !0;
+}
+
+static int buffer_scan_tifl(TiMemReader *r, uint8_t *dev_type, uint8_t *data_type,
+	int wanted_device, FileClass wanted_class)
 {
 	uint8_t buf[78];
 	size_t  saved = r->pos;
 	uint32_t len;
-	int     ret = 0;
+	int     found_header = 0;
+	int     found_match = 0;
 
-	if (r->size < 78)
+	if (r->pos > r->size || r->size - r->pos < 78)
 	{
 		r->pos = saved;
 		return 0;
@@ -769,7 +789,7 @@ static int buffer_has_tifl_header(TiMemReader *r, uint8_t *dev_type, uint8_t *da
 			break;
 		}
 
-		ret = 1;
+		found_header = 1;
 
 		/* if there are multiple entries (old OS files with license
 		   agreement, old app files with certificate), return the type
@@ -782,6 +802,10 @@ static int buffer_has_tifl_header(TiMemReader *r, uint8_t *dev_type, uint8_t *da
 		{
 			*data_type = buf[49];
 		}
+		if (tifl_entry_matches(buf[48], buf[49], wanted_device, wanted_class))
+		{
+			found_match = 1;
+		}
 
 		len = (uint32_t)buf[74] | ((uint32_t)buf[75] << 8) | ((uint32_t)buf[76] << 16) | ((uint32_t)buf[77] << 24);
 		/* Bounds-checked skip, replacing the previous unbounded fseek(). */
@@ -790,10 +814,29 @@ static int buffer_has_tifl_header(TiMemReader *r, uint8_t *dev_type, uint8_t *da
 			break;
 		}
 		r->pos += len;
+		const size_t remaining = r->size - r->pos;
+		if (remaining == 2)
+		{
+			r->pos += 2;
+		}
+		else if (remaining >= 10 && !memcmp(r->data + r->pos + 2, "**TIFL**", 8))
+		{
+			r->pos += 2;
+		}
 	}
 
 	r->pos = saved;
-	return ret;
+	return wanted_class == TIFILE_NONE ? found_header : found_match;
+}
+
+static int buffer_has_tifl_header(TiMemReader *r, uint8_t *dev_type, uint8_t *data_type)
+{
+	return buffer_scan_tifl(r, dev_type, data_type, DEVICE_TYPE_NONE, TIFILE_NONE);
+}
+
+static int buffer_has_tifl_entry(TiMemReader *r, int device_type, FileClass file_class)
+{
+	return buffer_scan_tifl(r, nullptr, nullptr, device_type, file_class);
 }
 
 static int buffer_has_tno_header(TiMemReader *r)
@@ -879,15 +922,13 @@ static int buffer_is_flash(TiMemReader *r)
 
 static int buffer_is_os(TiMemReader *r)
 {
-	uint8_t type;
-
 	if (!buffer_is_ti(r))
 	{
 		return 0;
 	}
 	if (   buffer_has_tib_header(r)
 	    || buffer_has_tno_header(r)
-	    || (buffer_has_tifl_header(r, nullptr, &type) && type == TI83p_AMS))
+	    || buffer_has_tifl_entry(r, DEVICE_TYPE_NONE, TIFILE_OS))
 	{
 		return !0;
 	}
@@ -897,13 +938,11 @@ static int buffer_is_os(TiMemReader *r)
 
 static int buffer_is_app(TiMemReader *r)
 {
-	uint8_t type;
-
 	if (!buffer_is_ti(r))
 	{
 		return 0;
 	}
-	if (buffer_has_tifl_header(r, nullptr, &type) && type == TI83p_APPL)
+	if (buffer_has_tifl_entry(r, DEVICE_TYPE_NONE, TIFILE_APP))
 	{
 		return !0;
 	}
@@ -913,9 +952,6 @@ static int buffer_is_app(TiMemReader *r)
 
 static int buffer_test(TiMemReader *r, FileClass type, CalcModel target)
 {
-	uint8_t ctype = 0;
-	uint8_t dtype = 0;
-
 	if (target >= CALC_MAX)
 	{
 		return 0;
@@ -959,9 +995,9 @@ static int buffer_test(TiMemReader *r, FileClass type, CalcModel target)
 
 	if (type & TIFILE_OS)
 	{
-		if (target && buffer_has_tifl_header(r, &ctype, &dtype))
+		if (target && buffer_has_tifl_header(r, nullptr, nullptr))
 		{
-			return (ctype == tifiles_model_to_dev_type(target) && dtype == TI83p_AMS);
+			return buffer_has_tifl_entry(r, tifiles_model_to_dev_type(target), TIFILE_OS);
 		}
 		else if (target && buffer_has_tib_header(r))
 		{
@@ -992,9 +1028,9 @@ static int buffer_test(TiMemReader *r, FileClass type, CalcModel target)
 
 	if (type & TIFILE_APP)
 	{
-		if (target && buffer_has_tifl_header(r, &ctype, &dtype))
+		if (target && buffer_has_tifl_header(r, nullptr, nullptr))
 		{
-			return (ctype == tifiles_model_to_dev_type(target) && dtype == TI83p_APPL);
+			return buffer_has_tifl_entry(r, tifiles_model_to_dev_type(target), TIFILE_APP);
 		}
 		else
 		{
@@ -1115,27 +1151,99 @@ int TICALL tifiles_file_has_tig_header(const char *filename)
 	return ret;
 }
 
-/* Read one page of the file; if it begins with a TIFL header, re-read up to
-   TIFILES_FLASH_READ_CAP (flash OS/app for TI-Z80/68k/eZ80 are at most 4 MB of
-   Flash). Non-flash files, including large Nspire OS files that carry a
-   different magic and are classified from the page via buffer_has_tno_header(),
-   stay at one page and never blow up memory. Returns 0 on success, -1 on
-   failure (in which case *reader is untouched). */
-static int open_for_tifl(TiMemReader *reader, const char *filename)
+static int file_scan_tifl(const char *filename, uint8_t *dev_type, uint8_t *data_type,
+	int wanted_device, FileClass wanted_class)
 {
-	TiMemReader r;
+	uint8_t header[78];
+	int found_header = 0;
+	int found_match = 0;
+	if (filename == nullptr)
+	{
+		return 0;
+	}
 
-	if (tifiles_mem_reader_create_from_file(&r, filename, TIFILES_HEAD_READ_CAP) != 0)
+	FILE *f = g_fopen(filename, "rb");
+	if (f == nullptr)
 	{
-		return -1;
+		return 0;
 	}
-	if (r.size >= 8 && memcmp(r.data, "**TIFL**", 8) == 0)
+	if (fseek(f, 0, SEEK_END) < 0)
 	{
-		tifiles_mem_reader_destroy(&r);
-		return tifiles_mem_reader_create_from_file(reader, filename, TIFILES_FLASH_READ_CAP);
+		fclose(f);
+		return 0;
 	}
-	*reader = r;
-	return 0;
+	const long file_size = ftell(f);
+	if (file_size < 0 || fseek(f, 0, SEEK_SET) < 0)
+	{
+		fclose(f);
+		return 0;
+	}
+
+	for (;;)
+	{
+		if (fread(header, 1, sizeof(header), f) != sizeof(header))
+		{
+			break;
+		}
+		if (memcmp(header, "**TIFL**", 8))
+		{
+			break;
+		}
+		found_header = 1;
+		if (dev_type != nullptr) *dev_type = header[48];
+		if (data_type != nullptr) *data_type = header[49];
+		if (tifl_entry_matches(header[48], header[49], wanted_device, wanted_class))
+		{
+			found_match = 1;
+		}
+
+		const uint32_t length = (uint32_t)header[74]
+		                      | ((uint32_t)header[75] << 8)
+		                      | ((uint32_t)header[76] << 16)
+		                      | ((uint32_t)header[77] << 24);
+		const long payload_start = ftell(f);
+		if (   payload_start < 0
+		    || payload_start > file_size
+		    || length > (uint32_t)(file_size - payload_start)
+		    || fseek(f, (long)length, SEEK_CUR) < 0)
+		{
+			break;
+		}
+		const long next = ftell(f);
+		if (next < 0)
+		{
+			break;
+		}
+		const long remaining = file_size - next;
+		if (remaining == 2)
+		{
+			if (fseek(f, 2, SEEK_CUR) < 0) break;
+		}
+		else if (remaining >= 10)
+		{
+			uint8_t next_signature[8];
+			if (fseek(f, next + 2, SEEK_SET) < 0
+			 || fread(next_signature, 1, sizeof(next_signature), f) != sizeof(next_signature))
+			{
+				break;
+			}
+			if (memcmp(next_signature, "**TIFL**", 8))
+			{
+				if (fseek(f, next, SEEK_SET) < 0) break;
+			}
+			else if (fseek(f, next + 2, SEEK_SET) < 0)
+			{
+				break;
+			}
+		}
+	}
+	fclose(f);
+	return wanted_class == TIFILE_NONE ? found_header : found_match;
+}
+
+static int file_has_tifl_entry(const char *filename, int device_type, FileClass file_class)
+{
+	return file_scan_tifl(filename, nullptr, nullptr, device_type, file_class);
 }
 
 /**
@@ -1149,16 +1257,7 @@ static int open_for_tifl(TiMemReader *reader, const char *filename)
  **/
 int TICALL tifiles_file_has_tifl_header(const char *filename, uint8_t *dev_type, uint8_t *data_type)
 {
-	TiMemReader r;
-	int ret = 0;
-
-	if (filename != nullptr && open_for_tifl(&r, filename) == 0)
-	{
-		ret = buffer_has_tifl_header(&r, dev_type, data_type);
-		tifiles_mem_reader_destroy(&r);
-	}
-
-	return ret;
+	return file_scan_tifl(filename, dev_type, data_type, DEVICE_TYPE_NONE, TIFILE_NONE);
 }
 
 
@@ -1681,22 +1780,20 @@ int TICALL tifiles_file_is_backup(const char *filename)
 int TICALL tifiles_file_is_os(const char *filename)
 {
 	TiMemReader r;
-	uint8_t type;
 	int ret = 0;
 
-	if (!open_for_tifl(&r, filename))
+	if (tifiles_mem_reader_create_from_file(&r, filename, TIFILES_HEAD_READ_CAP) == 0)
 	{
 		if (buffer_is_ti(&r))
 		{
 			ret = buffer_has_tib_header(&r)
-			    || buffer_has_tno_header(&r)
-			    || (buffer_has_tifl_header(&r, nullptr, &type) && type == TI83p_AMS);
+			    || buffer_has_tno_header(&r);
 		}
-		ret = ret || tifiles_fext_is_evo_os(tifiles_fext_get(filename));
 		tifiles_mem_reader_destroy(&r);
 	}
-
-	return ret;
+	return (   ret
+	        || file_has_tifl_entry(filename, DEVICE_TYPE_NONE, TIFILE_OS)
+	        || tifiles_fext_is_evo_os(tifiles_fext_get(filename)));
 }
 
 /**
@@ -1709,20 +1806,7 @@ int TICALL tifiles_file_is_os(const char *filename)
  **/
 int TICALL tifiles_file_is_app(const char *filename)
 {
-	TiMemReader r;
-	uint8_t type;
-	int ret = 0;
-
-	if (!open_for_tifl(&r, filename))
-	{
-		if (buffer_is_ti(&r))
-		{
-			ret = buffer_has_tifl_header(&r, nullptr, &type) && type == TI83p_APPL;
-		}
-		tifiles_mem_reader_destroy(&r);
-	}
-
-	return ret;
+	return file_has_tifl_entry(filename, DEVICE_TYPE_NONE, TIFILE_APP);
 }
 
 /**
@@ -1804,7 +1888,6 @@ int TICALL tifiles_file_is_tno(const char *filename)
 int TICALL tifiles_file_test(const char *filename, FileClass type, CalcModel target)
 {
 	const char *e = tifiles_fext_get(filename);
-	uint8_t ctype, dtype;
 
 #ifdef CHECK_FILE_EXTENSIONS
 	if (e[0] == 0)
@@ -1867,9 +1950,9 @@ int TICALL tifiles_file_test(const char *filename, FileClass type, CalcModel tar
 
 	if (type & TIFILE_OS)
 	{
-		if (target && tifiles_file_has_tifl_header(filename, &ctype, &dtype))
+		if (target && tifiles_file_has_tifl_header(filename, nullptr, nullptr))
 		{
-			return (ctype == tifiles_model_to_dev_type(target) && dtype == TI83p_AMS);
+			return file_has_tifl_entry(filename, tifiles_model_to_dev_type(target), TIFILE_OS);
 		}
 		else if (target && tifiles_file_is_tib(filename))
 		{
@@ -1936,9 +2019,9 @@ int TICALL tifiles_file_test(const char *filename, FileClass type, CalcModel tar
 
 	if (type & TIFILE_APP)
 	{
-		if(target && tifiles_file_has_tifl_header(filename, &ctype, &dtype))
+		if(target && tifiles_file_has_tifl_header(filename, nullptr, nullptr))
 		{
-			return (ctype == tifiles_model_to_dev_type(target) && dtype == TI83p_APPL);
+			return file_has_tifl_entry(filename, tifiles_model_to_dev_type(target), TIFILE_APP);
 		}
 		else
 		{

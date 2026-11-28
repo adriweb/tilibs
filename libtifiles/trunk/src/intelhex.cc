@@ -44,22 +44,26 @@
 #define BLK_MAX         16384    // 16KB max
 
 
-/* TI8X+ FLASH files contains text data. */
-static uint8_t read_byte(FILE * f)
+static int hex_digit(int c)
 {
-	unsigned int b;
+	if (c >= '0' && c <= '9') return c - '0';
+	if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+	if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+	return -1;
+}
 
-	if (fscanf(f, "%02X", &b) < 1)
+/* Read exactly two hexadecimal characters without letting scanf() skip across
+   a declared TIFL payload boundary. */
+static int read_byte(FILE *f, uint8_t *value)
+{
+	const int high = hex_digit(fgetc(f));
+	const int low = hex_digit(fgetc(f));
+	if (high < 0 || low < 0)
 	{
-		static int warn_read_byte = 0;
-		if (!warn_read_byte)
-		{
-			tifiles_warning("intelhex: couldn't read byte");
-			warn_read_byte++;
-		}
-		b = 0; /* 0 is better than random garbage */
+		return -1;
 	}
-	return (uint8_t)b;
+	*value = (uint8_t)((high << 4) | low);
+	return 0;
 }
 
 /*
@@ -77,89 +81,90 @@ static uint8_t read_byte(FILE * f)
 
 	Returns : 0 if success, a negative value otherwise.
 */
-static int hex_packet_read(FILE *f, uint8_t *size, uint16_t *addr, uint8_t *type, uint8_t *data)
+static int hex_packet_read(FILE *f, long end_offset, uint8_t *size, uint16_t *addr, uint8_t *type, uint8_t *data)
 {
 	uint8_t sum = 0;
+	long pos = ftell(f);
+	if (pos < 0)
+	{
+		return -4;
+	}
+	if (pos >= end_offset)
+	{
+		*size = 0;
+		*addr = 0;
+		*type = HEX_EOF;
+		return 0;
+	}
+	if (end_offset - pos < 3)
+	{
+		return -1;
+	}
 	int c = fgetc(f);
 	if (c != ':')
 	{
-		printf("Unexpected char: <%c> = %02X\n", c, (unsigned int)c);
 		return -1;
 	}
 
-	*size = read_byte(f);
-	uint16_t localaddr = ((uint16_t)(read_byte(f))) << 8;
-	localaddr |= read_byte(f);
-	*addr = localaddr;
-	*type = read_byte(f);
-
-	if(*size > PKT_MAX)
+	if (read_byte(f, size) < 0)
+	{
+		return -1;
+	}
+	pos = ftell(f);
+	if (pos < 0 || *size > PKT_MAX || end_offset - pos < 8 + 2 * (long)*size)
 	{
 		return -2;
 	}
+
+	uint8_t byte;
+	if (read_byte(f, &byte) < 0) return -1;
+	uint16_t localaddr = ((uint16_t)byte) << 8;
+	if (read_byte(f, &byte) < 0) return -1;
+	localaddr |= byte;
+	*addr = localaddr;
+	if (read_byte(f, type) < 0) return -1;
 
 	sum = *size + MSB(*addr) + LSB(*addr) + *type;
 
 	for (int i = 0; i < *size; i++) 
 	{
-		data[i] = read_byte(f);
+		if (read_byte(f, &data[i]) < 0) return -1;
 		sum += data[i];
 	}
 
-	const uint8_t checksum = read_byte(f); // verify checksum of block
+	uint8_t checksum;
+	if (read_byte(f, &checksum) < 0) return -1;
 	if (LSB(sum + checksum))
 	{
 		return -3;
 	}
 
+	/* Consume a line ending when it is part of this payload. Do not probe the
+	   first byte of the following TIFL member to determine EOF. */
+	pos = ftell(f);
+	if (pos < 0)
 	{
-		// check for end of file without mangling data checksum
-		long pos = ftell(f);
-
-		if (pos < 0)
-		{
-			return -4;
-		}
-
+		return -4;
+	}
+	if (pos < end_offset)
+	{
 		c = fgetc(f);
-
-		if (c == 0x0d) // CR
+		if (c == '\r')
 		{
-			c = fgetc(f);
-			if (c == 0x0a) // LF
+			const long after_cr = ftell(f);
+			if (after_cr < 0) return -4;
+			if (after_cr < end_offset)
 			{
-read_lf:
 				c = fgetc(f);
-				if (c == EOF) // EOF checking is set to keep compatibility with old generated FLASH files (buggy)
+				if (c != '\n')
 				{
-					goto eof;
+					return -1;
 				}
 			}
-			else // Unconditional else: either c is EOF, or the format is invalid.
-			{
-				goto eof;
-			}
 		}
-		else if (c == 0x0a) // LF
+		else if (c != '\n')
 		{
-			pos--;
-			goto read_lf;
-		}
-		else
-		{
-eof:
-			// Invalid format / end of file.
-			*type = HEX_EOF;
-			if (fseek(f, pos, SEEK_SET) < 0)
-			{
-				return -4;
-			}
-			return 0;
-		}
-
-		if (fseek(f, pos+2, SEEK_SET) < 0)
-		{
-			return -4;
+			return -1;
 		}
 	}
 
@@ -180,7 +185,7 @@ eof:
 
 	Returns : 0 if success, EOF if end of file has been reached.
 */
-int hex_block_read(FILE *f, uint16_t *size, uint16_t *addr, uint8_t *type, uint8_t *data, uint16_t *page)
+int hex_block_read(FILE *f, long end_offset, uint16_t *size, uint16_t *addr, uint8_t *type, uint8_t *data, uint16_t *page)
 {
 	static uint8_t flag = UINT8_C(0x80);
 	static uint16_t flash_page;
@@ -215,10 +220,11 @@ int hex_block_read(FILE *f, uint16_t *size, uint16_t *addr, uint8_t *type, uint8
 		uint16_t pkt_addr;
 
 		// read packet
-		const int ret = hex_packet_read(f, &pkt_size, &pkt_addr, &pkt_type, pkt_data);
+		const int ret = hex_packet_read(f, end_offset, &pkt_size, &pkt_addr, &pkt_type, pkt_data);
 		if(ret < 0)
 		{
-			return ret; // THIS RETURNS !
+			/* Keep EOF (-1) distinct from malformed input. */
+			return ret == EOF ? -5 : ret;
 		}
 
 		// new block ? Set address
@@ -238,12 +244,20 @@ int hex_block_read(FILE *f, uint16_t *size, uint16_t *addr, uint8_t *type, uint8
 		{
 		case HEX_DATA:
 			// copy data
+			if (pkt_size > BLK_MAX - i)
+			{
+				return -1;
+			}
 			memcpy(&data[i], pkt_data, pkt_size);
 			i += pkt_size;
 			*size = i;
 			break;
 
 		case HEX_END: 
+			if (pkt_size != 0)
+			{
+				return -1;
+			}
 			// new section
 			flash_addr = 0;
 			flash_page = 0;
@@ -254,17 +268,28 @@ int hex_block_read(FILE *f, uint16_t *size, uint16_t *addr, uint8_t *type, uint8
 				return 0;
 
 		case HEX_PAGE: 
+			if (pkt_size != 2)
+			{
+				return -1;
+			}
 			// new page
 			flash_page = (((uint16_t)(pkt_data[0])) << 8) | (uint16_t)(pkt_data[1]);
 			new_page = !0;
 			break;
 
-		case HEX_EOF: 
+		case HEX_EOF:
 			// end of file
+			if (i != 0)
+			{
+				// The payload ended without an end-of-section record: the
+				// pending block is not returned to the caller.
+				tifiles_critical("intelhex: payload ended inside an unterminated block; dropping %u bytes at page %04X, address %04X",
+				                 (unsigned int)i, (unsigned int)flash_page, (unsigned int)flash_addr);
+			}
 			return EOF;
 
 		default: 
-			printf("Unexpected char: <%c> = %02x\n", pkt_type, pkt_type);
+			tifiles_warning("intelhex: unexpected record type %02X", pkt_type);
 			return -1;
 		}
 	}
@@ -346,7 +371,11 @@ int hex_block_write(FILE *f, uint16_t size, uint16_t addr, uint8_t type, uint8_t
 	// write end block
 	if(!size && !addr && !type && !data && !page)
 	{
-		return hex_packet_write(f, 0, 0x0000, HEX_EOF, nullptr);
+		const int result = hex_packet_write(f, 0, 0x0000, HEX_EOF, nullptr);
+		// Each TIFL member and each output file starts in the default section.
+		// Do not leak the final section flag into the next hex_block_write user.
+		old_flag = 0x80;
+		return result;
 	}
 
 	// new section (FLASH OS only)

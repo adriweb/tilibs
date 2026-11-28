@@ -38,6 +38,7 @@
 #include "logging.h"
 #include "typesxx.h"
 #include "files8x.h"
+#include "flash_format.h"
 #include "rwfile.h"
 #include "intelhex.h"
 
@@ -547,32 +548,113 @@ tfrb2:
 
 static int check_device_type(uint8_t id)
 {
-	static const uint8_t types[] = { 0, DEVICE_TYPE_73, DEVICE_TYPE_83P };
-
-	for (int i = 1; i < (int)(sizeof(types)/sizeof(types[0])); i++)
-	{
-		if (types[i] == id)
-		{
-			return i;
-		}
-	}
-
-	return 0;
+	return tifiles_device_uses_ti8x_flash(id);
 }
 
-static int check_data_type(uint8_t id)
+static int check_data_type(uint8_t device_type, uint8_t data_type)
 {
-	static const uint8_t types[] = { 0, TI83p_AMS, TI83p_APPL, TI83p_CERT, TI83p_LICENSE };
+	return (   tifiles_tifl_type_is_os(device_type, data_type)
+	        || tifiles_tifl_type_is_app(device_type, data_type)
+	        || tifiles_tifl_type_is_raw(device_type, data_type));
+}
 
-	for (int i = 1; i < (int)(sizeof(types)/sizeof(types[0])); i++)
+static CalcModel model_from_device_type(CalcModel filename_model, uint8_t device_type)
+{
+	if (tifiles_model_to_dev_type(filename_model) == device_type)
 	{
-		if (types[i] == id)
-		{
-			return i;
-		}
+		return filename_model;
+	}
+	switch (device_type)
+	{
+		case DEVICE_TYPE_73: return CALC_TI73;
+		case DEVICE_TYPE_83P: return CALC_TI83P;
+		case DEVICE_TYPE_CBL2: return CALC_CBL2;
+		case DEVICE_TYPE_TIPRESENTER: return CALC_TIPRESENTER;
+		default: return filename_model;
+	}
+}
+
+/* Older libtifiles versions saved Z80 OS / FlashApp contents received from a
+   calculator with flags and object type left at 0, even though the payload is
+   Intel HEX. Those files were dispatched on hw_id == 0, so keep accepting them
+   when the payload itself starts with an Intel HEX record (":" followed by the
+   size, address and type hex digits). Binary payloads (TI-eZ80, bootcode,
+   accessories) carry a non-zero hw_id or do not start with a record.
+   Returns 1 for a legacy Intel HEX payload, 0 otherwise, -1 if @f could not be
+   restored to the payload start. */
+static int legacy_payload_is_intel_hex(FILE *f, const Ti8xFlash *content, long payload_end)
+{
+	char record[9];
+	int ret = 0;
+
+	if (content->hw_id != 0 || (content->flags & 1) || content->object_type != 0)
+	{
+		return 0;
 	}
 
-	return 0;
+	const long start = ftell(f);
+	if (start < 0 || payload_end - start < (long)sizeof(record))
+	{
+		return 0;
+	}
+	if (fread(record, 1, sizeof(record), f) == sizeof(record) && record[0] == ':')
+	{
+		ret = !0;
+		for (unsigned int i = 1; i < sizeof(record); i++)
+		{
+			if (!g_ascii_isxdigit(record[i]))
+			{
+				ret = 0;
+				break;
+			}
+		}
+	}
+	if (fseek(f, start, SEEK_SET) < 0)
+	{
+		return -1;
+	}
+	if (ret)
+	{
+		tifiles_info("Legacy TIFL header without the Intel HEX flag / object type: decoding the payload as Intel HEX");
+	}
+	return ret;
+}
+
+/* Position @f at the next member header. Some TIFL producers put an optional
+   two-byte checksum between the declared payload and the following header. */
+static int seek_next_tifl_header(FILE *f, long file_size)
+{
+	uint8_t signature[8];
+	const long start = ftell(f);
+	if (start < 0 || start > file_size)
+	{
+		return -1;
+	}
+	if (file_size - start < 8)
+	{
+		return 0;
+	}
+	if (fread(signature, 1, sizeof(signature), f) != sizeof(signature))
+	{
+		return -1;
+	}
+	if (!memcmp(signature, "**TIFL**", 8))
+	{
+		return fseek(f, start, SEEK_SET) < 0 ? -1 : 1;
+	}
+	if (file_size - start >= 10)
+	{
+		if (fseek(f, start + 2, SEEK_SET) < 0
+		 || fread(signature, 1, sizeof(signature), f) != sizeof(signature))
+		{
+			return -1;
+		}
+		if (!memcmp(signature, "**TIFL**", 8))
+		{
+			return fseek(f, start + 2, SEEK_SET) < 0 ? -1 : 1;
+		}
+	}
+	return fseek(f, start, SEEK_SET) < 0 ? -1 : 0;
 }
 
 static int get_native_app_name(const FlashContent *content, char *buffer, uint32_t buffer_size)
@@ -625,9 +707,9 @@ int ti8x_file_read_flash(const char *filename, Ti8xFlash *head)
 {
 	FILE *f;
 	Ti8xFlash *content = head;
-	int i;
 	char signature[9];
-	char varname[9];
+	char varname[VARNAME_MAX];
+	long file_size;
 	int ret = ERR_FILE_IO;
 
 	if (head == nullptr)
@@ -649,11 +731,22 @@ int ti8x_file_read_flash(const char *filename, Ti8xFlash *head)
 		ret = ERR_FILE_OPEN;
 		goto tfrf2;
 	}
+	if (fseek(f, 0, SEEK_END) < 0 || (file_size = ftell(f)) < 0 || fseek(f, 0, SEEK_SET) < 0)
+	{
+		goto tfrf;
+	}
 
 	for (content = head;; content = content->next) 
 	{
+		uint8_t varname_length;
+		const CalcModel filename_model = tifiles_file_get_model(filename);
+
 		if (fread_8_chars(f, signature) < 0) goto tfrf;
-		content->model = tifiles_file_get_model(filename);
+		if (strcmp(signature, "**TIFL**"))
+		{
+			ret = ERR_INVALID_FILE;
+			goto tfrf;
+		}
 		if (fread_byte(f, &(content->revision_major)) < 0) goto tfrf;
 		if (fread_byte(f, &(content->revision_minor)) < 0) goto tfrf;
 		if (fread_byte(f, &(content->flags)) < 0) goto tfrf;
@@ -661,9 +754,15 @@ int ti8x_file_read_flash(const char *filename, Ti8xFlash *head)
 		if (fread_byte(f, &(content->revision_day)) < 0) goto tfrf;
 		if (fread_byte(f, &(content->revision_month)) < 0) goto tfrf;
 		if (fread_word(f, &(content->revision_year)) < 0) goto tfrf;
-		if (fskip(f, 1) < 0) goto tfrf;
-		if (fread_8_chars(f, varname) < 0) goto tfrf;
-		if (fskip(f, 23) < 0) goto tfrf;
+		if (fread_byte(f, &varname_length) < 0) goto tfrf;
+		if (varname_length > 31)
+		{
+			ret = ERR_INVALID_FILE;
+			goto tfrf;
+		}
+		memset(varname, 0, sizeof(varname));
+		if (fread(varname, 1, 31, f) < 31) goto tfrf;
+		varname[varname_length] = 0;
 		if (fread_byte(f, &(content->device_type)) < 0) goto tfrf;
 		if (fread_byte(f, &(content->data_type)) < 0) goto tfrf;
 		if (fskip(f, 23) < 0) goto tfrf;
@@ -675,11 +774,12 @@ int ti8x_file_read_flash(const char *filename, Ti8xFlash *head)
 			ret = ERR_INVALID_FILE;
 			goto tfrf;
 		}
-		if (!check_data_type(content->data_type))
+		if (!check_data_type(content->device_type, content->data_type))
 		{
 			ret = ERR_INVALID_FILE;
 			goto tfrf;
 		}
+		content->model = model_from_device_type(filename_model, content->device_type);
 		// TODO: modify this code if TI ever makes a TI-eZ80 model with more than 4 MB of Flash memory...
 		if (content->data_length > 4U * 1024 * 1024 - 16384)
 		{
@@ -687,8 +787,18 @@ int ti8x_file_read_flash(const char *filename, Ti8xFlash *head)
 			ret = ERR_INVALID_FILE;
 			goto tfrf;
 		}
+		const uint32_t encoded_length = content->data_length;
+		const long payload_start = ftell(f);
+		if (   payload_start < 0
+		    || payload_start > file_size
+		    || encoded_length > (uint32_t)(file_size - payload_start))
+		{
+			ret = ERR_INVALID_FILE;
+			goto tfrf;
+		}
+		const long payload_end = payload_start + (long)encoded_length;
 
-		if (content->data_type == TI83p_CERT || content->data_type == TI83p_LICENSE)
+		if (tifiles_tifl_type_is_raw(content->device_type, content->data_type))
 		{
 			// get data like TI9X
 			content->data_part = (uint8_t *)g_malloc0(content->data_length + 256);
@@ -703,14 +813,21 @@ int ti8x_file_read_flash(const char *filename, Ti8xFlash *head)
 
 			content->next = nullptr;
 		}
-		else if (content->data_type == TI83p_AMS || content->data_type == TI83p_APPL)
+		else if (   tifiles_tifl_type_is_os(content->device_type, content->data_type)
+		         || tifiles_tifl_type_is_app(content->device_type, content->data_type))
 		{
-			if (content->hw_id == 0)
+			int is_intel_hex = tifiles_tifl_payload_is_intel_hex(content->flags, content->object_type);
+			if (!is_intel_hex)
+			{
+				is_intel_hex = legacy_payload_is_intel_hex(f, content, payload_end);
+				if (is_intel_hex < 0) goto tfrf;
+			}
+			if (is_intel_hex)
 			{
 				// This looks like a TI-Z80-style OS / FlashApp, let's try to parse Intel Hex format.
 
 				// reset/initialize block reader
-				hex_block_read(nullptr, nullptr, nullptr, nullptr, nullptr, nullptr);
+				hex_block_read(nullptr, 0, nullptr, nullptr, nullptr, nullptr, nullptr);
 				content->pages = nullptr;
 
 				// TODO: modify this code if TI ever makes a TI-Z80 model with more than 256 Flash pages...
@@ -723,7 +840,7 @@ int ti8x_file_read_flash(const char *filename, Ti8xFlash *head)
 
 				// read FLASH pages
 				content->data_length = 0;
-				for (i = 0, ret = 0; !ret; i++)
+				for (unsigned int i = 0;;)
 				{
 					uint16_t size;
 					uint16_t addr;
@@ -732,24 +849,37 @@ int ti8x_file_read_flash(const char *filename, Ti8xFlash *head)
 					uint8_t data[FLASH_PAGE_SIZE];
 					FlashPage* fp;
 
-					if (i > 256)
+					const int hex_ret = hex_block_read(f, payload_end, &size, &addr, &flag, data, &page);
+					if (hex_ret == EOF)
 					{
-						// More than 256 Flash pages in a TI-Z80 OS / FlashApp: this looks wrong.
-						content->num_pages = i;
+						break;
+					}
+					if (hex_ret < 0 || size == 0 || size > FLASH_PAGE_SIZE)
+					{
 						ret = ERR_INVALID_FILE;
 						goto tfrf;
 					}
+					if (i >= 256)
+					{
+						// More than 256 Flash pages in a TI-Z80 OS / FlashApp: this looks wrong.
+						ret = ERR_INVALID_FILE;
+						goto tfrf;
+					}
+
 					fp = content->pages[i] = (FlashPage *)g_malloc0(sizeof(FlashPage));
-
-					ret = hex_block_read(f, &size, &addr, &flag, data, &page);
-
+					if (fp == nullptr)
+					{
+						ret = ERR_MALLOC;
+						goto tfrf;
+					}
+					content->num_pages = i + 1;
 					fp->data = (uint8_t *) g_malloc0(FLASH_PAGE_SIZE);
-					memset(fp->data, 0xff, FLASH_PAGE_SIZE);
 					if (fp->data == nullptr)
 					{
 						ret = ERR_MALLOC;
 						goto tfrf;
 					}
+					memset(fp->data, 0xff, FLASH_PAGE_SIZE);
 
 					fp->addr = addr;
 					fp->page = page;
@@ -758,15 +888,15 @@ int ti8x_file_read_flash(const char *filename, Ti8xFlash *head)
 					memcpy(fp->data, data, size);
 
 					content->data_length += size;
+					i++;
 				}
-				content->num_pages = i;
 				content->next = nullptr;
 			}
 			else
 			{
-				// This looks like a TI-68k-style OS / FlashApp, containing flat data.
+				// Binary bootcode, certificate-style OS/application data, or other flat payload.
 
-				content->data_part = (uint8_t *)g_malloc0(content->data_length);
+				content->data_part = (uint8_t *)g_malloc0(content->data_length + 1);
 				if (content->data_part == nullptr)
 				{
 					ret = ERR_MALLOC;
@@ -774,12 +904,6 @@ int ti8x_file_read_flash(const char *filename, Ti8xFlash *head)
 				}
 
 				if (fread(content->data_part, 1, content->data_length, f) < content->data_length) goto tfrf;
-				if (   (content->data_type == TI83p_AMS && content->data_part[0] != 0x80)
-				    || (content->data_type == TI83p_APPL && content->data_part[0] != 0x81))
-				{
-					ret = ERR_INVALID_FILE;
-					goto tfrf;
-				}
 				content->next = nullptr;
 			}
 		}
@@ -798,17 +922,15 @@ int ti8x_file_read_flash(const char *filename, Ti8xFlash *head)
 			content->model_dst = content->model;
 		}
 		ticonv_varname_from_tifile_sn(content->model_dst, varname, content->name, sizeof(content->name), content->data_type);
+		if (fseek(f, payload_end, SEEK_SET) < 0) goto tfrf;
 
-		// check for end of file
-		if (fread_8_chars(f, signature) < 0)
+		// Check for another member, allowing the optional two-byte checksum.
+		const int has_next = seek_next_tifl_header(f, file_size);
+		if (has_next < 0) goto tfrf;
+		if (!has_next)
 		{
 			break;
 		}
-		if (strcmp(signature, "**TIFL**") || feof(f))
-		{
-			break;
-		}
-		if (fseek(f, -8, SEEK_CUR)) goto tfrf;
 
 		content->next = (Ti8xFlash *)g_malloc0(sizeof(Ti8xFlash));
 		if (content->next == nullptr) 
@@ -825,7 +947,7 @@ tfrf:	// release on exit
 	tifiles_critical("%s: error reading / understanding file %s", __FUNCTION__, filename);
 	fclose(f);
 tfrf2:
-	tifiles_content_delete_flash(content);
+	tifiles_content_delete_flash(head);
 	return ret;
 }
 
@@ -1149,9 +1271,8 @@ int ti8x_file_write_flash(const char *fname, Ti8xFlash *head, char **real_fname)
 {
 	const Ti8xFlash *content = head;
 	unsigned int i;
-	int bytes_written = 0;
 	char *filename;
-	char varname[VARNAME_MAX];
+	char varname[32];
 
 	if (head == nullptr)
 	{
@@ -1173,7 +1294,8 @@ int ti8x_file_write_flash(const char *fname, Ti8xFlash *head, char **real_fname)
 
 		for (content = head; content != nullptr; content = content->next)
 		{
-			if (content->data_type == TI83p_AMS || content->data_type == TI83p_APPL)
+			if (   tifiles_tifl_type_is_os(content->device_type, content->data_type)
+			    || tifiles_tifl_type_is_app(content->device_type, content->data_type))
 			{
 				break;
 			}
@@ -1205,12 +1327,17 @@ int ti8x_file_write_flash(const char *fname, Ti8xFlash *head, char **real_fname)
 
 	for (content = head; content != nullptr; content = content->next) 
 	{
+		const int write_intel_hex = (content->pages != nullptr)
+		                         || tifiles_tifl_payload_is_intel_hex(content->flags, content->object_type);
+		const uint8_t output_flags = write_intel_hex ? (uint8_t)(content->flags | 1) : content->flags;
+		const uint8_t output_object_type = write_intel_hex ? 0x88 : content->object_type;
+
 		// header
 		if (fwrite_8_chars(f, "**TIFL**") < 0) goto tfwf;
 		if (fwrite_byte(f, content->revision_major) < 0) goto tfwf;
 		if (fwrite_byte(f, content->revision_minor) < 0) goto tfwf;
-		if (fwrite_byte(f, content->flags) < 0) goto tfwf;
-		if (fwrite_byte(f, content->object_type) < 0) goto tfwf;
+		if (fwrite_byte(f, output_flags) < 0) goto tfwf;
+		if (fwrite_byte(f, output_object_type) < 0) goto tfwf;
 		if (fwrite_byte(f, content->revision_day) < 0) goto tfwf;
 		if (fwrite_byte(f, content->revision_month) < 0) goto tfwf;
 		if (fwrite_word(f, content->revision_year) < 0) goto tfwf;
@@ -1223,11 +1350,7 @@ int ti8x_file_write_flash(const char *fname, Ti8xFlash *head, char **real_fname)
 			get_native_app_name(content, varname, sizeof(varname));
 		}
 		if (fwrite_byte(f, (uint8_t) strlen(varname)) < 0) goto tfwf;
-		if (fwrite_8_chars(f, varname) < 0) goto tfwf;
-		for (i = 0; i < 23; i++)
-		{
-			if (fwrite_byte(f, 0) < 0) goto tfwf;
-		}
+		if (fwrite(varname, 1, 31, f) < 31) goto tfwf;
 		if (fwrite_byte(f, content->device_type) < 0) goto tfwf;
 		if (fwrite_byte(f, content->data_type) < 0) goto tfwf;
 		for (i = 0; i < 23; i++)
@@ -1240,15 +1363,17 @@ int ti8x_file_write_flash(const char *fname, Ti8xFlash *head, char **real_fname)
 		if (fwrite_long(f, content->data_length) < 0) goto tfwf;
 
 		// data
-		if (content->data_type == TI83p_CERT || content->data_type == TI83p_LICENSE)
+		if (tifiles_tifl_type_is_raw(content->device_type, content->data_type))
 		{
 			if (fwrite(content->data_part, 1, content->data_length, f) < content->data_length) goto tfwf;
 		}
-		else if (content->data_type == TI83p_AMS || content->data_type == TI83p_APPL)
+		else if (   tifiles_tifl_type_is_os(content->device_type, content->data_type)
+		         || tifiles_tifl_type_is_app(content->device_type, content->data_type))
 		{
 			// write
-			if (content->hw_id == 0)
+			if (write_intel_hex)
 			{
+				int bytes_written = 0;
 				// TI-Z80-style OS / FlashApp, let's write Intel Hex format.
 				for (i = 0; content->pages != nullptr && i < content->num_pages; i++)
 				{
@@ -1305,9 +1430,10 @@ int ti8x_file_write_flash(const char *fname, Ti8xFlash *head, char **real_fname)
 
 				// final block
 				bytes_written += hex_block_write(f, 0, 0, 0, nullptr, 0, 0);
-				if (fseek(f, -bytes_written - 4, SEEK_CUR)) goto tfwf;
+				const long end_pos = ftell(f);
+				if (end_pos < 0 || fseek(f, pos, SEEK_SET)) goto tfwf;
 				if (fwrite_long(f, bytes_written) < 0) goto tfwf;
-				if (fseek(f, SEEK_END, 0L) ) goto tfwf;
+				if (fseek(f, end_pos, SEEK_SET)) goto tfwf;
 			}
 			else
 			{
@@ -1396,21 +1522,42 @@ int ti8x_content_display_flash(Ti8xFlash *content)
 		tifiles_info("Object type:     %02X", ptr->object_type);
 		tifiles_info("Date:            %02X/%02X/%02X%02X", ptr->revision_day, ptr->revision_month, ptr->revision_year & 0xff, (ptr->revision_year & 0xff00) >> 8);
 		tifiles_info("Name:            %s", ptr->name);
-		tifiles_info("Device type:     %s", ptr->device_type == DEVICE_TYPE_83P ? "ti83+" : "ti73");
+		const char *device = "unknown";
+		switch (ptr->device_type)
+		{
+			case DEVICE_TYPE_83P: device = "ti83+"; break;
+			case DEVICE_TYPE_73: device = "ti73"; break;
+			case DEVICE_TYPE_CBL2: device = "cbl2/labpro"; break;
+			case DEVICE_TYPE_TIPRESENTER: device = "ti-presenter"; break;
+		}
+		tifiles_info("Device type:     %s", device);
 		switch (ptr->data_type)
 		{
 			case 0x23:
 				tifiles_info("Data type:       OS data");
 				break;
 			case 0x24:
+			case 0x29:
 				tifiles_info("Data type:       APP data");
 				break;
 			case 0x20:
 			case 0x25:
 				tifiles_info("Data type:       certificate");
 				break;
+			case 0x26:
+				tifiles_info("Data type:       ID list");
+				break;
+			case 0x27:
+				tifiles_info("Data type:       certificate memory");
+				break;
+			case 0x28:
+				tifiles_info("Data type:       unit certificate");
+				break;
 			case 0x3E:
 				tifiles_info("Data type:       license");
+				break;
+			case 0xF0:
+				tifiles_info("Data type:       information");
 				break;
 			default:
 				tifiles_info("Data type:       Unknown (send mail to tilp-users@lists.sf.net)");

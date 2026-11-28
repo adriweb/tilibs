@@ -281,12 +281,19 @@ static int metadata_fill_backup(TifilesMetadataPair ** pairs, unsigned int * cou
  **/
 static int metadata_fill_flash(TifilesMetadataPair ** pairs, unsigned int * count, FlashContent * content, const char * magic)
 {
+	unsigned int entries = 0;
+	char entry_count[32];
+	for (const FlashContent *entry = content; entry != nullptr; entry = entry->next)
+	{
+		entries++;
+	}
+	snprintf(entry_count, sizeof(entry_count), "%u", entries);
 	return metadata_add(pairs, count, 5,
 	                    "file.class", "flash",
 	                    "file.model", tifiles_model_to_string(content->model),
 	                    "file.magic", magic,
 	                    "file.name", content->name,
-	                    "file.entries", "1");
+	                    "file.entries", entry_count);
 }
 
 /**
